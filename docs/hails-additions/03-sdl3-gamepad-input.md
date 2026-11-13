@@ -19,7 +19,7 @@ conversion with its own dead zone) still receives an XInput-shaped
 `XboxState` with raw values. Only the transport in
 `crates/skate-game/src/input/platform.rs` changes.
 
-- **Threading.** SDL must be pumped on the thread that initialised it, while
+- **Threading.** SDL must be pumped on the thread that initialized it, while
   Bevy runs systems on a pool. A dedicated `sdl-gamepad` thread owns SDL,
   polls every 1 ms, and publishes a per-slot snapshot behind a mutex; the
   game reads the latest snapshot each frame, exactly as `XInputGetState`

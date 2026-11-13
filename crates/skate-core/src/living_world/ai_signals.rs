@@ -8,7 +8,7 @@ use crate::scoring::catalog;
 /// Retail values (data-driven, mod-tunable through the game's settings).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SignalSettings {
-    /// Anticipation only this close to the line, metres (`0x82063B08`, 3.0).
+    /// Anticipation only this close to the line, meters (`0x82063B08`, 3.0).
     pub anticipation_distance: f32,
     /// Look-ahead in recorded 60 Hz frames (`sub_824691A0`, 60).
     pub anticipation_frames: u32,
@@ -40,7 +40,7 @@ pub struct SignalInput {
     pub frame_in_segment: u32,
     /// The node the dispatcher handled last (`pc+820`); `None` right after spawn.
     pub last_node: Option<u32>,
-    /// Distance of the skater from the line, metres (`pc+828`).
+    /// Distance of the skater from the line, meters (`pc+828`).
     pub off_line: f32,
     /// Angle between the skater's facing and the line, radians.
     pub heading_error: f32,
@@ -121,7 +121,7 @@ pub struct IntentTuple {
 }
 
 /// The PathController's trick slot: `pc+832` category (0 = none), `pc+844` trick, `pc+904` ticks since the start
-/// node, `pc+836` the manual's value (set by a manual's dispatch). Plain data: serialisable state of the NPC.
+/// node, `pc+836` the manual's value (set by a manual's dispatch). Plain data: serializable state of the NPC.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TrickSlot {
     pub category: u8,
@@ -259,7 +259,7 @@ pub fn slot_signals(slot: &mut TrickSlot, schedule: &[IntentTuple], handplant_gr
     out
 }
 
-/// `sub_8296EC98(out, v, +Z, +Y)`: the angle from `v` to +Z (acos of the normalised dot), kept when
+/// `sub_8296EC98(out, v, +Z, +Y)`: the angle from `v` to +Z (acos of the normalized dot), kept when
 /// `cross(v, +Z) . +Y >= 0` (= -v.x >= 0), else `2 pi -` it; so `atan2(-v.x, v.z)` in [0, 2 pi). A zero vector gives 0
 /// (`0x82165A10`), as does one with a squared length at or under 1e-4 (`0x8209BE90`).
 pub fn retail_heading(v: Vec3) -> f32 {
@@ -289,7 +289,7 @@ impl Default for BoardYawTuning {
 }
 
 /// The takeoff board yaw: `pc+930` latched at this takeoff, `pc+931` outside the dead zone, `pc+856` angle,
-/// `pc+860` magnitude. Plain data (serialisable NPC state).
+/// `pc+860` magnitude. Plain data (serializable NPC state).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct BoardYaw {
     pub latched: bool,

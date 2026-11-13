@@ -1,5 +1,5 @@
 //! Skater fade-in after every placement ("ghost"), TU3 82594488 (timer +1868, set by 825926F8).
-//! Retail rule and the mod generalisation: docs/hails-additions/26c-living-world-npc-skaters.md#ghost-fade-rule
+//! Retail rule and the mod generalization: docs/hails-additions/26c-living-world-npc-skaters.md#ghost-fade-rule
 
 /// Longest fade a mod may ask for (s); also where the timer stops counting.
 pub const MAX_FADE_IN_SECONDS: f32 = 60.0;

@@ -8,7 +8,7 @@ use super::Vec3;
 pub struct GroundSteerTuning {
     /// Full stick at this error, degrees (tunable `FED24A60BD8606F7`, 18).
     pub full_deg: f32,
-    /// "Near the lane centre": inside the lane and |lateral ratio| below this (`0x821EE79C`, 0.6).
+    /// "Near the lane center": inside the lane and |lateral ratio| below this (`0x821EE79C`, 0.6).
     pub lane_centre: f32,
     /// The rejoin aim starts beyond this distance from the line (`0x82181B90`, 0.4 m) ...
     pub rejoin_start: f32,
@@ -61,7 +61,7 @@ pub struct GroundSteerInput {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct GroundSteer {
     pub error: f32,
-    /// `pc+944`: near the lane centre.
+    /// `pc+944`: near the lane center.
     pub centred: bool,
     /// `pc+945`: rejoining (aim moves toward the near point).
     pub rejoining: bool,
@@ -103,8 +103,8 @@ pub fn yaw(a: Vec3, b: Vec3, up: Vec3) -> f32 {
     angle
 }
 
-/// `sub_8246AA00`'s lane flags, also the record's steering bits (`sub_8246DE38`): `pc+944` centred (inside the lane,
-/// near its centre) and `pc+945` rejoining (`8.cpp` stores after `pc+933`, the category 9 test and `pc+828`; b602).
+/// `sub_8246AA00`'s lane flags, also the record's steering bits (`sub_8246DE38`): `pc+944` centered (inside the lane,
+/// near its center) and `pc+945` rejoining (`8.cpp` stores after `pc+933`, the category 9 test and `pc+828`; b602).
 pub fn lane_flags(inside_lane: bool, lateral: f32, dist: f32, avoiding: bool, category_9: bool, t: &GroundSteerTuning) -> (bool, bool) {
     let centred = inside_lane && lateral.abs() < t.lane_centre;
     (centred, !avoiding && !category_9 && !centred && dist > t.rejoin_start)
@@ -142,7 +142,7 @@ pub fn stick(error: f32, full_deg: f32) -> f32 {
 }
 
 /// The control-map writes, in retail order (`Turn` `0x830BFD74`, `BodySpin` `0x830BE600`, `KickTurn` `0x830BE1E0`).
-/// None for a centred stick: our skeleton handler treats a present `KickTurn` as pressed.
+/// None for a centered stick: our skeleton handler treats a present `KickTurn` as pressed.
 pub fn intents(s: f32) -> Vec<(&'static str, f32)> {
     if s == 0.0 {
         return Vec::new();
@@ -154,8 +154,8 @@ pub fn intents(s: f32) -> Vec<(&'static str, f32)> {
 mod tests {
     use super::*;
 
-    /// b602: the record's `pc+944` / `pc+945` (retail 0.6 lane ratio, 0.4 m): centred near the lane centre; rejoining
-    /// once 0.4 m off and not centred, unless avoid-steering or a category 9 trick.
+    /// b602: the record's `pc+944` / `pc+945` (retail 0.6 lane ratio, 0.4 m): centered near the lane center; rejoining
+    /// once 0.4 m off and not centered, unless avoid-steering or a category 9 trick.
     #[test]
     fn lane_flags_mark_centred_and_rejoining_as_retail() {
         let t = GroundSteerTuning::default();
@@ -240,7 +240,7 @@ mod tests {
         assert!((r.error - toward([0.0, 0.0, 2.0], 5.0)).abs() < 1e-4, "all near");
         // Facing +Z with +Y up, +X is to the left: back to x = 0 is a right turn (negative yaw, positive stick).
         assert!(r.error < 0.0 && stick(r.error, 18.0) > 0.0);
-        // Not while avoiding, for a category 9 trick, or near the lane centre.
+        // Not while avoiding, for a category 9 trick, or near the lane center.
         assert!(!heading_error(&GroundSteerInput { avoiding: true, ..at(1.7) }, &t).rejoining);
         assert!(!heading_error(&GroundSteerInput { category_9: true, ..at(1.7) }, &t).rejoining);
         assert!(!heading_error(&GroundSteerInput { inside_lane: true, lateral: 0.5, ..at(1.7) }, &t).rejoining);

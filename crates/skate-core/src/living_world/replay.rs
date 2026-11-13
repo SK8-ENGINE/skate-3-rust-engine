@@ -114,7 +114,7 @@ pub fn steer_input(yaw_error: f32, dead_zone_deg: f32, full_deg: f32) -> f32 {
 /// data-driven, retail values by default, a mod may change them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ChainConfig {
-    /// Look for other lines whose start node lies within this many metres of the end position
+    /// Look for other lines whose start node lies within this many meters of the end position
     /// (retail 4.0). 0 or less: never chain (the skater fades out at its line end).
     pub radius: f32,
     /// Candidate cap (retail 16).
@@ -183,12 +183,12 @@ pub struct ReplayNode {
     pub flags: u8,
     /// Index into [`ReplayLine::jumps`].
     pub jump: Option<u32>,
-    /// Path width left / right of the line, node bytes `+0x25/+0x26`; metres = byte / 50
+    /// Path width left / right of the line, node bytes `+0x25/+0x26`; meters = byte / 50
     /// ([`WIDTH_SCALE`]). The obstacle avoider reads them ([`super::avoid`]).
     pub width: [u8; 2],
 }
 
-/// Node width byte to metres: `1 / 50` (`sub_82F71580`: 1.0 / `0x8302EE0C`).
+/// Node width byte to meters: `1 / 50` (`sub_82F71580`: 1.0 / `0x8302EE0C`).
 pub const WIDTH_SCALE: f32 = 1.0 / 50.0;
 
 /// A recorded jump / trick slot (`tAIPathNodeExtData`).
@@ -374,7 +374,7 @@ pub fn flip_test(node: &ReplayNode, character: [f32; 4]) -> bool {
 }
 
 /// Shortest-arc slerp of two unit quaternions (x, y, z, w), like [code] `sub_82454B28` (sign
-/// selection by the dot product, normalised lerp when the two are close; the closeness threshold
+/// selection by the dot product, normalized lerp when the two are close; the closeness threshold
 /// is not decoded, 0.9995 here is ours).
 pub fn slerp(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
     let mut dot: f32 = (0..4).map(|i| a[i] * b[i]).sum();
@@ -954,7 +954,7 @@ impl LineCursor {
             c.history[0] = c.phase.map(|phase| PhaseEntry { phase, since: 0, trick: c.trick, trick_since: 0 });
             if let Some(n) = l.nodes.get(node as usize) {
                 // In the air: retail's first update sees the rising edge against the spawn frame.
-                // Riding: a labelled stand-in (retail holds 0 until the first takeoff, which tests
+                // Riding: a labeled stand-in (retail holds 0 until the first takeoff, which tests
                 // the same frames then); off board: nothing latched.
                 c.airborne = node_airborne(n.flags);
                 c.flip = (c.airborne || node_riding(n.flags)) && flip_test(n, node_world_frame(n));

@@ -3,7 +3,7 @@
 //! thread, the time spent waiting for the native runtime's lock (game thread and audio thread),
 //! the native render per 256-frame block, the load each block rendered (mixer voices, live AEMS
 //! instances, grain voices: max / average per block), and the slowest frame. Off: one relaxed atomic load per
-//! scope. For finding stutter in real play (`tools/audio-bench/`); measuring only, no behaviour.
+//! scope. For finding stutter in real play (`tools/audio-bench/`); measuring only, no behavior.
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;

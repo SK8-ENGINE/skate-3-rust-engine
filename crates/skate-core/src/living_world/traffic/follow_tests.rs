@@ -55,7 +55,7 @@ fn segment(id: u64, from: (u64, u8), to: (u64, u8), a: Vec3, b: Vec3) -> Segment
     }
 }
 
-/// A signalled (or not) 4-way junction at the origin, one-lane 92 m approaches (0x100 + k
+/// A signaled (or not) 4-way junction at the origin, one-lane 92 m approaches (0x100 + k
 /// arriving at end k) and exits (0x200 + k), connectors left / straight / right (index 3 k +
 /// turn). The outer ends are dead ends.
 fn four_way(signalled: bool) -> RoadInput {
@@ -371,7 +371,7 @@ fn a_held_car_drives_up_to_twelve_tenths_of_the_cap_and_the_player_skips_the_lig
     assert!(player[0].snapshot().flagged);
 }
 
-/// Manoeuvres (b69 / b74, `82C39F78` read by main): with the go roll certain and a short lane timer, a car on a
+/// Maneuvers (b69 / b74, `82C39F78` read by main): with the go roll certain and a short lane timer, a car on a
 /// two-lane road changes lane along its passage and ends on the other lane, moving sideways on the way.
 #[test]
 fn a_car_changes_lane_along_its_passage() {

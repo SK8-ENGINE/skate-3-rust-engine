@@ -246,7 +246,7 @@ fn default_max_interval() -> f32 { 20.0 }
 /// (audio_formats.region_layers).
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct RegionTile {
-    /// Centre x, z and half sizes x, z.
+    /// Center x, z and half sizes x, z.
     pub r#box: [f32; 4],
     /// Four child indices, then the value; child 0 = `NO_KEY` marks a leaf.
     pub nodes: Vec<[u16; 5]>,

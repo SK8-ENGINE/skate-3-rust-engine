@@ -31,7 +31,7 @@ from pathlib import Path
 import numpy as np
 
 LAYOUT_FIELD = 'Hash_79B248E8469DC5DA'
-# The park worlds' shadow colours (research b443: 827FFFB0 reads them when the world's park bool is set; other
+# The park worlds' shadow colors (research b443: 827FFFB0 reads them when the world's park bool is set; other
 # worlds use (0.2, 0.2, 0.2), a code constant).
 # The park worlds' projected lightmap (research b439 / b440: 8280FDC0 reads a texture name and x0, x1, z0, z1 from the
 # world row; 828101C0 builds g_skateparkProjectedTransform from them). The textures: miscboot.big data/content/textures.

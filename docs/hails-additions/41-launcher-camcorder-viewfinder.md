@@ -13,7 +13,7 @@ ledge) were replaced by this.
 ## Change
 
 - **The window is the LCD panel:** a borderless per-pixel-alpha (layered) window, 62 % of the work area's height,
-  drawn in a 1240 x 760 unit space: the moulded panel frame with a raised lip, the dark gasket round the glass, the
+  drawn in a 1240 x 760 unit space: the molded panel frame with a raised lip, the dark gasket round the glass, the
   screen, the backlight sensor, and the hinge barrel on the right edge where the camera body would be in your hand.
   Drag it by its bezel. Every frame is drawn into one bitmap and handed over with `UpdateLayeredWindow`
   (`Native.Push`).
@@ -72,7 +72,7 @@ ledge) were replaced by this.
 Measured with `SkateLauncher.exe --bench <out.txt> [WxH]` at 1052 x 645: about 3 ms per frame during the swing and 7 ms
 settled, plus about 1.2 ms to hand the frame to the window. That came from:
 - The panel's face is drawn once per size on the first (invisible) frame and cut into 48 strips; the swing only draws
-  the strips (each with a pixel of overlap so they meet without seams), nearest-neighbour while moving. Drawing one
+  the strips (each with a pixel of overlap so they meet without seams), nearest-neighbor while moving. Drawing one
   big image per strip, a texture brush, source rectangles, image attributes or bilinear sampling each cost 20 to
   110 ms a frame in GDI+.
 - The LCD canvas is copied 1:1 at whole pixels and cleared every frame (the scene's edge pixels are not fully opaque,

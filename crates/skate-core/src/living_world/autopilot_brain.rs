@@ -69,6 +69,15 @@ pub fn push_target(target: f32, jump: Option<JumpAhead>) -> f32 {
     jump.map_or(target, |j| target.max(j.speed))
 }
 
+/// The autopilot's push target: the recorded speed here, but no faster than the slowest recorded speed just ahead
+/// (the brake's look-ahead, `approach_speed`), unless a jump ahead needs more. Pushing to the speed here and braking
+/// for the slower stretch ahead pushed and braked back to back (desktop 2026-11-12: pushed 6.4 -> 8.5 m/s at 7.0
+/// recorded, braked 0.6 s later for 5.4 ahead); the brake's own margin (1 / `BrakeRules::factor`) absorbs a push's
+/// overshoot.
+pub fn push_speed(recorded: f32, ahead: Option<f32>, jump: Option<JumpAhead>) -> f32 {
+    push_target(ahead.map_or(recorded, |a| recorded.min(a)), jump)
+}
+
 /// Whether the trick look-ahead may still cut the push: only once the jump is close or the speed is there.
 pub fn trick_cuts_push(speed: f32, jump: Option<JumpAhead>, rules: &JumpRules) -> bool {
     jump.is_none_or(|j| speed >= j.speed || j.frames <= rules.push_until_frames)
@@ -128,11 +137,21 @@ pub struct BrakeRules {
     pub look_ahead_frames: u32,
     /// Retail's brake factor for the autopilot (`BrakeSettings::factor`; retail 0.3): 0.8 brakes above 1.25x.
     pub factor: f32,
+    /// Once braking it keeps braking down to this factor's inverse x that speed (1.0: the speed itself), so a downhill
+    /// does not brake, release at 1.25x and brake again a second later.
+    pub release_factor: f32,
 }
 
 impl Default for BrakeRules {
     fn default() -> Self {
-        Self { look_ahead_frames: 60, factor: 0.8 }
+        Self { look_ahead_frames: 60, factor: 0.8, release_factor: 1.0 }
+    }
+}
+
+impl BrakeRules {
+    /// The brake factor this tick: `factor` to start a brake, `release_factor` while one runs.
+    pub fn factor(&self, braking: bool) -> f32 {
+        if braking { self.release_factor } else { self.factor }
     }
 }
 
@@ -190,6 +209,14 @@ pub fn pump_magnitude(cycle: &mut u32, slope: f32, speed: f32, pushing: bool, ru
 mod tests {
     use super::*;
     use crate::living_world::replay::ReplayNode;
+
+    #[test]
+    fn push_aims_no_faster_than_the_slower_stretch_ahead_unless_a_jump_needs_it() {
+        assert_eq!(push_speed(7.0, Some(5.4), None), 5.4);
+        assert_eq!(push_speed(5.0, Some(6.0), None), 5.0);
+        assert_eq!(push_speed(7.0, None, None), 7.0);
+        assert_eq!(push_speed(7.0, Some(5.4), Some(JumpAhead { frames: 40, speed: 8.0 })), 8.0);
+    }
 
     fn line(jump_at: usize) -> ReplayLine {
         let nodes = (0..10)
@@ -268,6 +295,15 @@ mod tests {
         let rules = BrakeRules::default();
         assert!((approach_speed(&l, 1, 0, &rules).unwrap() - 3.0).abs() < 1e-4, "node 3 is 60 frames ahead");
         assert!((approach_speed(&l, 4, 0, &rules).unwrap() - 8.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_running_brake_holds_down_to_the_speed_ahead() {
+        let rules = BrakeRules::default();
+        let (speed, ahead) = (2.0, 1.7);
+        assert!(speed * rules.factor(false) <= ahead, "1.18x the speed ahead does not start a brake");
+        assert!(speed * rules.factor(true) > ahead, "but a brake already running goes on");
+        assert!(ahead * rules.factor(true) <= ahead, "and ends at the speed ahead");
     }
 
     #[test]

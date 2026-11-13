@@ -94,7 +94,7 @@ pub(crate) struct ObjectiveRow {
 }
 
 /// What the challenge HUD shows (retail's HUD elements `timer`, `dpo`, `objective` and the banner flags).
-/// Serialisable: the authority's run writes it, peers and replays show the same.
+/// Serializable: the authority's run writes it, peers and replays show the same.
 #[derive(Resource, Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChallengeHudState {
     pub shown: Vec<Component>,
@@ -957,7 +957,7 @@ mod tests {
             eprintln!("TIMER draw {} multiply {:?} add {:?} vertices {}", d.texture, d.multiply, d.add, d.vertices.len());
         }
         assert!(!draws.is_empty() && draws.iter().all(|d| d.multiply[3] > 0.99), "opaque after the intro");
-        // Retail 825D6B68: the Futura Shadow pass in black, then futuraheavy in the text colour over it.
+        // Retail 825D6B68: the Futura Shadow pass in black, then futuraheavy in the text color over it.
         assert!(draws.iter().any(|d| d.texture.contains("futurashadow") && d.multiply[..3].iter().all(|c| *c < 0.01)), "black shadow pass");
         assert!(draws.iter().any(|d| d.texture.contains("futuraheavy") && d.multiply[0] > 0.9), "futuraheavy in the text colour");
     }

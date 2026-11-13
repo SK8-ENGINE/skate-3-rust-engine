@@ -84,7 +84,7 @@ fn every_lane_is_reachable_and_has_a_way_on() {
         }
         if seg.from_junction.is_some() && into.get(&(s, l)).copied().unwrap_or(0) == 0 {
             // Five shipped lanes (DownTown, one lane of a two-lane exit) get no connector; cars
-            // reach them by a lane change from the neighbour lane, which has one [data].
+            // reach them by a lane change from the neighbor lane, which has one [data].
             let (left, right) = net.adjacent_lanes(s, l);
             assert!(
                 [left, right].into_iter().flatten().any(|n| into.get(&(s, n)).copied().unwrap_or(0) > 0),
@@ -96,7 +96,7 @@ fn every_lane_is_reachable_and_has_a_way_on() {
     }
     eprintln!("lanes entered only by a lane change: {lane_change_only:?}");
     assert_eq!(lane_change_only.len(), 5);
-    // Lane changes are edges too (both ways between neighbours).
+    // Lane changes are edges too (both ways between neighbors).
     for &(s, l) in &lanes {
         let (left, right) = net.adjacent_lanes(s, l);
         for n in [left, right].into_iter().flatten() {
@@ -171,7 +171,7 @@ fn the_city_has_four_controllers_with_the_shipped_timings() {
     let clock = SignalClock::new(t);
     assert_eq!(clock.controllers.len(), 4);
     if let Some(net) = network() {
-        // Every signalled approach maps to one of the 4 (its node end).
+        // Every signaled approach maps to one of the 4 (its node end).
         for j in net.junctions.iter().filter(|j| j.signalled) {
             for &c in &j.connectors {
                 assert!((net.connectors[c].from_end as usize) < clock.controllers.len());

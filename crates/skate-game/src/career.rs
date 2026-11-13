@@ -221,7 +221,7 @@ pub(crate) struct CareerState {
     pub looks_path: Option<PathBuf>,
     /// Bumped on every look change; the living world re-reads the looks when it moves.
     pub looks_generation: u64,
-    /// Teammate presets (b986), by id; the list screen sorts them by localised name.
+    /// Teammate presets (b986), by id; the list screen sorts them by localized name.
     pub presets: Vec<Preset>,
 }
 

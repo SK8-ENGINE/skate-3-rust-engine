@@ -65,17 +65,17 @@ BipedGround's update 82D30D30, so retail Move Object does not take the facing-li
 (probably in 82D44A10 / 82D45D30, which call the shared foot and ground-sync helpers 82D773F8, 82D77558, 82D2E250)
 is not decoded.
 
-**Root cause (inside the prop).** `prop_carry::follow` pulled the prop's CENTRE in to 0.9 m (`DRAG_HOLD`). A bench
+**Root cause (inside the prop).** `prop_carry::follow` pulled the prop's CENTER in to 0.9 m (`DRAG_HOLD`). A bench
 (box half extents 2.64 x 0.22 x 0.38 m) grabbed by its end then sits around the skater.
 
-**Root cause (flicker).** The auto-drop test measured the prop's centre against `MAX_HOLD_DISTANCE` (3.5 m) while
-the grab reach is measured to the box surface (2 m). A long prop grabbed by its end has its centre beyond 3.5 m, so
+**Root cause (flicker).** The auto-drop test measured the prop's center against `MAX_HOLD_DISTANCE` (3.5 m) while
+the grab reach is measured to the box surface (2 m). A long prop grabbed by its end has its center beyond 3.5 m, so
 it was dropped the tick after every grab and re-grabbed the tick after that while RB stayed held.
 
 **Change.**
 - `biped_ground.rs`: for the Move Object job only (502, held prop, stick asking for motion), clear the job's
   target-contact bit (flags bit 2) so the approach steps by the requested velocity; the support contact (bit 1)
-  still keeps the feet on the ground. Labelled NOT RETAIL YET in the code: it loses the 0.3 m step-up of the
+  still keeps the feet on the ground. Labeled NOT RETAIL YET in the code: it loses the 0.3 m step-up of the
   target contact while dragging.
 - `prop_carry.rs`: the hold distance is at least the box's extent toward the skater plus `grip_reach` (new carry
   tuning, 0.35 m, NOT RETAIL YET: engine value; retail's grab offset probably comes from the DMO (dynamic prop) characteristics and
@@ -94,8 +94,8 @@ and setup data, pad input through the whole frame): step off, put the nearest ma
 end-on with its near face 1.5 m ahead, hold RB, then push the left stick in 8 directions for 45 ticks each. Before:
 every direction moved the pair forward (stick right: local [0.01, 0.59] m; stick back: [0.00, +0.72] m). After:
 forward [0, 1.05], right [0.60, 0], back [0, -0.75], left [-0.60, 0], diagonals cos >= 0.97 (speeds differ per
-axis: push 1.4, side 0.8, pull 1.0 m/s); the prop follows; gap skater to near face 0.35 m throughout (before: centre
-at 0.9 m); exactly one state change while grabbing (11 flips with the old centre limit). Prop height drift on the
+axis: push 1.4, side 0.8, pull 1.0 m/s); the prop follows; gap skater to near face 0.35 m throughout (before: center
+at 0.9 m); exactly one state change while grabbing (11 flips with the old center limit). Prop height drift on the
 flat spawn plaza is under 2 cm. Run: `SKATE3_ASSET_ROOT=<assets> SKATE3_MAP=<maps/DownTown.skate> cargo test
 --locked --release -p skate-game --bin skate3rust carry_direction -- --ignored`. `cargo test -p skate-game --bin
 skate3rust`: 489 pass, known `pipelines_accept_...` failure, and `living_world_npc_trick_jump_has_no_pose_pop`
@@ -146,7 +146,7 @@ the overlapping volume, which ends it.
   physics tick and after a map load. Setting it to `default()` (mod disable) restores the shipped values; only
   prop types whose tuning changed are woken.
 - A prop whose pose did not change since its last rebake skips the rebake (bit-identical pose, so identical
-  triangles; behaviour unchanged).
+  triangles; behavior unchanged).
 
 **Files.** `crates/skate-game/src/physics/prop_dynamics.rs`, `crates/skate-game/src/physics.rs`.
 
@@ -174,7 +174,7 @@ never cut into the navmesh, see "Peds walking through props").
 **Evidence [trace].** `logs/game-20261007-225751` (DownTown, `PED_OBSTACLE`): 7 of 8 moved props went from a bottom
 of about 12.6 m (spawn) to 8-10 m within 1-3 s at 7-9 m/s (free fall) and stayed `moving`; one (206220507, moved
 1.12 m) rested normally. The sinking starts while the prop is still held: bench 3417526289 was already 0.6 m low at
-the release sample (centre 11.47 against a spawn of 12.07) and its height span had grown from 0.81 m to 0.92 m,
+the release sample (center 11.47 against a spawn of 12.07) and its height span had grown from 0.81 m to 0.92 m,
 i.e. the box was tilted. Every obstacle footprint grows after release (bin 44597382: [0.28, 0.27] -> [0.39, 0.32]).
 
 **Root cause [code].**
@@ -182,7 +182,7 @@ i.e. the box was tilted. Every obstacle footprint grows after release (bin 44597
    step still integrated the contact corrections' angular part: the floor friction on a box pushed along the ground
    (a spin about its bottom edge) was added to the orientation every tick and never undone, so pitch and roll built
    up over the drag. The drag doc comment already said "Rotation stays frozen"; only the velocity was frozen.
-2. A tilted box digs a corner into the floor; once its centre passes the floor plane, the separating axis points
+2. A tilted box digs a corner into the floor; once its center passes the floor plane, the separating axis points
    down and the retail triangle fixup (`fix_up_triangle`, 82AD3130) rejects the contact on a one-sided face
    (`ONE_SIDED`, projection < 0). From then on nothing holds the box and it falls forever (the 7-9 m/s in the log).
    District collision is one-sided (`portable_world` / the retail archive flags), so this is permanent.
@@ -192,16 +192,16 @@ i.e. the box was tilted. Every obstacle footprint grows after release (bin 44597
 **Retail [code, partial].** Move Object is state 502 (ctor 82D43B90). Its update 82D44A10 calls 82D444A0, 82D45D30,
 82D463D8 and 82D46218; 82D45D30's direct accesses are the state's own fields (+8, +16, +1128, +1200) and its
 helpers 82BE3220 / 82D2D2B0 / 82D448D8 call nothing further (math or state helpers); no rigid-body write was found. 82D463D8 blends a 4x4 transform toward a target through 82E0A570
-(row lerp plus renormalise 82BD3150) on the state's +1164 timer; whether that transform is the held DMO's is not
-confirmed. So how retail holds the dragged object's orientation is NOT decoded. Not retail yet, labelled in code.
+(row lerp plus renormalize 82BD3150) on the state's +1164 timer; whether that transform is the held DMO's is not
+confirmed. So how retail holds the dragged object's orientation is NOT decoded. Not retail yet, labeled in code.
 
 **Change (first interim, REMOVED 2026-10-08).** A yaw-only rule for the held body's contact rotation; the user
 rejected it (props must tip) and the Move Object port below replaced it. What stays from the interim:
 Diagnostics:
-- `HELD_PROP` (held prop every second, released prop every second for 3 s): id, phase, template, centre, local up
+- `HELD_PROP` (held prop every second, released prop every second for 3 s): id, phase, template, center, local up
   axis Y, velocity, ground height under it, gap (box bottom minus ground), contact manifolds, asleep, tick.
-- `PROP_BELOW_GROUND` (any awake prop whose centre is more than its half height below the floor under it, checked
-  twice a second, once per prop per 10 s): centre, half height, ground, last rest height, velocity, up Y, held,
+- `PROP_BELOW_GROUND` (any awake prop whose center is more than its half height below the floor under it, checked
+  twice a second, once per prop per 10 s): center, half height, ground, last rest height, velocity, up Y, held,
   contacts, tick. The ground probe starts above the prop's last rest height, so a sunk prop still finds the floor
   it fell through.
 - A sunk body is logged, not recovered: retail's handling of a DMO under the world is not decoded and no heuristic
@@ -275,7 +275,7 @@ synthetic push lost the grab); the port replaces it.
    the impulse. Trace: a tipping bench was launched at 15 m/s upward and 17 rad/s, then fell through the floor
    ([trace] test street drag, 2026-10-08). Shared, the bench no longer leaves the floor (worst gap -0.03 m).
 
-**Verification (2026-10-08).** `cargo test -p skate-core move_object`: 8 pass (stock curves, centre push, off-centre
+**Verification (2026-10-08).** `cargo test -p skate-core move_object`: 8 pass (stock curves, center push, off-center
 turn sense, controller step response hand-computed, blocking normal, heading latch, state round trip and
 determinism, mod value fallback). `cargo test -p skate-game --bin skate3rust -- prop_ carry world_tuning`: all pass
 except `dragged_props_rest_on_the_floor_after_release`: bench, vending and rail stay on the floor (worst gap -0.03 /
@@ -287,7 +287,7 @@ missing in those test apps; `setup::pipelines_accept_valid_group_outputs_when_fi
 change does not touch.
 
 **Open.**
-1. RESOLVED (see "Slot 9 applied" below: anti-windup write-back, commanded block). Was: slot 9 semantics decide everything left: read as an acceleration at the centre of mass, the integrating
+1. RESOLVED (see "Slot 9 applied" below: anti-windup write-back, commanded block). Was: slot 9 semantics decide everything left: read as an acceleration at the center of mass, the integrating
    controller (no anti-windup in 82D4E118 / 82D45318) saturates at 20 m/s^2 within two ticks for ANY stick, so it
    overshoots the target speed (4.1 m/s for a 3 m/s target), tips a 1 m cube (tips above g x half width / half
    height) and makes the yaw latch oscillate (0.66 rad of drift from the left stick alone). Retail props do not
@@ -313,7 +313,7 @@ Root causes [code, TU3 recomp, read for this change]:
    3 m/s push. The overshoot was the port, not slot 9 and not the one-tick-old record velocity.
 2. The commanded parameter block was not applied (spec 7.4 item 4): with the authored floor friction (0.5 to 0.6)
    every push tripped the prop over its base.
-3. Two signs dropped in the yaw term: the code has `lever = dot(-edge (+320, sign-flipped by vxor), centre (+880)
+3. Two signs dropped in the yaw term: the code has `lever = dot(-edge (+320, sign-flipped by vxor), center (+880)
    - grip (+256))` and `w = -(curve BFB3BEF0BB2661C0(|lever|) x rot x gain +1160)` (`fneg f24,f13`); the port had
    neither minus, which cancels for the lever-driven turn but flips OB_ObjectMvRot. The coupling
    (`fnmsubs`: fwd = fwd - lever x w x (-0.25)) was already equivalent and is now written as in the code.
@@ -321,13 +321,13 @@ Root causes [code, TU3 recomp, read for this change]:
 Change:
 1. `skate_core::player::offboard::move_object::command`: anti-windup write-back for both controllers; lever and
    yaw target with the code's signs. Edge direction (+320) taken as `side_of(forward)`: retail builds it from the
-   hand points (82D45D30) and its sense is not traced; it is the only choice for which an off-centre push turns the
+   hand points (82D45D30) and its sense is not traced; it is the only choice for which an off-center push turns the
    object the way its push torque does (r x F about +Y). NOT RETAIL YET: the edge sense. Our integrator is
    right-handed about +Y like the slot 9 angular sink (`(0, out, 0)`), checked by
    `positive_yaw_rate_turns_local_z_toward_plus_x`.
 2. `PropDynamics::apply_move_command(id, linear, yaw, grip, dt)`, per 60 Hz step, before the contact solve
    (spec 7.5): unknown or massless body skipped (props have no lock state yet, retail gate DMO+4464 bit 0x08); wakes
-   the body and clears its sleep counter on EVERY command, zero or not (82ADF7B8); `v += L dt` at the centre of mass,
+   the body and clears its sleep counter on EVERY command, zero or not (82ADF7B8); `v += L dt` at the center of mass,
    no mass factor, no torque, vertical dropped (82C4C370 passes only &linear); the yaw command replaces the angular
    accumulator (`torque_acceleration` zeroed, `w += (0, Y, 0) dt`, no inertia factor; contacts still change pitch
    and roll). Gravity stays in our integrator for every prop (retail resets the linear accumulator to the island's
@@ -386,7 +386,7 @@ interim grab record and let-go distance, skater contact normal not wired, impuls
 Open:
 1. RESOLVED (see "Yaw-rate feedback" below). Was: heading latch while turning: the port measures the drift only while |w| < 0.1 and lets the latch follow the
    object otherwise, so the yaw controller has no rate feedback while turning and pins at the 6 rad/s^2 clamp (a
-   held right stick spins a 1 m cube to 6.4 rad/s in 1.5 s; the off-centre bench turns 10 rad in 2 s). In the code
+   held right stick spins a 1 m cube to 6.4 rad/s in 1.5 s; the off-center bench turns 10 rad in 2 s). In the code
    both the turning branch (0x82D45714) and the small-drift branch (0x82D4570C) store the latch (+368 / +400) every
    tick, and a second wrapped angle is built from the stored drift with 8296EC98 (+384) before the yaw error; that
    is probably the rate feedback. Not decoded; `held_right_stick_turn_rate_stays_bounded` is ignored until it is.
@@ -394,7 +394,7 @@ Open:
 3. The prop landing overlap above (solver).
 
 **Yaw-rate feedback (2026-10-08, later).** Problem: a held right stick spun a 1 m cube up to 6.4 rad/s in 1.5 s
-and an off-centre push turned the bench 10 rad in 2 s: the yaw controller had no feedback while turning and sat at
+and an off-center push turned the bench 10 rad in 2 s: the yaw controller had no feedback while turning and sat at
 the 6 rad/s^2 clamp. Retail props turn at a controlled rate.
 
 Root cause [code, TU3 recomp, 82D45318, static reading]: the spec's "error = w - drift x 60" was a misreading. The
@@ -406,7 +406,7 @@ drift against the heading latch (+368) only decides the re-latch; the yaw error 
    small-drift branch does NOT store; the port's latch was already right. The drift is not read again (v127 is
    reused for the height error before the yaw part).
 2. Rate (call returning at 0x82D45BC8): `8296EC98(out, +384, facing now, axis (0, 1, 0) at 0x82139A20)`, then +384 =
-   facing now (0x82D45C0C), every tick, in every branch. 8296EC98 [code]: both vectors normalised (refined rsqrt); if either
+   facing now (0x82D45C0C), every tick, in every branch. 8296EC98 [code]: both vectors normalized (refined rsqrt); if either
    |v|^2 <= 1e-4 (0x8209BE90) the result is 0 (0x82165A10); else a = acos(clamp(dot, -1, 1)) (82453298) and, when
    cross(+384, now) . axis < 0, 2 pi - a (2 pi at 0x821647F0). The result is wrapped to [-pi, pi) as above and
    multiplied by 60 (0x822F860C, loaded at 0x82D45C08): the measured yaw rate (|rate| stored at +1192).
@@ -442,7 +442,7 @@ peak 1.969, retail target |w| = 1.966 (expectation: within 5 % of |w| and peak <
 not fitted); `off_centre_push_turns_a_long_prop` turns -1.29 rad in 2 s (was about -10). `cargo test -p skate-mods
 --lib` 102 pass / 2 ignored; `world_tuning` 9 pass (`carry_move_object_speeds_set_and_reset` covers the new knob).
 
-To playtest: right stick while holding a prop (steady turn, no runaway spin), off-centre push on the bench (turns
+To playtest: right stick while holding a prop (steady turn, no runaway spin), off-center push on the bench (turns
 and stops turning when the push stops), let go while turning.
 
 Open: the edge sense (+320, 82D45D30); whether a tipped prop's facing vector (+176 source) is the box's local axis
@@ -454,7 +454,7 @@ one-sided street floor got no floor manifold at all, so the dragged bin fell thr
 Root cause [instrumented test, every floor triangle under the box traced]: the narrow phase did not miss the
 geometry. For every tile the SAT found an axis and the prism produced points; triangle fixup (82AD3130) then rejected
 all of them. The per-triangle SAT (82ACF950) prefers the tilted box face (or an edge cross) by a fraction of a
-millimetre over the floor normal, e.g. roll +3 deg, depth 5 cm: floor normal overlap 0.050 m, box face axis
+millimeter over the floor normal, e.g. roll +3 deg, depth 5 cm: floor normal overlap 0.050 m, box face axis
 0.0486 m. That normal is 1 to 8 degrees off the floor, so fixup classifies it as an edge or vertex region of a
 welded flat edge (street flags 0xf10: one-sided, edge cosines, no convex bits, cosine 1, vertices disabled). The
 props called the GP volume-pair query 82AD43A8 (`primitive_pair_contacts`), which hard-codes fixup's object flag to
@@ -522,7 +522,7 @@ Change:
 4. Record+272: `MoveObjectInput::record_272`, per prop type `by_template[...].record_272`, scale
    `record_272_speed_scale` (2.0). Superseded 2026-10-08: the default is now the type's retail data +312 (doc 27,
    [Per-type DMO data](27-dynamic-props.md#per-type-dmo-data-2026-10-08)).
-5. Interim grab record (NOT RETAIL YET): the held face's straight top edge (centre-height edges fell below the
+5. Interim grab record (NOT RETAIL YET): the held face's straight top edge (center-height edges fell below the
    grabbing box's y range, 0.2 to 1.8 m above the root, and dropped a bench at once). Retail grab splines come
    from the DMO physics assembly definition +136 table, not in our assets: addresses recorded, no port.
 6. Moddability: `set_tuning('carry')` gains `drop_board`, `follow_step`, `hold_angle_limit`,
@@ -690,7 +690,7 @@ only saw the map's static rails (`grind_world/provider.rs`), and the prop export
 
 **Root cause / retail.** 82C1EAD8, the shared rail query, collects the static rails and then asks two providers (the DMO
 manager, then the living-world vehicle manager, both with the query 82C4C4E0) for up to 40 records in total. 82C4C4E0
-walks every DMO, skips one whose origin is 15 m or more from the query box centre (0x822F8F68 = 225, squared), and
+walks every DMO, skips one whose origin is 15 m or more from the query box center (0x822F8F68 = 225, squared), and
 places each segment of the DMO's rail map (DMO+1796, filled once by setup 82C535C0) with the DMO's current matrix: the
 segment bounds through 8258C1E0 against the query box, the chord D -> (A+B)+(C+D) through the same matrix. The rails
 live in the part's model space, so a pushed or knocked prop takes its rails along and no grind state is attached to the
@@ -809,7 +809,7 @@ or a skater inside a prop. Now:
   changes the prop's speed by 2 m/s or more in one tick.
 - `PROP_OVERLAP prop=<id> (<model>) skater inside for <n> ticks at [...] up_y <y>`: a skater volume that sat inside
   the prop long enough that the nudge stops (`stuck_release_ticks`), once per stay; `up_y` shows a fallen prop.
-No behaviour change.
+No behavior change.
 
 ## Grab: the carry binds the record the Ground decision qualified (2026-10-18)
 
@@ -827,7 +827,7 @@ No behaviour change.
   from the record it qualified (descriptor +152 / +156, the prop from the spline key) and binds exactly that record.
   Host tests without a decision keep the interim pick. Prop grab objects now carry a part with rates as retail's record
   init `82585F58` writes them (research b227): part and rates identity = the stable prop id, the Inertia words, angular
-  velocity at +144, centre of mass at +160, so Move Object's `+216` null gate (`82D442D0`) sees a real prop. Nothing
+  velocity at +144, center of mass at +160, so Move Object's `+216` null gate (`82D442D0`) sees a real prop. Nothing
   reads those words yet. Log `PROP_GRAB_MISS <reason>: decision <qualified record | no record qualified>; nearest prop
   <id> (<template>)` once per press that starts no carry. Test `the_carry_binds_the_record_the_ground_decision_qualified`.
 - **Retail order, the enter bind (research b233, 2026-10-18):** the Ground decision qualifies on tick N; on N+1 the
@@ -869,7 +869,7 @@ No behaviour change.
 
 Problem (user, asks 15 / 16): prop grab controls "not like retail". Research b240 to b245 checked
 every part of the held update against the retail code. The stick frame (the latched grab edge), the right stick's yaw
-about the prop's centre, the braking to a stop and the held friction pair already match retail; the user confirmed in
+about the prop's center, the braking to a stop and the held friction pair already match retail; the user confirmed in
 game that the left stick slides the prop the way it is pushed (2026-10-18: "it slides right. it follows the direction
 of the stick").
 
@@ -891,7 +891,7 @@ yaw sign convention of 8296EC98 (ours keeps the edge frame's sense); 82BDF268's 
 ## Grab: no prop could be grabbed, the grab scene held 2 of 786 props (2026-10-18)
 
 Problem (laptop session game-20261018-152526, user): grabbing objects did nothing, and with
-the grab visualisation opt-in on nothing showed either. 57 PROP_GRAB_MISS lines,
+the grab visualization opt-in on nothing showed either. 57 PROP_GRAB_MISS lines,
 all "decision no record qualified"; every GRAB_VIEW line "in_range=0", also 0.89 m from a bench.
 
 Root cause: the grab-scene ids pack the prop as `PROP_GRAB_TAG | id << 6 | spline`, and `grab_object_of` skipped
@@ -920,7 +920,7 @@ while carrying". The log had no stick input while carrying.
 Root cause: retail moves the pair along the latched side row +400 = -(+144), where +144 = Y x forward [code, b240 /
 b241]. Ours latched +144 itself (`side_of(forward)`, which our code called "the skater's right" but is the left in our
 right-handed +Y-up world; the traffic code's right is (-f.z, 0, f.x)). The DownTown carry test passed because it
-expected the same mirrored "right". The off-centre lever keeps +144 (that sign was already retail's).
+expected the same mirrored "right". The off-center lever keeps +144 (that sign was already retail's).
 
 Change: `move_object::command` latches `-side` (+400) for the stick's x; `carry_direction_tests` expects stick right
 along (-f.z, 0, f.x). New log line `CARRY_STICK` on every change of the stick while carrying: push / side / turn, the
@@ -947,8 +947,8 @@ ready; a "skitching" mode in GRAB_VIEW. Tests `a_held_grab_shows_the_owner_list_
 - **Problem:** laptop session 2026-10-18 22:01, the user: carrying, the right stick should pivot on retail's anchor,
   not spin the prop in place; dumpsters "feel too light".
 - **Retail [code] (research b284):** the command turns the prop about its
-  own centre of mass; the only turn term in the linear target is the lever coupling fwd += 0.25 x lever x yaw rate
-  (`sub_82D45318`, constant -0.25 at 0x8208ED00); 82D9CC78 adds the linear command at the centre with no mass factor,
+  own center of mass; the only turn term in the linear target is the lever coupling fwd += 0.25 x lever x yaw rate
+  (`sub_82D45318`, constant -0.25 at 0x8208ED00); 82D9CC78 adds the linear command at the center with no mass factor,
   82D9CCF0 replaces the angular one with the yaw command; no data anchor. "Around the player" is the skater walking
   round the prop: 82D45D30 / 82D46218 / 82D463D8 put the skater back on the grab edge every tick. Weight is two curves
   set at the grab (82D444A0): speed scale from the mass (curve 57D37D696363167E, 1.0 up to 91 kg, 0.51 from 200 kg)
@@ -961,7 +961,7 @@ ready; a "skitching" mode in GRAB_VIEW. Tests `a_held_grab_shows_the_owner_list_
   density x volume.
 - **Change (log only):** `CARRY_WEIGHT prop mass yaw_inertia speed_scale yaw_gain` once per grab, and while the right
   stick turns, every 15 steps `CARRY_ORBIT prop turn prop_heading skater_angle radius yaw_target step` (skater angle
-  round the prop centre: it should turn with the prop heading).
+  round the prop center: it should turn with the prop heading).
 - **Open:** the next carry session's lines decide which gap it is. Whether record +240 / +228 are body 0's or the whole
   DMO's for multi-body dumpsters; the skater-side weight (82D46610, 82BDF268) is not decoded.
 

@@ -19,7 +19,7 @@ the file of their topic (and get a line here).
 | [26c](26c-living-world-npc-skaters.md) | NPC skaters: replay tier and animation | Milestone 3 (NPC skaters replaying recorded lines) and the fixes to how they look and sound: fading at line ends, animation snapping and popping, jitter, switching sides, and silent landings from the voice cap. |
 | [26d](26d-living-world-skater-stance.md) | NPC skaters: stance and riding direction | Riding backwards (fix 23) and its correction, then the retail stance ports: fakie drawing, natural stance, trick-clip stance toggles, and the turn rate / pro stance / off-board steer research. The largest single topic. |
 | [26e](26e-living-world-skater-ai.md) | NPC skaters: AI and simulated tier | The M5 ports (AI board path steering, trick choice) and M7 steps 1 to 3: per-skater physics context, the AI record driving the physics, and simulated NPC skaters in the game. |
-| [26f](26f-living-world-peds.md) | Pedestrians: body, navigation and look | Peds milestones M2 (the ped body) and M3 (navigation), plus the fixes to how peds stand and render: upside down in left turns, warped bone frames, walking in place, clothes in mask colours, and peds floating in the air (the render height search). |
+| [26f](26f-living-world-peds.md) | Pedestrians: body, navigation and look | Peds milestones M2 (the ped body) and M3 (navigation), plus the fixes to how peds stand and render: upside down in left turns, warped bone frames, walking in place, clothes in mask colors, and peds floating in the air (the render height search). |
 | [26g](26g-living-world-ped-interactions.md) | Pedestrians: props and skater contact | Peds (and NPC skaters, fix 19) walking through props, peds walking through a held prop, and the skater knocking peds down or making them stumble. |
 | [26h](26h-living-world-traffic.md) | Traffic | Milestones V0 to V3 (vehicle data, road graph / lane cursor / signals / junction entry, the vehicle census, cars on screen) and the fixes: cars flying off, car shadows from bridges, and the retail reaction when cars hit peds. |
 | [26i](26i-living-world-props.md) | Props | Dynamic props and the held / moved prop: props pulled toward the player, moving a held prop (stick directions, skater inside the prop, grab flicker), the board stuck inside a prop, dragged props sinking, and the Move Object port. The dynamic props themselves (movable DMOs from upstream PR #15) are doc 27. |
@@ -40,7 +40,7 @@ the file of their topic (and get a line here).
 
 - [Change (milestone 1: data)](26b-living-world-population.md#change-milestone-1-data)
 - [Change (milestone 2: population core)](26b-living-world-population.md#change-milestone-2-population-core)
-- [NPCs vanishing in view (leave fade, census centre), 2026-10-05](26b-living-world-population.md#npcs-vanishing-in-view-leave-fade-census-centre-2026-10-05)
+- [NPCs vanishing in view (leave fade, census center), 2026-10-05](26b-living-world-population.md#npcs-vanishing-in-view-leave-fade-census-center-2026-10-05)
 - [NPC draw distance (QoL, not retail)](26b-living-world-population.md#npc-draw-distance-qol-not-retail)
 - [Startup freeze from the first-play fixes, 2026-10-05](26b-living-world-population.md#startup-freeze-from-the-first-play-fixes-2026-10-05)
 - [Population follows the board, not the player, 2026-10-05](26b-living-world-population.md#population-follows-the-board-not-the-player-2026-10-05)
@@ -99,7 +99,7 @@ the file of their topic (and get a line here).
 - [Peds standing on their heads in the left turn, 2026-10-05](26f-living-world-peds.md#peds-standing-on-their-heads-in-the-left-turn-2026-10-05)
 - [Peds rendered warped (bone frames twisted 90 degrees), 2026-10-05](26f-living-world-peds.md#peds-rendered-warped-bone-frames-twisted-90-degrees-2026-10-05)
 - [Peds walking in place at fixed spots, one standing on a wall top, 2026-10-05](26f-living-world-peds.md#peds-walking-in-place-at-fixed-spots-one-standing-on-a-wall-top-2026-10-05)
-- [Ped clothes drawn in their mask colours (looked like mixed outfits), 2026-10-05](26f-living-world-peds.md#ped-clothes-drawn-in-their-mask-colours-looked-like-mixed-outfits-2026-10-05)
+- [Ped clothes drawn in their mask colors (looked like mixed outfits), 2026-10-05](26f-living-world-peds.md#ped-clothes-drawn-in-their-mask-colors-looked-like-mixed-outfits-2026-10-05)
 - [Peds floating in the air all over the map (2026-10-06)](26f-living-world-peds.md#peds-floating-in-the-air-all-over-the-map-2026-10-06)
 
 ### 26g: Pedestrians: props and skater contact
@@ -109,7 +109,7 @@ the file of their topic (and get a line here).
 - [Peds walking through a held prop, 2026-10-08](26g-living-world-ped-interactions.md#peds-walking-through-a-held-prop-2026-10-08)
 - [Skater hits peds: knock-down or stumble (2026-10-08)](26g-living-world-ped-interactions.md#skater-hits-peds-knock-down-or-stumble-2026-10-08)
 
-- [Ped behaviour runtime: the stock ped AI graph on each ped (2026-10-09)](26g-living-world-ped-interactions.md#ped-behaviour-runtime-the-stock-ped-ai-graph-on-each-ped-2026-10-09)
+- [Ped behavior runtime: the stock ped AI graph on each ped (2026-10-09)](26g-living-world-ped-interactions.md#ped-behavior-runtime-the-stock-ped-ai-graph-on-each-ped-2026-10-09)
 - [Ped mood system: wants from the stock mood tables (2026-10-09)](26g-living-world-ped-interactions.md#ped-mood-system-wants-from-the-stock-mood-tables-2026-10-09)
 - [Fleeing peds run away from the threat (2026-10-09)](26g-living-world-ped-interactions.md#fleeing-peds-run-away-from-the-threat-2026-10-09)
 - [Peds speak from their AI graph (2026-10-09)](26g-living-world-ped-interactions.md#peds-speak-from-their-ai-graph-2026-10-09)
@@ -171,7 +171,7 @@ the file of their topic (and get a line here).
 - [Skitching step 4i: PushSpeed's latch and step (2026-10-09)](26h-living-world-traffic.md#skitching-step-4i-pushspeeds-latch-and-step-2026-10-09)
 - [Skitching step 4j: the board's effective transform rows (2026-10-09)](26h-living-world-traffic.md#skitching-step-4j-the-boards-effective-transform-rows-2026-10-09)
 - [Skitching step 7: NPC skaters skitch (opt-in, 2026-10-09)](26h-living-world-traffic.md#skitching-step-7-npc-skaters-skitch-opt-in-2026-10-09)
-- [Manoeuvres groundwork: lane-change passage, stop spots, gap check (2026-10-09)](26h-living-world-traffic.md#manoeuvres-groundwork-lane-change-passage-stop-spots-gap-check-2026-10-09)
+- [Maneuvers groundwork: lane-change passage, stop spots, gap check (2026-10-09)](26h-living-world-traffic.md#maneuvers-groundwork-lane-change-passage-stop-spots-gap-check-2026-10-09)
 - [Traffic: the horn's driver fields corrected (2026-10-09)](26h-living-world-traffic.md#traffic-the-horns-driver-fields-corrected-2026-10-09)
 - [Traffic: cars change lane (2026-10-09)](26h-living-world-traffic.md#traffic-cars-change-lane-2026-10-09)
 - [Traffic: cars pull over, park and pull out (2026-10-09)](26h-living-world-traffic.md#traffic-cars-pull-over-park-and-pull-out-2026-10-09)

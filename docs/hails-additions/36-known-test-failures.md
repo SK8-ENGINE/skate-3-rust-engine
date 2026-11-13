@@ -2,7 +2,7 @@
 
 Branch `fix/known-test-failures` (from `main` 2e166977). Both tests failed on upstream `main` and therefore on every
 branch built on it, so every PR listed them as "known failures". Both are test fixtures that contradict the code's
-own rule; no engine behaviour changes.
+own rule; no engine behavior changes.
 
 ## Problem
 
@@ -71,7 +71,7 @@ The 12 still failing:
 Two traps found on the way:
 
 - **A dead `assets` junction** in a worktree (it pointed at a deleted install) raised the count to 100, because many tests read `assets/` directly and ignore `SKATE3_ASSET_ROOT`. Check the junction first. That run also ended once in `0xc0000409` (`STATUS_STACK_BUFFER_OVERRUN`); it did not come back after repointing, and the cause was not found.
-- **A leaked process-wide flag:** `carry_direction_tests` turned `PROP_GRAB` on and left it on, so `downtown_dragged_props_rest_on_the_floor` failed whenever it ran later in the same process and passed alone. Tests now set it through `prop_grab_for_test`, which serialises them and restores it.
+- **A leaked process-wide flag:** `carry_direction_tests` turned `PROP_GRAB` on and left it on, so `downtown_dragged_props_rest_on_the_floor` failed whenever it ran later in the same process and passed alone. Tests now set it through `prop_grab_for_test`, which serializes them and restores it.
 
 ### Re-run at the #52 head (2026-11-03)
 

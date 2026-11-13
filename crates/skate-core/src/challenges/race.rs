@@ -48,7 +48,7 @@ pub fn visible_gates(passed: usize, total: usize, max_icons: usize) -> (std::ops
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Leg {
-    /// Point 0 = the leg start, then one point per split trigger (the volume's centre), the last = the finish.
+    /// Point 0 = the leg start, then one point per split trigger (the volume's center), the last = the finish.
     pub points: Vec<[f32; 3]>,
     pub length: f32,
 }

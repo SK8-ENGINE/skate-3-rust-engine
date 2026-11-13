@@ -636,7 +636,7 @@ fn setup(
                 RenderAssetUsages::RENDER_WORLD,
             ));
             // The Trick Guide (FE 14): its data from the collections and the tables, its movie in the set; the pause
-            // item gets its engine handler (greyed without them).
+            // item gets its engine handler (grayed without them).
             let guide_tables = tables.as_ref().map(|t| t.trick_guide.clone()).unwrap_or_default();
             let has_movie = movies.movies.contains_key("source/screens/tricks/trickguide");
             let trick_guide = match skate_data::collections::Collections::load(&config.asset_root) {
@@ -656,7 +656,7 @@ fn setup(
                     Default::default()
                 }
             };
-            // Video Calibration (FE 51): the settings row gets its engine handler when the movie is in the set (greyed
+            // Video Calibration (FE 51): the settings row gets its engine handler when the movie is in the set (grayed
             // otherwise, e.g. sets exported before it was added).
             if movies.movies.contains_key("source/screens/options/videocal")
                 && menus.registry.data().settings.iter().any(|s| s.id == VIDEO_CALIBRATION_ROW)
@@ -693,13 +693,13 @@ fn setup(
             } else {
                 warn!("RETAIL_MENUS: Extras screen unavailable (no extras movie); the EXTRAS overlay stands in; run Refresh Game Files");
             }
-            // Music Player (FE 26): greyed without the movie (sets exported before it was added).
+            // Music Player (FE 26): grayed without the movie (sets exported before it was added).
             if movies.movies.contains_key(MUSIC_PLAYER_MOVIE) && menus.registry.data().item(MUSIC_PLAYER_ITEM).is_some() {
                 let owner = Owner::Engine(format!("{}{}", crate::retail_menus::SCREEN, crate::fe_backdrop::MUSIC_PLAYER_SCREEN));
                 let handler = skate_core::menus::Handler { owner, select: true, highlight: false, callback: None };
                 menus.registry.register_handler(EntryRef::item(MUSIC_PLAYER_ITEM), handler);
             }
-            // SpawnSkater (FE 62): Free Play (SoloFreeskateOptions) and Call Skater (SkateWith) push it (b307); greyed
+            // SpawnSkater (FE 62): Free Play (SoloFreeskateOptions) and Call Skater (SkateWith) push it (b307); grayed
             // without the movie (sets before version 14).
             if movies.movies.contains_key(SPAWN_SKATER_MOVIE) {
                 for (item, _) in skate_core::spawn_skater::SpawnSkaterRules::default().items {
@@ -1523,7 +1523,7 @@ fn update(
                 }
                 Effect::Open(i) if Some(i) == extras => {
                     info!("RETAIL_MENUS open Extras (FE {i})");
-                    // A set from before the credits movie (version 12) keeps the Credits row greyed.
+                    // A set from before the credits movie (version 12) keeps the Credits row grayed.
                     let credits_ready = credits.is_some() && movies.has_movie(CREDITS_MOVIE);
                     if let Some(row) = fe.extras.rules.rows.iter_mut().find(|r| r.id == "extras.credits").filter(|_| !credits_ready) {
                         row.greyed = true;
@@ -2242,7 +2242,7 @@ fn update(
                 ExtrasAction::PushScreen(name) if name == "credits" && credits.is_some() => {
                     ms.stack.request(Layer::Main, Request::push(credits.unwrap()));
                 }
-                // Greyed by default until their screens are ported (doc 31).
+                // Grayed by default until their screens are ported (doc 31).
                 other => warn!("RETAIL_MENUS extras: {other:?} has no handler yet"),
             }
         }
@@ -2360,7 +2360,7 @@ fn update(
     ms.popup = std::mem::take(&mut fe.popup);
     // A Challenge Map leaf the player picked goes through the registry: the engine's teleport handler queues the
     // teleport and closes the map and the pause menu (retail fades out and closes the front end, sub_826494C8);
-    // a mod's handler gets its menu_select event; a greyed one never reaches here.
+    // a mod's handler gets its menu_select event; a grayed one never reaches here.
     if let Some(entry) = ms.challenge_map.selected.take() {
         let outcome = menus.act(MenuAction::Select { entry: entry.clone() });
         info!("RETAIL_MENUS challenge map select {}: {outcome:?}", entry.hook_id());
@@ -2617,7 +2617,7 @@ struct TimelineLook {
     width: f32,
     band_top: f32,
     band_bottom: f32,
-    /// Band colours per camera type (0 Follow, 1 Tripod, 2 Free, 3 Game), normal / selected, and their alphas.
+    /// Band colors per camera type (0 Follow, 1 Tripod, 2 Free, 3 Game), normal / selected, and their alphas.
     normal: [[f32; 3]; 4],
     selected: [[f32; 3]; 4],
     alpha: f32,
@@ -2895,7 +2895,7 @@ fn render(
         &draws,
         |t| if t.is_empty() { Some(white.clone()) } else { textures.get(t).cloned() },
         MENU_Z,
-        // Colour transforms in gamma space like the console front end (retail shot: near-black panel body).
+        // Color transforms in gamma space like the console front end (retail shot: near-black panel body).
         true,
     );
 }
@@ -2904,7 +2904,7 @@ fn render(
 mod timeline_tests {
     use super::*;
 
-    /// The editor timeline (b403): a band from y 3 to 30 in the clip's space coloured by the camera, a 13 x 51
+    /// The editor timeline (b403): a band from y 3 to 30 in the clip's space colored by the camera, a 13 x 51
     /// `key_default` per key, `key_glow` (and an unselected band) when the playhead is on a key; nothing in instant mode.
     #[test]
     fn timeline_draws_the_camera_band_and_the_keys() {
@@ -2920,13 +2920,13 @@ mod timeline_tests {
         let mut feed = crate::replay_menu_host::ReplayScreenFeed { mode: 6, keys: vec![0.5], segments: vec![(0.0, 0)], position: 0.2, ..Default::default() };
         let draws = timeline_draws(&placeholder, &feed);
         assert_eq!(draws.len(), 2);
-        // The band: Follow (type 0) selected colour, from x 100 to 917, y 53 to 80.
+        // The band: Follow (type 0) selected color, from x 100 to 917, y 53 to 80.
         assert_eq!(draws[0].multiply, [0.74, 0.74, 0.19, 0.85]);
         assert_eq!((draws[0].vertices[0].position, draws[0].vertices[2].position), ([100.0, 53.0], [917.0, 80.0]));
         // The key at x = 0.5 x 817 - 0.5, 13 wide, 51 high.
         assert!(draws[1].texture.ends_with("texture/key_default"));
         assert_eq!(draws[1].vertices[0].position, [100.0 + 408.0 - 6.5, 50.0]);
-        // On the key: the glow, the band not selected (Follow normal colour).
+        // On the key: the glow, the band not selected (Follow normal color).
         feed.position = 0.5;
         let draws = timeline_draws(&placeholder, &feed);
         assert!(draws[1].texture.ends_with("texture/key_glow"));

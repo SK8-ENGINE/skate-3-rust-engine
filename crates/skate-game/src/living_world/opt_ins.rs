@@ -51,7 +51,8 @@ impl OptIn {
     fn env_on(self) -> bool {
         let named = |v: &str| std::env::var(v).is_ok_and(|v| !v.is_empty());
         std::env::var(self.env()).is_ok_and(|v| v == "1")
-            || (self == OptIn::Challenges && (named("SKATE_CHALLENGE") || named("SKATE_VERIFY_CHALLENGE")))
+            || (self == OptIn::Challenges
+                && ["SKATE_CHALLENGE", "SKATE_VERIFY_CHALLENGE", "SKATE_CONTEST", "SKATE_RACE"].into_iter().any(named))
     }
     /// Session log key.
     fn log_key(self) -> &'static str {

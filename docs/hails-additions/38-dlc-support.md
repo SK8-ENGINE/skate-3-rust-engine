@@ -232,7 +232,7 @@ data. Open: no recomp trace confirms retail plays the SkateSchool bed there.
   District (the disc Maloof filter names `dist_maloofmoneycup`, its rows' World; their District is `dist_maloof`; the
   Art Gallery row has no District). skate.Park's filter (`skatepark`) lists `world` rows with `IsSkatePark` and
   `AllowInSkateParksTab`: 5 disc park worlds plus Back Lot, Downtown Night and Zen Plaza Full with the packs = the 8 of
-  the video, labelled by the world's own text.
+  the video, labeled by the world's own text.
 - Ours (`skate-data` `challenge_map.rs`): the rules match on World (inherited through the row's parents) and include the
   four DLC folders; the skate.Park folder lists the park worlds as `World` leaves; `retail_menus.rs` gives each park
   world the teleport of the destination that names that world (`megapark_full` for `dist_megapark_full`, which starts
@@ -244,7 +244,7 @@ data. Open: no recomp trace confirms retail plays the SkateSchool bed there.
   vaults), so the packs' fe rows become destinations. The three DLC Full worlds (`dist_backlotpark_full`,
   `dist_downtownparknight_full`, `dist_zenplazapark_full`) are entered through their packs' rows `dist_backlotpark`,
   `dist_downtownparknight`, `dist_zenplazapark` (World = the Full world; with artwork, so they keep their locator, the
-  same rule as `startpark_progression`). Before this the three stayed greyed. Checked on the dev install
+  same rule as `startpark_progression`). Before this the three stayed grayed. Checked on the dev install
   (2026-10-21 refresh): 66 destinations, all with a matrix, incl. the 3 DLC park worlds, their Empty rows and the
   4 DLC maps.
 - Unlock rule (research b450) [code]: `Unlock.IsLocationUnlocked` (`82839C38`) lists a row when its bool
@@ -268,14 +268,14 @@ data. Open: no recomp trace confirms retail plays the SkateSchool bed there.
 - Category headers (research b454) [code + movie data]: after the sort retail inserts a map_category row before each
   category run; the screen draws it as a picker header (`UpdateStuffMenuItems` -> `AddSpecificItem(label,
   mHeaderItem)`, list [3] of `GetStuffMenuItems` `8264AF28`), labelled by the category's `Hash_465698DD3CC73CA2`
-  (`82644430`), not greyed (`82646D18`), skipped by the cursor (`82D0D100`, the movie's picker) and by A (`826475B8`),
+  (`82644430`), not grayed (`82646D18`), skipped by the cursor (`82D0D100`, the movie's picker) and by A (`826475B8`),
   and not counted; normal rows indent 16 px when a list has one. A folder whose inherited `Hash_EAFE7F250C154184` is
   set and that holds one category shows no header (University, Downtown and the other location folders). The
   comparator's middle key is cProgressionManager's challenge status "new" list (`*(*(0x830CFD94)+0xE0)+0x44`, +0x60):
   new challenges first; it never matches a location or park key. Ours: `load` inserts the header nodes
   (EntryKind::MapCategory; the screen host already sends list [3] and skips them), `select` ignores a header, rows
-  never grey a header. Result on the dev install: skate.Park = 15 rows, 8 parks under 7 headers (Zen Plaza's
-  category is the San Van pack's, labelled `ID_WORLD_ARTGALLERYDLC` in its data). Tests:
+  never gray a header. Result on the dev install: skate.Park = 15 rows, 8 parks under 7 headers (Zen Plaza's
+  category is the San Van pack's, labeled `ID_WORLD_ARTGALLERYDLC` in its data). Tests:
   `a_folder_sorts_by_category_order_then_label_text` (headers, the flag with one and two categories), the real tree.
   Open: retail's header label for leaves without a category; who fills the "new" list. Not play-tested; b447 noted
   the video's skate.Park count as "(8)", so the user's check decides whether the headers show.
@@ -324,7 +324,7 @@ Change:
   pack ships and are left out. Tests `test_teleporters`.
 - Engine (`crates/skate-game/src/teleporters.rs`): arms the loaded map's teleporters (hull volumes join the map's
   trigger volumes), shows the prompt while the local skater is inside, D-pad Up raises retail's confirm popup (No /
-  Yes; a list for several exits), Yes posts a serialisable `TeleporterUsed` and moves the skater: `travel_ex` on the
+  Yes; a list for several exits), Yes posts a serializable `TeleporterUsed` and moves the skater: `travel_ex` on the
   same map (the skater's own board state), the map transition plus the Challenge Map arrival for another map
   (multiplayer refuses a map switch, as the Challenge Map does). Tests in the module.
 - Mods (`sdk.triggers.teleporter`, `sdk/ENGINE_API.md`): add, replace (same id as a retail teleporter) or remove
@@ -599,27 +599,27 @@ The prompt is retail's action overlay (`actionoverlay2`, template 59 SignUpHUD, 
   row 2) per `visualindicators` row, the eight known rows by name (`smallarrow`, `gates`, ...); the engine builds the
   strips, billboards and fades per icon (one material each, alpha blended) from the row, and falls back to the
   `default` row's values for installs without the export.
-- **Colour and texture [code + data], research b535 / b536 (2026-10-22):** no flat colour: `827AFC80` draws every
+- **Color and texture [code + data], research b535 / b536 (2026-10-22):** no flat color: `827AFC80` draws every
   indicator twice, first the background pass then the front pass (`827B2200` binds texture param 0x9C1D9BBD from
-  ind+0x18 / +0x14). `827AEF08` resolves the request's colour key in VLT `ribbon_spline_colour` (0xF0DB8767D611AF94):
+  ind+0x18 / +0x14). `827AEF08` resolves the request's color key in VLT `ribbon_spline_colour` (0xF0DB8767D611AF94):
   front texture field 8E38, background field FF4D, tint Vector4 E4F3. Teleporter requests pass -1 = the `default` row
   = `visual_indicator_blue` / `visual_indicator_bg_blue`, tint (1, 1, 1, 1). The textures are in `miscboot.big`
   `data/content/textures/vitextures.rx2` (16 textures): the fronts are 64x64 R5G6B5 bands, constant along u, black at
   both edges and bright in the middle (blue peaks at 107, 174, 231); the backgrounds 64x64 A8R8G8B8, darker, alpha 0
   at the edges. The passes use pixel shaders `spline_defaultPS` (front: rgb only, additive-style) and
-  `spline_darkenPS` (background: alpha-blend-style) [b536, shader decoded by hand]. Verified the colour rows in
+  `spline_darkenPS` (background: alpha-blend-style) [b536, shader decoded by hand]. Verified the color rows in
   the export and decoded all 16 textures (setup `write_textures`; the Xenos decoder now handles R5G6B5).
-- **Change (2026-10-22, colour):** setup exports `colours` (the `ribbon_spline_colour` rows) and every vitextures
+- **Change (2026-10-22, color):** setup exports `colours` (the `ribbon_spline_colour` rows) and every vitextures
   texture as PNG under `assets/private/visual-indicators/`; the engine draws each icon as two child meshes, the
   background texture alpha blended, then the front texture additive (sorted after it), both tinted and faded, UV u =
-  spline parameter in segments, v = strip side. Installs without the textures keep the flat colour.
+  spline parameter in segments, v = strip side. Installs without the textures keep the flat color.
 - **Pass states and shader factors [code], research b536 (verified the FNV-1 32 names: technique "darken"
   0x8DB32DC8 / "default" 0x2EA8FB98, `i_intensity` 0xF8CB054C, `i_clipvalues`, `i_diffuse`; the intensity fields
   031D / 1643 = 1.0 / 0.7 for smallarrow):** `82CE9080` / `82CF5A10`: background blend 0x07060706 = alpha blend,
   front 0x01010101 = additive, depth less-equal with test on and write off [inferred byte order], cull 4 [inferred
   none]. `spline_darkenPS`: rgb = tex * I.y, alpha = sqrt(tex.a * I.y * fade); `spline_defaultPS`: rgb = tex * I.x *
   fade (gamma 2 pairs reduced on decoded textures); UV (t, side); the fade runs per vertex on clip z (view depth).
-  Ported (2026-10-22): style `intensity` exported, `Pass::colour` gives those factors as linear material colours,
+  Ported (2026-10-22): style `intensity` exported, `Pass::colour` gives those factors as linear material colors,
   setup stores sqrt(alpha) in the background textures so the material's product equals the shader's root, fade on
   view depth per icon.
 - **Fade, billboard flag and Offset [code], research b537 (2026-10-23):** `827B1B70` reads only graph row 1 (rows 0
@@ -667,15 +667,15 @@ The prompt is retail's action overlay (`actionoverlay2`, template 59 SignUpHUD, 
   self.SignUpIndicator)`; nothing removes, disables or recolours it later (not on entering the volume, the prompt, the
   teleport or a cooldown). The two fields are the ones setup reads (verified: `Location` = F1C6D5FA4A23951E,
   `SignUpIndicator` = 284B07325D587CC4 by name hash). `AddLocationIndicator` (`82D502C8` -> `82D4F328` locator lookup
-  -> `82D4F2A8`, verified its call to `82D4F0B0` with -1 colour / style) builds the same entry as the key 0 path:
-  full anchor matrix, ribbon key, colour and style `default`. So in Free Play ours matches in anchor, key, colour,
-  style and timing. Edge cases not modelled: retail dedupes per group (ours per locator, only matters if two
+  -> `82D4F2A8`, verified its call to `82D4F0B0` with -1 color / style) builds the same entry as the key 0 path:
+  full anchor matrix, ribbon key, color and style `default`. So in Free Play ours matches in anchor, key, color,
+  style and timing. Edge cases not modeled: retail dedupes per group (ours per locator, only matters if two
   teleporters share one), and a missing locator falls back to a fixed matrix (ours draws none); with a challenge
   runner, each teleporter's icon hides while another challenge is current.
 - **Not retail yet:** the fade is per icon, not per vertex; the depth byte order and cull value are inferred; the
   render-target gamma of the 360 versus Bevy's linear blend may shift the glow slightly; the passes field, wiggle and
-  flicker are not modelled; a mod map cannot mark itself a park world yet; the mode gate of the key 0 group
-  (`82552750`, word 0x830B7AE8) and the stategraph's CreateGroup(false) groups are not modelled.
+  flicker are not modeled; a mod map cannot mark itself a park world yet; the mode gate of the key 0 group
+  (`82552750`, word 0x830B7AE8) and the stategraph's CreateGroup(false) groups are not modeled.
 - **Mods:** `indicator="<ribbon_indicator key>"`, `indicator_position={x,y,z}`, `indicator_style="<visualindicators row>"` and `indicator_colour="<ribbon_spline_colour row>"` on `sdk.triggers.teleporter`
   (`sdk/ENGINE_API.md`); the icon goes with the teleporter.
 - **Tests:** `test_visual_indicators.py` (spline layout, the bank chain, style rows with inheritance, park maps from the

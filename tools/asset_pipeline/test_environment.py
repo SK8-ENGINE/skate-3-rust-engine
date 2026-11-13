@@ -120,7 +120,7 @@ class DynamicObjectMaterialTests(unittest.TestCase):
         self.assertEqual(_retail_shader_family('dynamicobject.default'), 15)
         self.assertEqual(_retail_shader_family('dynamicobject.alphatest'), 15)
         self.assertEqual(_retail_render_flags('dynamicobject.alphatest', 1) & 5, 5)
-        # Neighbouring families are unchanged.
+        # Neighboring families are unchanged.
         self.assertEqual(_retail_shader_family('environment.default'), 1)
         self.assertEqual(_retail_shader_family('incandescent.backlituvscroll'), 14)
         self.assertEqual(_retail_shader_family('vehicle.default'), 0)

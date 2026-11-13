@@ -1,5 +1,5 @@
 //! Teammate stand-ins wear their save slot's look (research b977: retail spawns `teammate_0n` with save skater slot n):
-//! the customiser profile from the career's `cac.json` is assembled from the customiser's parts under one container,
+//! the customizer profile from the career's `cac.json` is assembled from the customizer's parts under one container,
 //! then bound to the stock skeleton like any NPC look. Other NPCs keep `present_looks`.
 //! Details: docs/hails-additions/43-career.md#change-team-brand-tiers-teammates-and-achievements-step-11
 use super::npc_skaters::{NpcPuppet, NpcSkater, SaveSlotLooks};
@@ -7,7 +7,7 @@ use super::PopulationState;
 use crate::customiser_material::SkaterMaterial;
 use bevy::prelude::*;
 
-/// The NPC wears this resolved customiser profile (set before its puppet is built).
+/// The NPC wears this resolved customizer profile (set before its puppet is built).
 #[derive(Component)]
 pub(crate) struct NpcOutfit {
     profile: serde_json::Value,

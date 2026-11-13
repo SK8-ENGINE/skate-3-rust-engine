@@ -163,21 +163,21 @@ Init (`sub_824C59C8`): e 0, gains 1, envelope reset (done → the first frame dr
   30 km/h manual −38.21 dBFS (= old chain), centroid 1375 → 1502 Hz. High speed (send 3, level 0.45..0.87):
   +5.7 dB from graph 3's clipped copy in the probe (60–85 km/h, concrete_rough_hard).
 
-## 7. UNCERTAIN / not modelled
+## 7. UNCERTAIN / not modeled
 - FlangeSub return A (`[[mgr+116]]`, graph-2 Sen0 #1): rendered since 2026-10-29 (doc 11 "Rolling leftovers").
 - Env send level vs retail: graph 2's mono Sen0s never appear in the SEND hook (`sub_82B31838`) in the dsp session,
   so level(13) at the chain is untraced; our MixMap gives 0.079 at 30 km/h.
 - Two SEND lines at 1.0 (t 27720 / 28690) where the model says 2.0 / 0: probably a rebuilt chain's first block at
-  the Sen0 default before its build-time post (game thread vs audio thread race); not modelled.
+  the Sen0 default before its build-time post (game thread vs audio thread race); not modeled.
 - XMVectorSin/Cos to the ulp: VMX flushes denormals and the recomp's `vmaddfp` fusing is assumed; no FSS oracle
   vectors (PoC `dsp_vectors` has none).
-- Release fold of a torn-down chain's env send (Sub0 deltas into the env bus) is not modelled; the dry fold is.
+- Release fold of a torn-down chain's env send (Sub0 deltas into the env bus) is not modeled; the dry fold is.
 - The high-speed level jump (+5.7 dB) is the mechanism's result; not compared with a retail capture (the capture
   also holds wind, rattle and rocket at those speeds).
 - Trick latch only evaluated while the manual latch is clear (§4.1); the existing `board::Latches` updates both.
 
 ## 8. Sources & credits
-Retail behaviour read from the skate3recomp TU3 lifted code (reference only), image constants from the PoC's dumped
+Retail behavior read from the skate3recomp TU3 lifted code (reference only), image constants from the PoC's dumped
 image, vault values from the converted collections; trace hooks in skate3recomp `src/research/hooks_audio.cpp`
 (GREC / GAIN / SEND / MOD). Prior notes: upstream PR #4 (chain shape), `grain-player-spec.md`.
 

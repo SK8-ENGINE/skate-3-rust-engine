@@ -321,7 +321,7 @@ fn bytes(values: [Vec4; 2]) -> Vec<u8> {
     values.into_iter().flat_map(|v| v.to_array()).flat_map(f32::to_le_bytes).collect()
 }
 
-/// sRGB-encoded 0..255 to linear: retail multiplies the displayed colour, and this target holds linear values
+/// sRGB-encoded 0..255 to linear: retail multiplies the displayed color, and this target holds linear values
 /// that Bevy encodes to sRGB on output (doc 31: assumed, the retail shader is not ported).
 fn linear(c: i32) -> f32 {
     let v = c.clamp(0, 255) as f32 / 255.0;

@@ -43,7 +43,7 @@ pub(crate) fn percentile(sorted: &[f32], p: f64) -> f32 {
     sorted[rank.clamp(1, sorted.len()) - 1]
 }
 
-/// Summarises frame times. `scratch` is reused to avoid an allocation per call.
+/// Summarizes frame times. `scratch` is reused to avoid an allocation per call.
 pub(crate) fn summarise(frames: impl Iterator<Item = f32>, scratch: &mut Vec<f32>) -> Summary {
     scratch.clear();
     scratch.extend(frames.filter(|ms| ms.is_finite() && *ms >= 0.0));

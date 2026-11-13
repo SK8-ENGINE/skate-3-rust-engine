@@ -172,10 +172,10 @@ impl Graph8 {
 /// The stream voice's PEAK filter by the speaker's azimuth (both speech owners' updates,
 /// `sub_824D9370` / `sub_824DA300`): the owner's raw azimuth (output 0, 0..65535) folded to the
 /// front / back angle (above 32767 → 65536 − raw), then three curves of the speech record
-/// (class `B29C3B2C13D96482` `default`, holder `*(0x830CFDA4)+44`): centre `2C166907CF51DB88`
+/// (class `B29C3B2C13D96482` `default`, holder `*(0x830CFDA4)+44`): center `2C166907CF51DB88`
 /// (600 Hz at the front, 4000 at the side, 600 behind), gain `EA2C18D9CE5CBA3A` (0.4 → 0.1),
 /// Q `CF8679F540B82B2B` (3). Setup export `world_tuning.speech_voice`; the defaults are the shipped
-/// curves. Recomp (163809): every speech voice's PEAK (centre, gain) lies on the two curves at one
+/// curves. Recomp (163809): every speech voice's PEAK (center, gain) lies on the two curves at one
 /// azimuth.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpeechVoiceTuning {
@@ -212,7 +212,7 @@ impl Default for SpeechVoiceTuning {
 }
 
 impl SpeechVoiceTuning {
-    /// (centre Hz, linear gain, Q) for an owner's raw azimuth.
+    /// (center Hz, linear gain, Q) for an owner's raw azimuth.
     pub fn peak(&self, raw_azimuth: i32) -> [f32; 3] {
         let a = raw_azimuth as f32;
         let a = if a > 32767.0 { 65536.0 - a } else { a };
@@ -251,7 +251,7 @@ pub struct VoiceParams {
     pub azimuth: f32,
     pub hpf: f32,
     pub lpf: f32,
-    /// The PEAK filter (centre Hz, linear gain, Q) ([`SpeechVoiceTuning::peak`]).
+    /// The PEAK filter (center Hz, linear gain, Q) ([`SpeechVoiceTuning::peak`]).
     pub peak: [f32; 3],
 }
 
@@ -297,13 +297,13 @@ pub fn skater_outputs_focused(out: &dyn Outputs, model: u32, far: bool, focused:
     params(out, skater_level_ids_focused(model, far, focused), SKATER_SEND_A, SKATER_FILTERS, SKATER_ECHO_FILTERS, voice, scale)
 }
 
-/// The announcer's block constants (`sub_824A3C28`): the PEAK stays flat (centre `*(0x822F8920)`
+/// The announcer's block constants (`sub_824A3C28`): the PEAK stays flat (center `*(0x822F8920)`
 /// = 96000 Hz, gain 1.0, Q 3.0), the voice float is 1.0 and there is no echo send.
 pub const ANNOUNCER_PEAK: [f32; 3] = [96_000.0, 1.0, 3.0];
 
 /// The announcer's values (`out` = a snapshot of the Global slot's Announcer object with outputs
 /// 3 / 4 read as filters; `scale` = [`super::announcer::AnnouncerLevel::scale`]): the level is
-/// out2 × the scale truncated to an integer (`sub_824A7FA0`'s neighbour: `fctiwz`), the pitch
+/// out2 × the scale truncated to an integer (`sub_824A7FA0`'s neighbor: `fctiwz`), the pitch
 /// out1, the azimuth out0 (raw), the high pass out4, the low pass out3, the environment send out5
 /// (SFXObj_Announcer `sub_824D07B8` copies them into its object, the stream block takes them).
 pub fn announcer_outputs(out: &dyn Outputs, scale: f32) -> VoiceParams {

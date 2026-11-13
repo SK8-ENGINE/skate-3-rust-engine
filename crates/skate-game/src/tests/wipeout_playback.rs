@@ -303,7 +303,7 @@ fn travel_keeps_the_mods_arrival_velocity() {
 }
 
 /// Laptop session 2026-10-21 21:38: an on-foot arrival (Challenge Map, a marker set on foot) went Teleporting ->
-/// BipedGround -> PhysicsAir in one tick and flung the skater tens of metres. It must stay at the target.
+/// BipedGround -> PhysicsAir in one tick and flung the skater tens of meters. It must stay at the target.
 #[test]
 #[ignore = "requires private stock animation banks and collections"]
 fn travel_on_foot_stays_at_the_target() {

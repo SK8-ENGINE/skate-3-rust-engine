@@ -708,7 +708,7 @@ fn the_sit_timer_and_the_stand_up_roll_follow_the_ped_type() {
     assert!((430..570).contains(&half), "{half}");
 }
 
-/// The plugin flags (`826A7498`, `826A3108`, `826A2988` and their Ends): set while the behaviour runs, cleared at its
+/// The plugin flags (`826A7498`, `826A3108`, `826A2988` and their Ends): set while the behavior runs, cleared at its
 /// end; the explicit turn takes the locked waypoint's orientation, and nothing without a waypoint.
 #[test]
 fn plugin_flags_hold_while_their_behaviours_run() {
@@ -741,7 +741,7 @@ fn plugin_flags_hold_while_their_behaviours_run() {
 }
 
 /// A ped whose prop plugin ended keeps no waypoint: as a conversation partner it locks the conversation's waypoint and
-/// faces the centre, not the old seat (research b186: a kept seat waypoint flipped Speak / TurnToFace for minutes).
+/// faces the center, not the old seat (research b186: a kept seat waypoint flipped Speak / TurnToFace for minutes).
 #[test]
 fn a_released_prop_waypoint_lets_a_conversation_lock_its_own() {
     let settings = BrainSettings::default();
@@ -788,7 +788,7 @@ fn plugin_conditions_follow_retail() {
     assert_eq!(h.condition_activation(2, &f), 0);
 }
 
-/// The collision / mood switches hold while their behaviours run; DisableAllMoods restores what it saved.
+/// The collision / mood switches hold while their behaviors run; DisableAllMoods restores what it saved.
 #[test]
 fn collision_and_mood_switches_restore_at_end() {
     let settings = BrainSettings::default();
@@ -1056,7 +1056,7 @@ fn end_chase_resets_the_end_reason_and_unsets_angrychase() {
 
 #[test]
 fn ending_the_plugin_graph_clears_the_seat_flags() {
-    // The Plugin behaviour's End runs the plugin graph's EndAllBehaviours (`8269F310` -> `82E0CFA0`, controller vtable
+    // The Plugin behavior's End runs the plugin graph's EndAllBehaviours (`8269F310` -> `82E0CFA0`, controller vtable
     // +0x10 = `82C13498`, b300): a ped that leaves its seat owns no plugin object, stands no longer locked and takes
     // standing collisions again.
     use crate::graph::controller::{ActiveBehavior, Controller};
@@ -1100,4 +1100,73 @@ fn a_prop_moving_at_the_ped_takes_over_its_wants_with_flee() {
     brain.flee_object(0xFE00_0000_0000_0042);
     assert!(!brain.wants["greet"].needs_addressing);
     assert_eq!(brain.wants["flee"], Want { target: 0xFE00_0000_0000_0042, needs_addressing: true, forget_on_unset: false });
+}
+
+#[test]
+fn spectate_cheers_at_scores_boos_a_bail_and_gets_bored_without_either() {
+    let behaviors = ops(&[("Spectate", &[("shortCheerThreshold", "50"), ("longCheerThreshold", "400"), ("boredomTime", "15")])]);
+    let conditions = ops(&[("SpectatorIsBored", &[])]);
+    let mut brain = PedBrain::default();
+    let settings = BrainSettings::default();
+    let none = |_: u64| None;
+    let f = Frame { dt: 0.1, ..frame() };
+    let mut h = BrainHost { behaviors: &behaviors, conditions: &conditions, brain: &mut brain, settings: &settings, position: [0.0; 3], heading: 0.0, skater: None, target_position: &none, chase: Default::default() };
+    h.begin(0, [0; 6], &f);
+    assert_eq!(h.brain.timer(timers::SPECTATOR_BOREDOM), 15.0);
+    // A 120-point trick: a short cheer after up to 0.5 s, the gesture, then 3..7 s of short-cheer speech.
+    h.brain.skater_feed = Some(SkaterFeed { score: 120, bail: false });
+    h.update(0, [0; 6], &f);
+    h.brain.skater_feed = None;
+    let run = h.brain.spectate.unwrap();
+    assert!(run.pending && !run.long && (3.0..=7.0).contains(&run.cheer_time));
+    for _ in 0..6 {
+        h.update(0, [0; 6], &f);
+    }
+    assert!(h.brain.chase_requests.contains(&ChaseRequest::GestureClip { clip: SPECTATE_CHEER_CHANNEL }));
+    h.update(0, [0; 6], &f);
+    assert_eq!((h.brain.spectate.unwrap().cheering, h.brain.speech), (true, Some(spectate_speech::SHORT_CHEER)));
+    assert_eq!(h.brain.speed_suggestion, Some(0.0), "stands still");
+    // A bail while cheering cuts it.
+    h.brain.set_timer(timers::WAIT_AFTER_CHEER, 0.0);
+    h.brain.skater_feed = Some(SkaterFeed { score: 0, bail: true });
+    h.update(0, [0; 6], &f);
+    assert_eq!((h.brain.speech, h.brain.timer(timers::SPECTATOR_CHEER)), (Some(spectate_speech::STOP_CHEER), 0.0));
+    // Nothing above the threshold for the boredom time: bored, and the End line.
+    h.brain.skater_feed = Some(SkaterFeed { score: 10, bail: false });
+    h.brain.tick_timers(15.0);
+    assert_eq!(h.condition_activation(0, &f), 1);
+    h.end(0, [0; 6], &f);
+    assert_eq!((h.brain.speech, h.brain.spectate), (Some(spectate_speech::BORED), None));
+}
+
+#[test]
+fn recognizers_cap_and_recognition_greets_and_looks_at_the_player() {
+    let behaviors = ops(&[("RegisterRecognizer", &[]), ("PlayerRecognition", &[]), ("LookAt", &[])]);
+    let conditions = ops(&[("MaxRecognizersExceeded", &[("maxrecognizers", "4")]), ("MaxRecognizersExceeded", &[]), ("LookAtTimeOut", &[])]);
+    let mut brain = PedBrain::default();
+    let settings = BrainSettings::default();
+    let none = |_: u64| None;
+    let f = frame();
+    let chase = ChaseView { recognizers: 5, can_recognize: true, ..Default::default() };
+    let mut h = BrainHost { behaviors: &behaviors, conditions: &conditions, brain: &mut brain, settings: &settings, position: [0.0; 3], heading: 0.0, skater: None, target_position: &none, chase };
+    assert_eq!((h.condition_activation(0, &f), h.condition_activation(1, &f)), (1, 0), "5 > 4, not > 5 (default)");
+    h.chase.can_recognize = false;
+    assert_eq!(h.condition_activation(0, &f), 0, "a ped type that may not recognize never counts as exceeded");
+    h.begin(0, [0; 6], &f);
+    assert!(h.brain.recognizer);
+    h.end(0, [0; 6], &f);
+    assert!(!h.brain.recognizer);
+    h.begin(1, [0; 6], &f);
+    assert!(matches!(h.brain.speech, Some(42 | 45)));
+    assert!(h.brain.chase_requests.contains(&ChaseRequest::GestureClip { clip: GREET_CHANNEL }));
+    assert_eq!(h.brain.look_at, [LookTarget::Player]);
+    h.end(1, [0; 6], &f);
+    assert!(h.brain.look_at.is_empty());
+    // LookAt: the plugin prop for 30 s (the default), straight ahead without one.
+    h.brain.plugin_target = Some([1.0, 2.0, 3.0]);
+    h.begin(2, [0; 6], &f);
+    assert_eq!((h.brain.look_at.clone(), h.brain.timer(timers::LOOK_AT)), (vec![LookTarget::Prop([1.0, 2.0, 3.0])], 30.0));
+    assert_eq!(h.condition_activation(2, &f), 0);
+    h.brain.tick_timers(30.0);
+    assert_eq!(h.condition_activation(2, &f), 1);
 }

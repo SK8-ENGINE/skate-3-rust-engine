@@ -26,7 +26,7 @@ The recompilation is **not** a perfect copy of the console game, and its traces 
   - logged values, data and program logic are strong evidence;
   - timings, per-frame rates and gaps are specific to the recompilation until checked against the code or the
     console.
-- **Our rule:** retail parity comes from the mechanism (the code and data). Traces only validate it. Behaviour
+- **Our rule:** retail parity comes from the mechanism (the code and data). Traces only validate it. Behavior
   that runs per rendered frame targets the 360's ~30 fps cadence, made independent of the frame rate.
 
 ## Using it

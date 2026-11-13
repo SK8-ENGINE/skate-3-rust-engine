@@ -211,7 +211,7 @@ impl Menu {
     pub(crate) fn session_timer_visible(&self) -> bool {
         self.settings.session_timer
     }
-    /// The overlay drew this frame (not hidden behind the customiser, travel or mod menus).
+    /// The overlay drew this frame (not hidden behind the customizer, travel or mod menus).
     /// Better Object Mover: every prop can be moved (not retail).
     pub(crate) fn better_object_mover(&self) -> bool {
         self.settings.better_object_mover
@@ -324,7 +324,7 @@ impl RowView {
     fn reset(mut self) -> Self { self.reset = true; self }
     fn danger(mut self) -> Self { self.danger = true; self }
     fn selectable(&self) -> bool { self.kind != Kind::Header && self.enabled }
-    /// Whether a Left (-1) / Right (+1) step does anything (the recomp greys the stepper out at the end).
+    /// Whether a Left (-1) / Right (+1) step does anything (the recomp grays the stepper out at the end).
     fn can_step(&self, direction: i32) -> bool {
         match self.kind {
             Kind::Enum { index, count, wrap } => self.enabled && count > 1 && (wrap || if direction < 0 { index > 0 } else { index + 1 < count }),
@@ -696,7 +696,7 @@ impl Plugin for GraphicsMenuPlugin {
             .add_systems(PreUpdate, toggle_fullscreen.after(bevy::input::InputSystems))
             .add_systems(Update, preview_menu.before(view::view))
             .add_systems(Update, (crate::map_render::advance_day, apply, view::view, view::sync_blur, resize_menu).chain())
-            // Every UI button prompt (PromptGlyph) shows the connected pad's SDL-labelled glyph.
+            // Every UI button prompt (PromptGlyph) shows the connected pad's SDL-labeled glyph.
             .init_resource::<crate::prompt_glyphs::PromptImages>()
             .add_systems(Update, crate::prompt_glyphs::sync_ui_glyphs.after(view::view))
             .add_systems(PostUpdate, crate::map_render::position_celestial_bodies.before(bevy::transform::TransformSystems::Propagate))
@@ -1069,7 +1069,7 @@ pub(crate) fn interact(
                     let direction = if matches!(hit, Some(view::Hit::Left(_))) { -1 } else { 1 };
                     menu.view.content = true;
                     menu.selected = id;
-                    // A click on a greyed-out stepper is swallowed (the recomp's rule), not a row cycle.
+                    // A click on a grayed-out stepper is swallowed (the recomp's rule), not a row cycle.
                     if view_of(id).is_some_and(|r| r.can_step(direction)) { act = Some(Act::Step(id, direction)); }
                 }
                 Some(view::Hit::Slider(id, x0, x1)) if selectable.contains(&id) => {

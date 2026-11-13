@@ -434,7 +434,7 @@ fn volume_query_bounds_follow_82777e70() {
     let bounds = |primitive, motion| {
         volume_query_bounds(primitive, motion, VOLUME_QUERY_STEP, VOLUME_QUERY_SCALE).unwrap()
     };
-    // At rest: the shape bounds scaled by 1.05 about their centre, no padding.
+    // At rest: the shape bounds scaled by 1.05 about their center, no padding.
     let b = bounds(sphere, VolumeMotion::default());
     close(b.min.y, -0.105);
     close(b.max.x, 0.105);
@@ -508,7 +508,7 @@ fn volume_query_rotation_pad_uses_refined_reciprocal_square_root() {
 
 #[test]
 fn volume_query_shape_bounds_follow_the_retail_bounds_slots() {
-    // Capsule 82AD97A0: centre +- fma(|axis|, half length, radius).
+    // Capsule 82AD97A0: center +- fma(|axis|, half length, radius).
     let axis = Vector3::new(0.6, 0.8, 0.);
     let capsule = ContactPrimitive::Capsule {
         center: Vector3::new(1., 2., 3.),

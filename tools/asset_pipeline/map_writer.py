@@ -53,12 +53,12 @@ def write_textures(output,root,textures,workers=None):
             if name is not None:pending.append(pool.submit(packed_texture,root,name,textures[name]))
 def normalise(a):return a/np.maximum(np.linalg.norm(a,axis=1,keepdims=True),1e-20)
 
-GROUND_HEADROOM=2.5  # clear metres above a spawn surface
-GROUND_RADIUS=25.    # neighbourhood searched for lower ground
+GROUND_HEADROOM=2.5  # clear meters above a spawn surface
+GROUND_RADIUS=25.    # neighborhood searched for lower ground
 GROUND_STEP=1.       # a surface this far above nearby ground is a roof/platform
 GROUND_CANDIDATES=512
 # Only compact districts (skate parks) use ground_spawn. City districts are
-# kilometres wide with collision under the streets, where "lowest surface"
+# kilometers wide with collision under the streets, where "lowest surface"
 # is underground; they keep the original rule.
 GROUND_MAX_EXTENT=500.
 
@@ -84,7 +84,7 @@ def ground_spawn(triangles):
     flat_low=low[flat];flat_high=high[flat]
     for index in order[:GROUND_CANDIDATES]:
         x,y,z=points[index]
-        # Extents, not centres: one large floor triangle can reach the candidate.
+        # Extents, not centers: one large floor triangle can reach the candidate.
         near=((flat_low[:,0]<=x+GROUND_RADIUS)&(flat_high[:,0]>=x-GROUND_RADIUS)
               &(flat_low[:,2]<=z+GROUND_RADIUS)&(flat_high[:,2]>=z-GROUND_RADIUS))
         if flat_low[near,1].min()<y-GROUND_STEP:continue

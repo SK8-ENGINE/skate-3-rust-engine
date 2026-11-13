@@ -164,7 +164,7 @@ pub(crate) struct NpcLineFilter(pub Arc<Vec<[u8; 16]>>);
 pub(crate) struct NpcSkaterIndex(pub BTreeMap<LivingWorldId, Entity>);
 
 /// Looks of the save skater slots 1.. (the career's `cac.json`): a teammate stand-in whose slot has one joins the pool
-/// (`SkaterData::filled_slots`) and wears it, assembled from the customiser's parts. Written by the career.
+/// (`SkaterData::filled_slots`) and wears it, assembled from the customizer's parts. Written by the career.
 #[derive(Resource, Default, Clone, PartialEq)]
 pub(crate) struct SaveSlotLooks(pub BTreeMap<u32, serde_json::Value>);
 
@@ -206,7 +206,7 @@ pub(crate) enum NpcSkaterEvent {
 
 /// The stock clip a replay NPC shows per phase ([data]: names checked against the decoded stock
 /// clip list, `crate::living_world` data-gated test). Riding uses the pro's style like the
-/// customiser (`native_animation_style`).
+/// customizer (`native_animation_style`).
 pub(crate) fn puppet_clip(phase: ReplayPhase, style: &str) -> &'static str {
     match phase {
         ReplayPhase::Rolling => match style {

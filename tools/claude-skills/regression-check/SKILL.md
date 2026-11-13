@@ -55,7 +55,7 @@ Run the staged release exe on a fixed spot and compare with the previous build: 
 <install>\maps\DownTown.skate --mute` for about 60 s with `SKATE_TRACE_ALL=1` (living world branch and later); the
 frame log path is in the stderr `TRACE_ACTIVE` line (`frames.tsv` in the run's trace-all folder; elsewhere use
 `SKATE_FRAME_LOG=<file>`). Compare median / p90 / p99 `frame_ms` of frames 100 and later with
-`optimisation/tools/frame_log_summary.py`. `SYSTEM_TIMING` (on under trace-all) gives a per-system breakdown.
+`optimization/tools/frame_log_summary.py`. `SYSTEM_TIMING` (on under trace-all) gives a per-system breakdown.
 A Chrome trace: `--trace <file.json> --trace-seconds 30` (capture starts at launch: `--trace-delay` is accepted but
 ignored; a 30 s trace is several GB, so write it to a large drive). Tracing slows every frame and hides steady-state
 stalls of 30-70 ms: use it for costs, not for finding those stalls.
@@ -83,7 +83,7 @@ same time (build output timestamps): one overlapping link turned a 3.6 ms median
   tools.test_setup_assets`.
 - Muted smoke run (`bin\skate3rust.exe --assets assets --mute`): the `Game audio: native ...` start lines, no
   `panic`, `ERROR` or missing-file warnings.
-- Fingerprints (section 3d): an audio change must change only the `audio` group; never the customiser.
+- Fingerprints (section 3d): an audio change must change only the `audio` group; never the customizer.
 - Physics must be untouched: audio observation code is observation-only; when in doubt run `check_maps.py`
   (identical results).
 - Sound quality itself is judged by people listening in game (skill `audio-tuning`), never by an agent.
@@ -95,9 +95,9 @@ same time (build output timestamps): one overlapping link turned a 3.6 ms median
 - `llvm-readobj --coff-imports` on the static exe: no `vcruntime140.dll` / `api-ms-win-crt-*`.
 - `--locked` must work (lockfile updated after `[patch]` edits).
 
-## 3b. Performance changes must be behaviour-preserving
-Optimisations that silently change behaviour are regressions. For any speed-up (details: skill `optimisation`):
-1. Capture a behavioural baseline BEFORE the change, for example full `--validate-maps` results per map (collision
+## 3b. Performance changes must be behavior-preserving
+Optimizations that silently change behavior are regressions. For any speed-up (details: skill `optimization`):
+1. Capture a behavioral baseline BEFORE the change, for example full `--validate-maps` results per map (collision
    triangles, support_drop, grounded_ticks, warnings; drop `seconds`/`timings`) to JSON.
 2. Keep the old implementation as a test-only reference and compare old vs new on synthetic edge cases AND on the
    real private data (ignored test with `SKATE3_ASSET_ROOT`).
@@ -105,12 +105,12 @@ Optimisations that silently change behaviour are regressions. For any speed-up (
 4. Watch for hidden state: caches keyed by path go stale (custom difficulty overlays collections at runtime); reset
    caches on every mutation.
 
-Ready-made behavioural comparisons:
+Ready-made behavioral comparisons:
 - Maps: `check_maps.py` (validator results + collision baseline) and `check_spawns.py`.
-- Character customiser: `check_customiser.py --save` BEFORE the change (snapshots receipts of all output files +
+- Character customizer: `check_customiser.py --save` BEFORE the change (snapshots receipts of all output files +
   JSON), then `check_customiser.py` after a fresh setup; set-id-aware, must print IDENTICAL. Needed because a fresh
   setup deletes the previous installation.
-- Parallel customiser stages fall back to serial when a worker fails, so the output still matches but the speed-up
+- Parallel customizer stages fall back to serial when a worker fails, so the output still matches but the speed-up
   is gone. Check the setup log for `Customiser worker N failed`; there should be none.
 - Map conversion: convert all districts with `main`'s tools (`git archive main tools` into a temp folder) and with
   the new tree into the same scratch stage, hash every output (map, irradiance, props) and require IDENTICAL per
@@ -124,7 +124,7 @@ Ready-made behavioural comparisons:
   and `customiser_cache.versions(old_tools)` with the working tree.
 - Asset groups: equivalence pairs `[committed, final]` in `pipeline-equivalence.json` only for groups whose outputs
   are proven identical.
-- Customiser: has NO equivalence mechanism; its fingerprint/stage versions must not change unless outputs really
+- Customizer: has NO equivalence mechanism; its fingerprint/stage versions must not change unless outputs really
   change. `optional_content.py`, `setup_state.py`, `vlt.py`, `environment.py`, `owned_game/**`, `vendor/utt/**`,
   `customis*.py`, `native_roster.py`, `character_glb.py`, `mixamo_to_skate/*.py` are in it: wrap instead of editing
   where possible.

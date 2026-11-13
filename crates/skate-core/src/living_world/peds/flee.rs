@@ -83,7 +83,7 @@ mod tests {
         let p = FleeParams::default();
         // Threat 3 m behind (-z), moving +z at 8 m/s, the ped slightly to its right (+x).
         let d = direction([0.5, 0.0, 0.0], [0.0, 0.0, -3.0], [0.0, 0.0, 8.0], &p);
-        // Side = +x (the ped's side), away mostly +z: blended and not renormalised.
+        // Side = +x (the ped's side), away mostly +z: blended and not renormalized.
         assert!(d[0] > 0.4 && d[1] > 0.4, "{d:?}");
         assert!((d[0] * d[0] + d[1] * d[1]).sqrt() < 1.0);
         // Behind the threat's motion: straight away.

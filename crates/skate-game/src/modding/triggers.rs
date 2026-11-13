@@ -146,7 +146,7 @@ pub(super) fn set_teleporter(world: &mut World, owner: &str, key: String, option
             matrix: [[c, 0., -s, 0.], [0., 1., 0., 0.], [s, 0., c, 0.], [e.position[0], e.position[1], e.position[2], 1.]],
             world: e.world.clone() }
     }).collect();
-    // The icon: a `ribbon_indicator` key, upright at the mod's point or the volume's centre.
+    // The icon: a `ribbon_indicator` key, upright at the mod's point or the volume's center.
     let indicator = options.indicator.clone().map(|key| {
         let at = options.indicator_position.or_else(|| volumes_center(world, &volume)).unwrap_or_default();
         crate::visual_indicators::Placement { key, locator: String::new(),

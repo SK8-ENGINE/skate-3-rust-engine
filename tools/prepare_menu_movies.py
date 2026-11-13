@@ -90,7 +90,7 @@ MENU_ROOTS = (
     # The sign-up poster and lot list (FE 0x1B, template 23; research b932, b935).
     'source/screens/challenge/challenge_signup',
     # The pause menu's Options > Music Player (template 31 MusicPlayer, host object MusicPlayer; research b1015). Optional for
-    # the engine like the action overlay: a set without it keeps the row greyed, so the set version stays.
+    # the engine like the action overlay: a set without it keeps the row grayed, so the set version stays.
     'source/screens/musicplayer/musicplayertest',
     'source/screens/main3dhud',
     'source/helper/screenmanager',
@@ -145,7 +145,7 @@ def _contained(root, relative):
 
 
 # The world records' map picture (`Sk8::FE::tMapInfo` word 0 = the name's offset in skatercollections.bin, research
-# b257 / b259): resolved here, in the menu stage, so the vault converter (core / living world / customiser fingerprints)
+# b257 / b259): resolved here, in the menu stage, so the vault converter (core / living world / customizer fingerprints)
 # stays unchanged.
 WORLD_MAP_INFO = 'Hash_20BBC594CD2FAEF8'
 

@@ -49,7 +49,7 @@ Setup (`tools/asset_pipeline/park_layout.py`, wired into the maps group in `inst
 
 Engine (`crates/skate-game/src/park_layout.rs`):
 - The Challenge Map plan (`challenge_map.rs`) resolves the destination's world to a layout; another layout on the
-  current map is a map load with `map_library::Entry::world` set (the request stays serialisable).
+  current map is a map load with `map_library::Entry::world` set (the request stays serializable).
 - The map loader (`map_transition.rs`) marks the loaded map with the layout (an in-memory `PARK` extension, never in a
   file); `CurrentMap::layout` remembers it.
 - Physics (`physics.rs`): `skate_world::collision_world_with` appends the posed piece triangles (retail shapes with
@@ -73,8 +73,8 @@ gets close a small dialog on screen asks whether to teleport):
 - The teleporter pieces have no model. The disc vault class `Hash_D01B99210BA7323C` gives each one a channel 0..3
   and a role, 0 start / 1 end (field `Hash_77B8CA7AC65C8504`) [data]. Per channel, retail takes the first placed
   start and end piece (8287B918 / 828687C0) and builds an ordinary teleport challenge (8286D6E8: title
-  `ID_COMMON_TELEPORT`) with a box entry volume of half extents 2 (8286CFF8) around the start piece's world centre,
-  arriving at the end piece's world centre with its axes [code].
+  `ID_COMMON_TELEPORT`) with a box entry volume of half extents 2 (8286CFF8) around the start piece's world center,
+  arriving at the end piece's world center with its axes [code].
 - `park_layout.layout_teleporters` writes those as `private/park-layouts/teleporters.json` (the `teleporters.json`
   record shape, plus `layout`); `teleporters.rs` loads them beside the disc's and arms one only while its layout is
   loaded. They use the ported prompt and confirm (doc 38 "Teleporters"). Zen Plaza - Full: one, channel 0, entry at
@@ -101,19 +101,19 @@ Movable pieces (block 2; research b435):
 Park shading (research b433, b439 to b443):
 - The pieces' materials use Skate 3's own programs, families 50 / 51 / 52 for `environmentpark.diffuse` / `.decal` /
   `.alphatest` (`retail_material.py`; `retail_world.wgsl` branch `fam >= 50u && fam <= 52u`, ALU slots cited). Diffuse:
-  albedo = diffuse squared times the piece's tint; the tangent normal is not normalised before the frame; the light is
-  the tangent-frame pseudo light (kd, as dynamicobject's) times min(lerp(dynamic shadow colour, 1, visibility),
-  lerp(exponential shadow colour, 1, saturate(10 N.L) x visibility), projected lightmap), with no direct N.L,
+  albedo = diffuse squared times the piece's tint; the tangent normal is not normalized before the frame; the light is
+  the tangent-frame pseudo light (kd, as dynamicobject's) times min(lerp(dynamic shadow color, 1, visibility),
+  lerp(exponential shadow color, 1, saturate(10 N.L) x visibility), projected lightmap), with no direct N.L,
   counter light or ambient; the specular reflects the world's literal light, unshadowed; fog scale m_params.y. Decal:
   the same, with the decal mixed in by its alpha before the tint and the detail normal. Alphatest: dynamicobject's
   shape with the occlusion in place of its shadow; output alpha = the raw diffuse alpha, tested at 30 / 255
   (`GREATEREQUAL`, blend state 1, b441), two-sided.
 - Data: the tint per piece (layout record, white default; b439: the renderer's slots start white and take the
-  record's), the shadow colours per park world (the world row's two Vector4 fields when its park bool is set; other
+  record's), the shadow colors per park world (the world row's two Vector4 fields when its park bool is set; other
   worlds (0.2, 0.2, 0.2), the retail code constant; written into each layout's sidecar as `shadow_colours`), and the
   park materials' `m_params` rows (vault class `material_environmentpark`, now in `render-parameters.json`; an older
   install falls back to the retail fog scale 1). The engine gives each piece a material with its `ParkDraw` (tint +
-  colours), one per distinct value (at most 97 per layout).
+  colors), one per distinct value (at most 97 per layout).
 - Projected lightmap (b439, b440, b444): each park world row names a lightmap (`Hash_AA9212BDE5A603B4`) and its
   x0, x1, z0, z1 bounds; the textures are 512 x 512 DXT1 RX2s (disc `miscboot.big` `data/content/textures/`: megapark,
   startpark, downtown, industrial; the Create pack: backlot, downtownlightmapnight; the San Van pack: zenplaza).
@@ -198,7 +198,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
 - **Retail [code, b478, medium-high]:** the SkateParkView (`world+0xBC` slot +0x20, vtable `82310560`) fuses all
   static pieces in its "fuserJob" (`827762D0`, build `827765C0` -> `828728B8`): per piece `82872D70` copies only the
   posed corners, piece index and surface of each triangle (the edge-code bytes are skipped), and `82876188` merges
-  vertices, removes zero-area triangles (`82AC2010`) and pairs neighbours over the whole set. Open: the exact
+  vertices, removes zero-area triangles (`82AC2010`) and pairs neighbors over the whole set. Open: the exact
   edge-writing function and which builder default (0.01 or 0.1) is the vertex merge.
 - **Change:** `skate_world.rs` `portable_parts_fused`: the posed pieces' vertices merge across the whole set within
   `Pieces::weld` (data: the layout sidecar's `fuse_weld`, default 0.01 m), every edge code is rebuilt over the fused
@@ -209,7 +209,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
   runs load "Stadium - Full" (450 pieces, 197832 triangles) and "Back Lot Park - Full" (453, 188784). skate-game 882.
   Not play-tested: whether the ramp and BackLot still catch.
 
-## Back-to-back faces between pieces are removed; edges pair with the best neighbour (2026-10-21, USER-ASKS 221)
+## Back-to-back faces between pieces are removed; edges pair with the best neighbor (2026-10-21, USER-ASKS 221)
 
 - **Problem (laptop session 2026-10-21 21:38, the user):** the Skate.Park maps still have many physics and collision
   issues, both at seams between objects and around objects in general. The trace (`tools/dev-bench/park-catches.py`
@@ -224,7 +224,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
   back to back; with the same third vertex both are marked 0x80 (removed), otherwise their quads (`82875438`: the same
   piece's triangle across the next edge) are compared and all four removed when they cover the same corners. The score
   `82AC00A0`: d = n1.n2; convex or flat (edge . (n1 x n2) > -1e-6, `822F8ABC`) -> max(d, -1); concave -> min(2 - d, 3)
-  (constants `8216DEE0` -1, `82060C50` 2, `82063B08` 3). Pairing `82875B20` / `82875CA8`: per edge the neighbour with
+  (constants `8216DEE0` -1, `82060C50` 2, `82063B08` 3). Pairing `82875B20` / `82875CA8`: per edge the neighbor with
   the highest score wins, a better pair displacing a worse one (unpaired edges score 1.0, `8231A844`).
 - **Change:** `skate_world.rs` `fused_edge_features` (the fused park path only; disc maps and props keep their path):
   zero-area drop, the back-to-back removal (pairs and quads), best-score pairing, normals from the merged corners (as
@@ -264,7 +264,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
     fused set reaches the world.
   - Asset-gated `ignore_fuser_counts_per_layout`: 16 / 8 / 9 / 13 in backlot_full / Downtown_Fullpark / ZenPlaza_Full
     / Nightpark, 0 in MegaPark and Starter.
-- **Not play-tested.** Skating through a hedge or bush in these layouts is now retail behaviour.
+- **Not play-tested.** Skating through a hedge or bush in these layouts is now retail behavior.
 - **Props:** retail props still touch these pieces; ported 2026-10-22, see "Props and IgnoreFuser pieces".
 
 ## Props and IgnoreFuser pieces
@@ -309,7 +309,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
   with cosine 1 is rejected (`ground.rs` thresholds, research b487).
 - **Retail [code, research b487, writer verified in the recomp]:** after pairing, `82AC2438` writes each edge
   byte with `82AC2390`: the convex bit 0x20 only for a score below 1.0 (`8231A844`), 0x1A above the concave limit,
-  0x9A (unmatched) with no neighbour. An unpaired edge keeps score 1.0, so retail writes it unmatched, not convex.
+  0x9A (unmatched) with no neighbor. An unpaired edge keeps score 1.0, so retail writes it unmatched, not convex.
 - **Change:** `skate_world.rs` `fused_edge_features`: unpaired edges of the fused set get cosine 1 and no convex bit.
   Fused park path only; disc maps and props keep theirs.
 - **Diagnostics (ask 237):** the log now has `SKATE_SPEED_DROP` / `SKATE_SPEED_GAIN actor=player from= to= over_ms= at=
@@ -331,7 +331,7 @@ NOT RETAIL YET: the lightmap's sun direction L (see "Park shading", b444).
 constant below in Ghidra and the recomp asm.
 
 - **Problem:** our fused park path stored each paired edge's full cosine n1 . n2 and set vertex-disable bits only for
-  all-coplanar vertices. Retail writes quantised edge bytes and has a second vertex rule. So our wheels took edge
+  all-coplanar vertices. Retail writes quantized edge bytes and has a second vertex rule. So our wheels took edge
   contacts over about twice the angle retail allows on every park seam, and kept vertices retail disables.
 - **Retail [code]:**
   - Angle code `82AC0140(score)`: x = score, or 2 - score above 1.0 (`8231A844` 1.0, `82060C50` 2.0).
@@ -339,7 +339,7 @@ constant below in Ghidra and the recomp asm.
     (`82094178` -2.0), below 0 -> 0, 27 or more -> 26. Decoded as a disc map's byte, 1 - pi^2 / (8 << code) is about
     cos(theta / 2) at the bin edge: about the half dihedral angle.
   - Edge byte `82AC2390`: the angle code; OR 0x20 (convex) for a score below 1.0; OR 0x1A for a score above
-    2 + builder tolerance (-0.2, `8208EA7C`), which decodes to cosine 1 (sharp concave); OR 0x9A with no neighbour.
+    2 + builder tolerance (-0.2, `8208EA7C`), which decodes to cosine 1 (sharp concave); OR 0x9A with no neighbor.
   - Vertex bits `82875200`: per vertex V with a kept face, T0 = its first kept face. V is disabled (`828749C0` ORs
     0x40 into V's corner byte of every kept face at V) when either test holds:
     - `828746A8`: every later face is coplanar with T0, abs(n . n_ref - 1) <= 0.01 (`820D71E8`).
@@ -357,7 +357,7 @@ constant below in Ghidra and the recomp asm.
   object. The values are logged in `SKATE_PARK_FUSE`.
 - **Multiplayer:** pure functions of the positions and the triangle order, so every peer builds the same bytes.
 - **Tests:** `fused_edge_bytes_follow_retail` (open edge 0x9A, 90 degree convex 0x22 with cosine 0.6916, concave 0x1B
-  with cosine 1, 14 degrees -> code 7) and `fused_vertex_bits_follow_retail` (flat centre and valley floor disabled,
+  with cosine 1, 14 degrees -> code 7) and `fused_vertex_bits_follow_retail` (flat center and valley floor disabled,
   pyramid apex kept). Regression pass 2026-10-22: skate-game 892 passed; asset-gated `park_layout_seam_audit`,
   `park_layout_render_vs_collision`, `ignore_fuser_counts_per_layout` pass; `backlot_plaza_pad_seam_is_flat_after_fusing`
   now checks only that the seam stays flat (an open edge and a flat pair both decode to cosine 1, so its old "open"
@@ -443,7 +443,7 @@ you lose speed and/or get bumped up in the air sometimes"), research b502 / b503
 - **Retail [trace]:** hook WHLC (recomp `src/research/hooks_wheelc.cpp`) on a scripted roll into the toe at x 223.53
   (recomp trace "toe", 2327 lines, 0 malformed): the same toe edge is NOT convex with cosine 0.9993976
   (code 11) and its edge contacts are rejected; only face contacts are taken. Table research b505.
-- **Retail [code, b505]:** the fuser finalise 82876188 runs 82874248 between the pairing and the byte writer. For each
+- **Retail [code, b505]:** the fuser finalize 82876188 runs 82874248 between the pairing and the byte writer. For each
   ground plane (normal, d, optional box; at most 6) and each live triangle facing into it (normal component difference
   at most job +8) with v1 on it (|n . v1 - d| at most job +4), every paired edge with a score below job +12 calls
   82874070: the partner's score becomes the edge score of (plane normal, partner normal, edge) and the triangle adds
@@ -466,7 +466,7 @@ you lose speed and/or get bumped up in the air sometimes"), research b502 / b503
 
 2026-10-22, research b507 (research b507; verified the constant 0.005 at 82099920).
 
-- **Retail [code]:** the fuser finalise 82876188 runs 82873EA0 after the ground plane pass and before the edge bytes:
+- **Retail [code]:** the fuser finalize 82876188 runs 82873EA0 after the ground plane pass and before the edge bytes:
   the same idea for pieces that stand on another piece's flat top above the ground. Up-facing flat triangles
   (|1 - n.y| at most job +8, 0.01) are the floors. Each down-facing triangle (|-1 - n.y| at most 0.01) whose v0 is off
   the ground (|v0.y| above job +4, 0.05) takes each paired edge with a score below -job +12 (-0.1, a sharp convex
@@ -496,7 +496,7 @@ you lose speed and/or get bumped up in the air sometimes"), research b502 / b503
   rails to the static rail provider as one asset per piece; the renderer spawns the pieces as `ParkPiece` entities.
   A layout change is a map load (retail re-applies a layout in place; the outcome is the same).
 - Moddable: a mod ships its own `<layout>.skate` / `.json` and `worlds.json` row; the world row is part of the
-  serialisable map request (`map_library::Entry::world`).
+  serializable map request (`map_library::Entry::world`).
 
 ## Code reference: skate_world.rs
 
@@ -518,14 +518,14 @@ you lose speed and/or get bumped up in the air sometimes"), research b502 / b503
   `reconstruct = false` keeps the default features (fully native maps decode theirs per triangle).
 - `fused_edge_features` (b478): vertices merge within the weld; triangles the merge collapses or flattens are dropped
   (82AC2010); faces of different pieces lying back to back (abutting side walls under their tops) are removed in
-  pairs or as two quads (828755B8 with 82875438); each edge pairs with the neighbour of the highest score, a better pair
+  pairs or as two quads (828755B8 with 82875438); each edge pairs with the neighbor of the highest score, a better pair
   displacing a worse one (82875B20 / 82875CA8); then the edge bytes and vertex bits of the section above.
 - `portable_parts_fused`: `fuse` merges vertices across the whole set and rebuilds every edge code, ignoring the native
   ones (surfaces kept), as retail's 82872D70 copies only the corners, piece and surface of each triangle; collapsed
   triangles are dropped and the split ranges follow the kept triangles.
 - `add_instance` (mid-game prop, e.g. a released hand prop or a mod's): template-space triangles with scale folded in,
   baked like `rebake`; edge features from the instance's own triangles (load-time instances also pair edges with
-  touching neighbours); a retired slot with the same triangle count is reused, so repeated spawns do not grow the
+  touching neighbors); a retired slot with the same triangle count is reused, so repeated spawns do not grow the
   world.
 - DMO template collision (`native-props/<map>.json` `collision`, setup `dynamic_props.template_collision`): the
   template's ClusteredMesh triangles in model space with their RW edge codes and surface ids (research

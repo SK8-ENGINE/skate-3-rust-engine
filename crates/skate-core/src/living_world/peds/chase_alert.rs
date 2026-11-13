@@ -50,9 +50,9 @@ pub struct AlertSettings {
     pub near: f32,
     pub far: f32,
     pub far_scale: f32,
-    /// On-screen box: inside `margin` of half the screen each way round the centre (manager +0x90 = 0.85).
+    /// On-screen box: inside `margin` of half the screen each way round the center (manager +0x90 = 0.85).
     pub margin: f32,
-    /// Edge ring: `margin * width * 0.5 + ring_extra` px from the centre (+20).
+    /// Edge ring: `margin * width * 0.5 + ring_extra` px from the center (+20).
     pub ring_extra: f32,
 }
 

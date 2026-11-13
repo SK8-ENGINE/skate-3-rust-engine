@@ -362,6 +362,11 @@ impl GamePhysics {
             self.animation_profile.wheel_hardness = wheel.clamp(0.0, 1.0);
         }
     }
+    /// The pin bit (actor +0x770 bit 26, set by AI.PinAI / cMsgPinPlayer): 82593640 copies it into the physics
+    /// packet's force-brake byte (+0x2A2C), which brakes a nearly stopped skater riding on 3+ wheels.
+    pub(crate) fn set_pinned(&mut self, pinned: bool) {
+        self.animation_profile.force_braking = pinned;
+    }
     pub(crate) fn set_difficulty(&mut self, difficulty: crate::difficulty::Difficulty) {
         // Actor publication carries this selector into the next physical packet.
         // Keep the board, active trick, equipment preferences and controller history.
@@ -993,7 +998,7 @@ impl GamePhysics {
         context.board.part_transforms()[skate_core::physics::board::BodyId::Deck.index()]
     }
 
-    /// The deck rigid body's position (its centre of mass, retail `Reckoning+144`) in a context.
+    /// The deck rigid body's position (its center of mass, retail `Reckoning+144`) in a context.
     pub(crate) fn context_deck_position(context: &SkaterPhysicsContext) -> [f32; 3] {
         let p = context.board.bodies()[skate_core::physics::board::BodyId::Deck.index()].rates.position;
         [p.x, p.y, p.z]

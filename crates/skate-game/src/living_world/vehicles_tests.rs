@@ -1,5 +1,5 @@
 //! Headless, seeded tests of the V3 traffic cars: spawn records become car entities, the cars
-//! drive their lanes through a signalled junction, publish `TrafficAudio`, leave on despawn and
+//! drive their lanes through a signaled junction, publish `TrafficAudio`, leave on despawn and
 //! move the same at any engine rate. No window, no assets (synthetic road, synthetic models).
 
 use super::vehicles::*;
@@ -38,7 +38,7 @@ fn seg(id: u64, from: (u64, u8), to: (u64, u8), a: [f32; 3], b: [f32; 3]) -> Seg
     }
 }
 
-/// A straight road along +z through a signalled junction at the origin: approach 0x1 (end 0)
+/// A straight road along +z through a signaled junction at the origin: approach 0x1 (end 0)
 /// -> connector 0 -> exit 0x2 (end 2).
 fn road() -> RoadNetwork {
     let mut approaches: [Option<EndInput>; 4] = Default::default();
@@ -334,7 +334,7 @@ fn living_world_traffic_material_uniform_is_the_retail_constant_set() {
     assert_eq!(p.rows[4], Vec4::new(0.0, 0.0, 0.0, 0.75));
     assert_eq!(p.rows[8], Vec4::ZERO, "rows past the export's are zero");
     assert_eq!(p.light, light);
-    // A mod gain scales both colours, not their alpha.
+    // A mod gain scales both colors, not their alpha.
     let g = params(Program::Chassis, &rows, [0.5, 0.25, 0.0, 1.0], [0.1, 0.1, 0.1, 1.0], 2.0, light, false, false);
     assert_eq!(g.blue, Vec4::new(1.0, 0.5, 0.0, 1.0));
     assert_eq!(g.options.x, 0.0);

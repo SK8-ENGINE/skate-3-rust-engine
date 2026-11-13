@@ -23,7 +23,7 @@ fn car(id: u64, position: Vec3, forward: Vec3, speed: f32) -> Obstacle {
 #[test]
 fn standing_ped_close_ahead_stops_the_skater() {
     let s = AvoidSettings::default();
-    // Off-centre (0.5 m right) it blocks [-0.3, 1.3] of the path and one gap stays: retail steers into it
+    // Off-center (0.5 m right) it blocks [-0.3, 1.3] of the path and one gap stays: retail steers into it
     // (`+6006` = free gap count != 0, b112), no speed cap.
     let one = evaluate(&s, &mut AvoidState::default(), &me(4.0), &[ped(7, [0.5, 0.0, 2.0], [0.0; 3])], &straight);
     assert_eq!(one.mode, AvoidMode::Steer, "{one:?}");
@@ -118,7 +118,7 @@ fn ped_in_the_middle_of_the_path_splits_it_and_the_skater_steers() {
     let s = AvoidSettings::default();
     let out = evaluate(&s, &mut AvoidState::default(), &me(5.0), &[ped(5, [0.0, 0.0, 6.0], [0.5, 0.0, 0.0])], &straight);
     assert_eq!(out.mode, AvoidMode::Steer, "{out:?}");
-    // Two equal gaps, the skater on the line: the first nearest one (left, centre -0.9).
+    // Two equal gaps, the skater on the line: the first nearest one (left, center -0.9).
     assert!((out.lateral + 0.9).abs() < 1e-4, "{}", out.lateral);
     let p = out.entries[0].path.unwrap();
     let q = steer_point(&p, out.lateral);

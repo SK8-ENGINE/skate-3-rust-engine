@@ -120,7 +120,7 @@ impl DurationFormat {
     }
 }
 
-/// The HUD timer element's text and colour flag for `ticks` left (retail 82663940, research b845): the time rounded
+/// The HUD timer element's text and color flag for `ticks` left (retail 82663940, research b845): the time rounded
 /// up to whole seconds, at least 0, in the retail duration format; the flag is 0 (red) under [`LOW_TIME_SECONDS`].
 pub fn hud_text(ticks: i32) -> (String, i32) {
     let seconds = ticks as f32 / TICKS_PER_SECOND;

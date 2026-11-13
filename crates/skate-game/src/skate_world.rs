@@ -922,7 +922,7 @@ fn welded_edge_features(
 }
 
 /// [`welded_edge_features`] with `merge` = a distance weld (a vertex joins the first earlier vertex within `merge`
-/// metres, in triangle order, so the result is deterministic): the fused park pieces (b478). A triangle whose corners
+/// meters, in triangle order, so the result is deterministic): the fused park pieces (b478). A triangle whose corners
 /// merge together has repeated vertex ids; its edges pair with nothing and the caller drops it.
 fn welded_edge_features_within(
     triangles: &[[[f32; 3]; 3]],

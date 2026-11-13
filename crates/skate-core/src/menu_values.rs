@@ -8,7 +8,7 @@
 //! arithmetic runs in f32 with a fused multiply-add like the console's `fmadds`.
 use crate::menus::SettingValue;
 
-/// A Left / Right press on a settings row (serialisable by name).
+/// A Left / Right press on a settings row (serializable by name).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Direction {
     Left,
@@ -126,7 +126,7 @@ pub fn number(value: &SettingValue) -> f64 {
 }
 
 /// Retail's rule for a Game Settings row, by string id. `None` = the row is not a value
-/// row or its rule is not decoded yet (it stays greyed until something binds a rule).
+/// row or its rule is not decoded yet (it stays grayed until something binds a rule).
 ///
 /// Labels and offsets ([code] sub_8260C258 / sub_8260D968, settings object
 /// `[[0x83067060] + 28]`): 11 Camera Angle +188 (0 LOW, 1 HIGH); 12 / 13 offboard axis
@@ -160,7 +160,7 @@ pub fn retail_rule(id: &str) -> Option<ValueRule> {
         | "ID_GAMESETTINGS_SKATEFEED_STATUS_MESSAGE" => ValueRule::toggle(OFF, ON),
         "ID_GAMESETTINGS_UNITS_TOGGLE" => ValueRule::toggle("ID_GAMESETTINGS_UNITS_METRIC", "ID_GAMESETTINGS_UNITS_IMPERIAL"),
         // Labels: sub_825E7648 maps 0..4 (values above 4 show nothing); the rule cycles 0..2,
-        // Motorized (3) and the test slot (4, our Custom) are only labelled.
+        // Motorized (3) and the test slot (4, our Custom) are only labeled.
         "ID_GAMESETTINGS_DIFFICULTY_OPTIONS" => ValueRule::Cycle {
             count: 3,
             labels: ["EASY", "NORMAL", "HARDCORE", "MOTORIZED", "TEST"].map(|l| format!("ID_GAMESETTINGS_DIFFICULTY_{l}")).to_vec(),

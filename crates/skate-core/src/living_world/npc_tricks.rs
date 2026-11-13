@@ -6,7 +6,7 @@ use crate::scoring::catalog;
 use super::replay::{node_events, node_flags, ReplayLine};
 use super::rng;
 
-/// Behaviour mode of the trick choice (retail behaviour context +60).
+/// Behavior mode of the trick choice (retail behavior context +60).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TrickMode {
     /// Mode 0: always the recorded trick.
@@ -54,7 +54,7 @@ impl Default for TrickParams {
 }
 
 /// A character's trick tables (`ai_skater_profiles`: regular flips + ollie, nollie flips +
-/// nollie), raw weights as on the disc; [`pick_weighted`] normalises.
+/// nollie), raw weights as on the disc; [`pick_weighted`] normalizes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TrickProfile {
     pub regular: Vec<(i16, f32)>,
@@ -127,7 +127,7 @@ pub fn gate(line: &ReplayLine, slot: u32, recorded: i16, params: TrickParams) ->
     true
 }
 
-/// [code] `sub_8245FE58` over a table normalised like `sub_824720C8`: the first entry with
+/// [code] `sub_8245FE58` over a table normalized like `sub_824720C8`: the first entry with
 /// `u < running sum`, else entry 0; `None` for an empty table or one without positive weight.
 pub fn pick_weighted(table: &[(i16, f32)], u: f32) -> Option<i16> {
     let total: f32 = table.iter().map(|e| e.1.max(0.0)).sum();

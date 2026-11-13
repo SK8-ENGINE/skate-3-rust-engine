@@ -149,7 +149,7 @@ flip, and its target is the whole recorded skater frame, not a per-node fold aga
   `target_skater` (slerp of the recorded skater frames, `slerp` with shortest-arc sign; the nlerp threshold 0.9995 is
   ours, retail's is not decoded), turned 180 deg (`turn_about_up`) while `LineCursor::flip`. The cursor latches
   `flip` with `flip_test` (retail's dot test) at spawn against `node_world_frame` (an air spawn as retail; a riding
-  spawn as a labelled stand-in, retail holds 0 until the first takeoff) and at every takeoff (`node_airborne` rising:
+  spawn as a labeled stand-in, retail holds 0 until the first takeoff) and at every takeoff (`node_airborne` rising:
   `+928` is the airborne byte `+438`, b354) against the drawn skater of the previous frame, and holds it across
   landings, branches and chains. `airborne` is the edge detector. (Until 2026-10-19 it latched on landing and on
   getting back on the board, from a wrong "riding" reading of `+438`.) Both
@@ -189,7 +189,7 @@ flip, and its target is the whole recorded skater frame, not a per-node fold aga
   | `per_node` + `keep_facing` (fix 16, mod option) | 16,026 | 3 |
   | `riding_entry` (retail, mod option) | 84,776 | 128 |
 
-  The `per_node` and fix 16 numbers equal the fix 23 numbers above (behaviour unchanged by default). Under the retail
+  The `per_node` and fix 16 numbers equal the fix 23 numbers above (behavior unchanged by default). Under the retail
   rule the flip was set at spawn on 19 of 212 rides and changed 2 times later. The counts are reported, not tuned.
 
 **Open questions.**
@@ -257,7 +257,7 @@ draws those stretches riding fakie. The open question was what sets the AI skate
   `skater_clips["fakie_channel"]` (the overlaid stock tree; a tree that does not build is left out).
 - Multiplayer: the bit, its clocks and its change frames are plain cursor fields, a pure function of the lines, the
   spawn, the branch records and the tuning; a mirroring client steps the same cursor and gets the same bits (no
-  serialisation added; a snapshot would carry them as plain values).
+  serialization added; a snapshot would carry them as plain values).
 
 **Files.** `crates/skate-core/src/living_world/replay.rs`, `replay_tests.rs`, `crates/skate-core/src/animation/riding_fakie.rs`;
 `crates/skate-game/src/living_world/npc_skaters.rs`, `npc_tests.rs`, `crates/skate-game/src/graph_host/motion.rs`,
@@ -315,14 +315,14 @@ are drawn as recorded.
   with the `ai_skater` tunables `DD8843F793462295` = 2.0 deg and `281F55D7BB965ADC` = 10.0 deg
   (`skater_profiles.json`, `ai_skater.default`). It then writes that one value through `sub_82471818` (a hashed
   name-to-slot lookup) into three input channels of the character: `0x830BFD74`, `0x830BE600`, `0x830BE1E0`. Their
-  names come from the static initialisers `sub_82F84BE0` / `sub_82F84A30` / `sub_82F84BC8`: `Turn` (`0x820DB088`),
+  names come from the static initializers `sub_82F84BE0` / `sub_82F84A30` / `sub_82F84BC8`: `Turn` (`0x820DB088`),
   `BodySpin` (`0x820DAF88`) and `KickTurn` (`0x820DB07C`).
 - So the AI drives the same channels as the player's stick (`Turn` is the intention of `sub_825999F0`,
   `skate_core::input::steering_intentions`). On the ground the body yaw follows from steering tilt `sub_82D92440`
   (`skate_core::riding::steering::calculate_tilt`), truck targets `sub_82C040F0` and `SetTruckDriveFrames`
   `sub_82C0B9C0` (`skate_core::physics::truck_frames`), and the rigid-body wheel solve. There is no turn rate or yaw
   response constant on the AI side to port into the replay puppet; the rate is whatever the board physics produces.
-- Decision (2026-10-08): no fitted turn rate for the puppet. The 0.2 s switch blend stays, labelled NOT RETAIL
+- Decision (2026-10-08): no fitted turn rate for the puppet. The 0.2 s switch blend stays, labeled NOT RETAIL
   YET in `ChainConfig::blend_seconds`. The faithful fix is the simulated NPC tier (PR #52 checklist item), where the
   AI steer drives the ported riding physics.
 
@@ -354,10 +354,10 @@ Next step: trace (recomp hook on `sub_82590B50`) the index passed for spawned AI
 it points at; the table is filled at runtime, so this needs a recomp run. Until then every NPC keeps the default
 goofy stance (left / right only).
 
-**Change.** Documentation and the `ChainConfig::blend_seconds` NOT RETAIL YET note only; no behaviour change, so the
+**Change.** Documentation and the `ChainConfig::blend_seconds` NOT RETAIL YET note only; no behavior change, so the
 counts above are unchanged (riding_entry: 128 spins after a switch, per_node 29, keep_facing 3).
 
-**Open questions.** The AI pro CAS index; whether a simulated-tier NPC reproduces retail's switch behaviour (it should,
+**Open questions.** The AI pro CAS index; whether a simulated-tier NPC reproduces retail's switch behavior (it should,
 since the steer and the physics are both ported); `+930` / `+931` gating of `sub_82471008`.
 
 ### NPC skater natural stance (port, 2026-10-08)
@@ -391,7 +391,7 @@ Industrial Ghetto Spot, then 13 Downtown, eight University and nine more Industr
 **Change.**
 - `skate_core::living_world::stance`: the table as our own data file `npc_natural_stance.tsv` (record name, record id,
   regular / goofy / unknown, measured / inferred / unseen; measured values, no game records), `resolve` (mod override by
-  record id or record name, then the table, then the default goofy = the old behaviour).
+  record id or record name, then the table, then the default goofy = the old behavior).
 - `NpcSkater::stance`: set once at spawn from the character key's record (`skater_profiles.json` `recipe`, e.g.
   `deerman` -> `deerman_of_darkwoods`). A function of the spawn record, so a client derives the host's value.
 - Puppet (`puppet_pose_in_stance`): goofy commands unchanged; regular closes the layered pose and the fakie channel tree
@@ -425,7 +425,7 @@ within 1 mm; after the root turn the front truck is where the goofy one is and t
   bit 26 (ryan_smith) is on most University lines where bit 51 (the shared index of andrew_reynolds, lucas_puig,
   michael_burnette, ray_barbee, teammates) is not, which is where ryan_smith first spawned (Campus Entrance to Peterson
   Pavilion); bits 17 (darren_navarette), 24 (colin_mckay) and 51 are set on the same lines everywhere, so for those
-  there is no favoured spot and only more idle time helps. Untried: skate.Park, DLC areas, Slappy's Car Lot.
+  there is no favored spot and only more idle time helps. Untried: skate.Park, DLC areas, Slappy's Car Lot.
 - Switch / mirrored toggles from trick clip attributes: ported, see the next section.
 
 ### NPC skater trick-clip stance toggles (port, 2026-10-08)
@@ -525,7 +525,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/sta
 
 NPC skater natural stance (regular / goofy), set once at spawn from the character record.
 
-Retail [code] (doc 26, "NPC skater natural stance"): every NPC skater spawn refills its CAS slot from the skater's character record (`GetCACSettings` `82590B50`, 168-byte entries at `[0x83067060 + 8]`); the actor ctor (`82590DC0`) reads `goofy = (byte +120 == 0)` and passes it to `Initialize82B97E38`, which stores it at character +228 (read back by virtual +128 `82B97168` and the Lua bindings `GetIfSkaterIsRegularStance` `8284B910` / `IsRegular`). For a regular skater the same initialiser selects the orientation and mirror bits (`0xC000_0000` of the animation flags), so every bind pose adds `BOARD_BACKWARDS` and mirrors (mode 2); a goofy skater draws the stock rig as authored. The player's `SkaterAnimation::set_customisation` does the same.
+Retail [code] (doc 26, "NPC skater natural stance"): every NPC skater spawn refills its CAS slot from the skater's character record (`GetCACSettings` `82590B50`, 168-byte entries at `[0x83067060 + 8]`); the actor ctor (`82590DC0`) reads `goofy = (byte +120 == 0)` and passes it to `Initialize82B97E38`, which stores it at character +228 (read back by virtual +128 `82B97168` and the Lua bindings `GetIfSkaterIsRegularStance` `8284B910` / `IsRegular`). For a regular skater the same initializer selects the orientation and mirror bits (`0xC000_0000` of the animation flags), so every bind pose adds `BOARD_BACKWARDS` and mirrors (mode 2); a goofy skater draws the stock rig as authored. The player's `SkaterAnimation::set_customisation` does the same.
 
 [data]: the record class (91BCA6693EFC9AA7) is not in our setup export, so the values come from our own measurement table [`RETAIL_TABLE`] (`npc_natural_stance.tsv`: record name, record id, stance, measured / inferred / unseen). A record the table does not know keeps the engine default, goofy (the stock rig, what every NPC drew before this port).
 

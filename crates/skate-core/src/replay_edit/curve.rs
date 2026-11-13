@@ -57,7 +57,7 @@ pub fn sample(keys: &[Key], t: f32, stepped: bool) -> Option<f32> {
 }
 
 /// The tangent at key `i` for the segment of length `dc` and step `d`: linear unless the key is cubic; cubic across
-/// a soft key blends in the neighbour segment (before the key when `incoming`, after it otherwise), Bessel style.
+/// a soft key blends in the neighbor segment (before the key when `incoming`, after it otherwise), Bessel style.
 fn tangent(keys: &[Key], i: usize, d: f32, dc: f32, incoming: bool) -> f32 {
     let key = &keys[i];
     if !key.cubic {
@@ -69,7 +69,7 @@ fn tangent(keys: &[Key], i: usize, d: f32, dc: f32, incoming: bool) -> f32 {
     let neighbour = if incoming { keys.get(i + 1).map(|n| (n.value_in - key.value_out, n.at - key.at)) } else { i.checked_sub(1).map(|p| (key.value_in - keys[p].value_out, key.at - keys[p].at)) };
     let m = match neighbour {
         Some((dn_value, dn)) if dn > EPSILON => {
-            // The neighbour's step scaled to this segment's parameter length.
+            // The neighbor's step scaled to this segment's parameter length.
             let dn_scaled = dn_value * dc / dn;
             d * dn / (dn + dc) + dn_scaled * dc / (dn + dc)
         }

@@ -11,7 +11,7 @@ Xenia (from which rexglue's runtime pieces derive). Credit them in every doc and
 ## Rules: read first
 - **You need your own legally owned copy of Skate 3** and must build the recomp yourself. Nothing from the game
   (code, data, disassembly, decoded audio) is ever shared or committed.
-- skate3recomp has **no licence**: local research only. Never copy its code (or its Xenia-derived rexglue SDK) into
+- skate3recomp has **no license**: local research only. Never copy its code (or its Xenia-derived rexglue SDK) into
   skate-3-rust-engine. Only measurements (bank names, sample indices, timings, addresses) come back, cited as
   "measured from a local recompiled build".
 - Codegen output (`<recomp checkout>/generated`) is local.

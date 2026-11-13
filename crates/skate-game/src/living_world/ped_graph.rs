@@ -12,7 +12,7 @@ pub(crate) const AI_GRAPH: &str = "private/stock/data/state/livingworldentities/
 pub(crate) const CONVERSATION_GRAPH: &str = "private/stock/data/state/livingworldentities/pedestrian/plugin/conversation.stategraph";
 pub(crate) const MOTION_GRAPH: &str = "private/stock/data/state/livingworldentities/pedestrian/MotionGraph_Pedestrian.stategraph";
 
-/// The ped AI graph, compiled, with its operations parsed per behaviour and condition id.
+/// The ped AI graph, compiled, with its operations parsed per behavior and condition id.
 pub(crate) struct PedGraph {
     pub graph: LoadedGraph,
     pub behaviors: Vec<PedOp>,

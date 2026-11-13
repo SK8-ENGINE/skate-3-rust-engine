@@ -30,7 +30,7 @@ fn dist(a: Vec3, b: Vec3) -> f32 {
     ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
 }
 
-/// One straight segment from `a` to `b` (lane centre line for `lanes` lanes, 4 m each), two
+/// One straight segment from `a` to `b` (lane center line for `lanes` lanes, 4 m each), two
 /// pieces.
 fn segment(id: u64, from: (u64, u8), to: (u64, u8), a: Vec3, b: Vec3, lanes: u8) -> SegmentInput {
     let length = dist(a, b);
@@ -72,7 +72,7 @@ fn four_way(signalled: bool) -> RoadInput {
     let mut into_exit: [Vec<u32>; 4] = Default::default();
     for k in 0..4u8 {
         let d = dir(k);
-        // Approach travels towards the centre (-d); its lane sits to its right.
+        // Approach travels towards the center (-d); its lane sits to its right.
         let ra = right_of([-d[0], -d[1], -d[2]]);
         let a0 = add(add([0.0; 3], d, 40.0), ra, 2.0);
         let a1 = add(add([0.0; 3], d, 8.0), ra, 2.0);
@@ -389,7 +389,7 @@ impl World {
     fn seg(&self, id: u64) -> usize {
         self.net.segment_index(SegmentId(id)).unwrap()
     }
-    /// A car on the approach from `end`, `to_line` metres from its stop line (front).
+    /// A car on the approach from `end`, `to_line` meters from its stop line (front).
     fn approaching(&mut self, id: u32, end: u8, to_line: f32, speed: f32) -> VehicleSnapshot {
         let s = self.seg(0x100 + end as u64);
         let d = self.net.segments[s].length - to_line - 2.0;
@@ -528,7 +528,7 @@ fn signalled_left_turn_yields_to_oncoming_by_distance() {
     w.occ.enter_connector(c, 20);
     w.cars.insert(20, snapshot(20, Place::Lane { segment: s2, lane: 0 }, len - 1.0 - 2.0, 0.0));
     assert_eq!(w.ask(&me, 0, 1, true).entry, Entry::Yield, "left turn waits for closer oncoming");
-    // A crossing car still on its lane does not matter at a signalled junction.
+    // A crossing car still on its lane does not matter at a signaled junction.
     w.occ.remove(20);
     w.cars.remove(&20);
     let c = con(&w.net, 1, 3);

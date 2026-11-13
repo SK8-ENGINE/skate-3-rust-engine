@@ -218,7 +218,7 @@ fn grinding(state: u32) -> bool {
 /// material 143 for whole stretches, never flickering — while our riding ground state keeps
 /// reporting the riderless board's touches (the 19:29 listening test: a bed and skid burst when
 /// the dropped board touched down after a trick). UNCERTAIN: the record writer itself (+152 bits
-/// 20–22) is not located; this is the measured behaviour.
+/// 20–22) is not located; this is the measured behavior.
 pub(super) fn board_unridden(state: u32) -> bool {
     matches!(state, 300 | 500..=502)
 }

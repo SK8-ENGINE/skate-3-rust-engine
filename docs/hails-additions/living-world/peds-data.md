@@ -24,7 +24,7 @@ any content error it removes `living_world/`, writes `living_world-availability.
 `optional_content.py`, `character_glb.py`, `retail_character.py`, `extract_default_skater.py`, `vendor/utt/**/*.py`,
 `skate3_streams.py`, plus the `livingworld` function of `asset_exports.py`.
 A `core` change rebuilds it too (existing rule). The group does its own vault conversion (with the summary-report record
-names, like the customiser) instead of core's `converted`, so record keys match the skater half.
+names, like the customizer) instead of core's `converted`, so record keys match the skater half.
 
 Run on the user's disc (verification output `<stage>/assets/private/living_world/`,
 log `m1-out/peds/export-run.log`): 40 s for both halves, 53 MB, validation clean, one warning (below).
@@ -47,7 +47,7 @@ moodresults, knowledge, protect, patrolzone), `_moodeventcategories`, `_models`,
 ### <District>.census.bin (little-endian, documented in `write_census_grid`)
 `LWCENSUS`, u32 version 1, f32 cell (4 m), f32 origin x/z, u32 width/height, u32 layer count, u32 name count, per layer
 32-byte name + u32 offset, names (u16 length + ASCII), then per layer width x height u16 cells (row-major z then x;
-0 = unpainted: for peds and vehicles no record and cap 0, `sub_826B8A28`, see doc 26 milestone 2; k = name k-1). Cell value = the record at the cell centre, from the exact
+0 = unpainted: for peds and vehicles no record and cap 0, `sub_826B8A28`, see doc 26 milestone 2; k = name k-1). Cell value = the record at the cell center, from the exact
 quadtree (`audio_formats.region_key`). Sizes: DownTown 384 x 448, Industrial 640 x 288, University 384 x 448 cells.
 Layer keys are the vault hash of the `livingworld_census` record name [data] (all keys resolved).
 Records painted: DownTown aletown, business_center, mall, memorial, residential (+ vehicles dwntwn); Industrial
@@ -67,7 +67,7 @@ the verbatim pack moved to `roads_raw.bin`.) `roads.bin` = every object verbatim
 skater path packs) so M3 decodes nodes / lane samples (4 m, 0x19 per block) / crossing quads without a new setup.
 
 ### waypoints.json (`0x00EB001A`) [data, 59 objects, 74 groups, 394 waypoints, layout checked on all]
-Group 0x60: vec4 centre / min / max, u64 name id, u64 GUID, u64 class id, u64 type id (vault hash of
+Group 0x60: vec4 center / min / max, u64 name id, u64 GUID, u64 class id, u64 type id (vault hash of
 `waypoint_vendingmachine` etc.), u32 count, u32 first waypoint offset, u32 strings, u32 class-name offset. Waypoint
 0x30: vec4 position, vec4 facing, u32 word (0/1), u32 group offset (back-pointer, checked), u32 locator name, u32
 class name. Types present in streams: only `waypoint_vendingmachine` (54 groups) and `waypoint_usetrashbin`
@@ -81,7 +81,7 @@ material id, u32 texture count, (string channel, u64 id) each; trailer: zero pad
 own offset. Strings are u32 length + bytes. Every arena and texture exists in `livingworld.big` (0 missing).
 GLB: skeleton = the arena's own bind skeleton (peds 39 named bones, root `Hips`; Eyelids / HeadEnd / Eyebrow / Mouth /
 thumbs have no stored parent and hang off the rig root), parts as primitives, two meshes `LOD0` / `LOD1` sharing the
-skin, diffuse (+ alpha, MASK) and converted normal map; arena space (metres, Y up). Visual check: `male_jock_1`,
+skin, diffuse (+ alpha, MASK) and converted normal map; arena space (meters, Y up). Visual check: `male_jock_1`,
 `female_adult_1` thumbnails render correctly textured (`m1-out/peds/female_adult_1.png`). `zprop_saftybarrier` LOD1
 is empty in the data (no mesh, no material) and is written with LOD0 only. 76 recipes have both LODs.
 

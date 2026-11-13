@@ -8,7 +8,7 @@
 //! camera distance × the speech record's factor / 344 m/s, at most 0.15 s. Pn21 and Sen0 keep their
 //! class defaults (azimuth 0, level 1.0).
 //!
-//! Modelled mono: the graph's two channels carry the one mono speech signal and the env bus input
+//! Modeled mono: the graph's two channels carry the one mono speech signal and the env bus input
 //! is mono, so the Pn21 → Sen0 path is a unity tap (the two-channel routing's exact gains are not
 //! traced). The graph keeps its filter history and delay line between lines, as retail's persists.
 use super::env::Level;

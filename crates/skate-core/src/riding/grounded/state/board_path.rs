@@ -43,7 +43,7 @@ impl Default for PhysicsAiTuning {
     }
 }
 
-/// `0x830BD350` (initialiser `82F826F8` broadcasts `0x82181A88`).
+/// `0x830BD350` (initializer `82F826F8` broadcasts `0x82181A88`).
 const EPSILON: f32 = 1e-6;
 /// `0x8206D110`: degrees to radians.
 const DEGREES: f32 = f32::from_bits(0x3c8e_fa35);

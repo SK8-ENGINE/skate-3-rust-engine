@@ -1,5 +1,5 @@
 //! The Splice one-shot player for the `SPLC` banks (`Skate_Collisions.bnk`, `sk8_foley.bnk`,
-//! `Skate_Metal.bnk` …): retail's per-sound records of layered, randomised sample members, played
+//! `Skate_Metal.bnk` …): retail's per-sound records of layered, randomized sample members, played
 //! by gameplay owners (the board's contacts, the collision manager, the off-board foley) with a
 //! 6-float block they rewrite every frame.
 //!
@@ -22,7 +22,7 @@
 //! (pitch / 4096), [2] azimuth (degrees, raw × 360/65535), [3] dt (s), [4] pan spread (1 for the
 //! local player's 3-D voices, else 0), [5] second rate factor (1).
 //!
-//! Not modelled (values not recovered or not used by any disc member): the per-voice output route
+//! Not modeled (values not recovered or not used by any disc member): the per-voice output route
 //! (`member +3`, the owner's bus objects `sub_82488DD0` with their eEQChain preset and level — the
 //! voices mix dry into the default bus), the second rate stage (`member +12` is 1.0 on every member
 //! and owners pass block[5] = 1), the no-resample path (`member +68` is 0 everywhere), and the

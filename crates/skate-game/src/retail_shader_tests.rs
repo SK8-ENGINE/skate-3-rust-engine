@@ -161,7 +161,7 @@ fn simple_diffuse_and_alphatest_families_have_no_kd_term() {
     assert!((0.39_f32 * 2.39562 - 0.93429).abs() < 1e-5);
 }
 
-/// Which programs normalise the tangent normal before the kd dot product (family 1 does, 2 and 6 do not): docs/hails-additions/35-world-shading-parity.md#kd-normal-normalisation
+/// Which programs normalize the tangent normal before the kd dot product (family 1 does, 2 and 6 do not): docs/hails-additions/35-world-shading-parity.md#kd-normal-normalization
 #[test]
 fn tangent_normal_is_normalised_for_kd_only_where_retail_does() {
     let branch = lit_environment_branch();

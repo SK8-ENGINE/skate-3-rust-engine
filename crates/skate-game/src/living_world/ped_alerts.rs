@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub(crate) struct PedAlerts {
     pub settings: AlertSettings,
     pub alerts: Alerts,
-    /// Metres above the ped's root (ours, see the module note).
+    /// Meters above the ped's root (ours, see the module note).
     pub anchor_height: f32,
     /// A mod that hid the alerts (`sdk.ui.chase_alerts(false)`).
     pub hidden_by: Option<String>,
@@ -88,7 +88,7 @@ pub(crate) fn update_ped_alerts(
     alerts.alerts.tick(&alerts.settings, ms, |ped| alive.contains(&ped));
 }
 
-/// One image per alert: over the ped inside the centred box, else an edge arrow pointing at it (`825E2B80`).
+/// One image per alert: over the ped inside the centered box, else an edge arrow pointing at it (`825E2B80`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_ped_alerts(
     mut commands: Commands,
@@ -124,9 +124,9 @@ pub(crate) fn draw_ped_alerts(
     let size = alerts.settings.size;
     let layout = |placement: &Placement| -> (Val, Val, f32, f32) {
         match *placement {
-            // The sprite's bottom centre on the anchor, pointing down at the ped.
+            // The sprite's bottom center on the anchor, pointing down at the ped.
             Placement::Over { at, scale } => (px(at[0] - size * scale * 0.5), px(at[1] - size * scale), size * scale, 0.0),
-            // Centred on the ring point, turned from pointing down to pointing at the ped.
+            // Centered on the ring point, turned from pointing down to pointing at the ped.
             Placement::Edge { at, angle, scale } => (px(at[0] - size * scale * 0.5), px(at[1] - size * scale * 0.5), size * scale, angle - std::f32::consts::PI),
         }
     };

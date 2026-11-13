@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// NOT RETAIL: retail's colour / texture come from a shader or texture not read yet (b534 section 3).
+/// NOT RETAIL: retail's color / texture come from a shader or texture not read yet (b534 section 3).
 const COLOR: [f32; 3] = [1.0, 0.85, 0.2];
 /// Retail caps the samples per spline segment at 10 (`827B0BA8`, b534).
 const MAX_SAMPLES: u16 = 10;
@@ -118,12 +118,12 @@ pub(crate) enum Pass {
     Background,
     /// `spline_defaultPS`, additive: rgb = tex * I.x * fade.
     Front,
-    /// No textures installed: our flat colour, alpha = fade.
+    /// No textures installed: our flat color, alpha = fade.
     Flat,
 }
 
 impl Pass {
-    /// The material's linear base colour for intensity `i` (front, background) and `fade`.
+    /// The material's linear base color for intensity `i` (front, background) and `fade`.
     pub(crate) fn colour(self, i: [f32; 2], fade: f32) -> [f32; 4] {
         match self {
             Pass::Background => [i[1], i[1], i[1], (i[1] * fade).max(0.0).sqrt()],
@@ -133,7 +133,7 @@ impl Pass {
     }
 }
 
-/// Teleporter requests name no colour (-1, b533), which retail resolves to this row.
+/// Teleporter requests name no color (-1, b533), which retail resolves to this row.
 const DEFAULT_COLOUR: &str = "default";
 
 /// A teleporter's indicator: the `ribbon_indicator` key and its anchor (the challenge's locator matrix).
@@ -154,7 +154,7 @@ pub(crate) struct Placement {
     #[serde(default)]
     pub always: bool,
     /// Fit to a trigger box with these half extents (race gates, `827AF330`): no indicator offset, the spline scaled
-    /// per axis to the box (`fit_scale`); the matrix is the box frame (centre, axes).
+    /// per axis to the box (`fit_scale`); the matrix is the box frame (center, axes).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fit: Option<[f32; 3]>,
 }
@@ -595,7 +595,7 @@ mod tests {
     }
 
     /// b536 pixel shaders with smallarrow's intensity (1.0, 0.7): the front glows by the fade, the background keeps
-    /// its colour and fades its opacity as sqrt.
+    /// its color and fades its opacity as sqrt.
     #[test]
     fn pass_colours_follow_the_pixel_shaders() {
         assert_eq!(Pass::Front.colour([1.0, 0.7], 0.5), [0.5, 0.5, 0.5, 1.0]);

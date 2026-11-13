@@ -80,7 +80,7 @@ impl PosedRails {
         std::array::from_fn(|i| self.origin[i] + self.basis[0][i] * q[0] + self.basis[1][i] * q[1] + self.basis[2][i] * q[2])
     }
 
-    /// 82C4C4E0 for one prop: skipped past `prop_radius` from the box centre; each segment's bounds placed by the
+    /// 82C4C4E0 for one prop: skipped past `prop_radius` from the box center; each segment's bounds placed by the
     /// pose (8258C1E0) and tested against the box; chord endpoints through the same pose. Returns false once the
     /// shared cap is reached.
     pub(crate) fn append(&self, min: [f32; 3], max: [f32; 3], rules: &super::RailRules, out: &mut Vec<super::RailHit>) -> bool {

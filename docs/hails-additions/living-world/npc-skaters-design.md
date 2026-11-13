@@ -34,7 +34,7 @@ later traffic); the ped design (`peds-design.md`) uses the same names.
 | skater sim | `physics::SkaterRuntime` (a single `Resource`, ~136 files touch it) + `GamePhysics` (one board) | not per entity: running N full skaters needs a refactor |
 | input | `skate_core::input::xbox` conversion, `PlayerInputRuntime`, `skate-data::input_recording` | no AI input source |
 | animation | `graph_host` + stock graphs, `SkaterAnimation` evaluator | single instance |
-| rendering other skaters | multiplayer `RemoteSkins` (skinned marquee/customiser looks from streamed poses, interpolation buffers), `Appearances` | keyed by network actor; reusable for NPCs |
+| rendering other skaters | multiplayer `RemoteSkins` (skinned marquee/customizer looks from streamed poses, interpolation buffers), `Appearances` | keyed by network actor; reusable for NPCs |
 | collision with other skaters | `physics::network::Proxies` (remote kinematic proxies join the solve) | keyed by network actor |
 | models | `tools/asset_pipeline/native_roster.py` converts `characters_marquee` pros + IP | skips `ambient_skaters`, `teammates`, `community` |
 | audio | `world_audio::NpcSkaterAudio` component, `game_audio::npc_skaters` host, `world_bridge` (inert until a system publishes), `NpcSkaterReactionEvent`, mod ghosts (`modding/world_audio.rs`) | needs a publisher |
@@ -100,7 +100,7 @@ later traffic); the ped design (`peds-design.md`) uses the same names.
   materials, settings) stays shared in `GamePhysics`.
 - Input: `SkaterInput { Pad(controller slot), Ai(AiPhysicsInput), Recorded(...) }`; the player input runtime runs
   on whichever source the skater has.
-- Done in mechanical steps with behaviour-identity proof for the local player (skill regression-check §3b:
+- Done in mechanical steps with behavior-identity proof for the local player (skill regression-check §3b:
   identical state logs / e2e renders before and after), since the user warned about regressions.
 - This is also the base for split-screen and better multiplayer (remote players could become simulated skaters).
 
@@ -124,7 +124,7 @@ mod spawned or overrode):
   own session: a "record a line" helper using the replay recorder), extra characters (marquee recipe or a mod
   model) and profiles (trick weight tables) through the content overlay (#36 pattern), mod "spots" (a list of
   lines tagged as a spot).
-- Behaviour hooks: events `npc_skater_spawned`, `despawned`, `trick`, `bail`, `line_end`; a per-NPC override of the
+- Behavior hooks: events `npc_skater_spawned`, `despawned`, `trick`, `bail`, `line_end`; a per-NPC override of the
   input (`set_input`), the line choice (`choose_line` callback) and the character choice.
 - Engine-facing equivalents: Bevy events/resources with the same meaning (`NpcSkaterSpawned`, ...), so engine code
   and mods use one mechanism. Stable identities: character keys = `characters_marquee` record names, path ids =
@@ -155,9 +155,9 @@ Rule: values come from setup data or are code constants documented with their ad
   spawn distance p10 ≥ 55 m and p90 ≤ 92 m, despawn median 115-125 m (the recomp's tolerances, code wins on
   disagreement); NPC speed distribution vs the lines' recorded speeds.
 - **Engine tests:** spawn/despawn leaves no entities, audio publishes `NpcSkaterAudio` for live NPCs only, mods'
-  NPCs are removed on disable, the local player's behaviour is identical with NPCs disabled (regression-check
+  NPCs are removed on disable, the local player's behavior is identical with NPCs disabled (regression-check
   state-log comparison), performance budget (3 simulated + replay NPCs within the frame-time target; skill
-  optimisation measurements).
+  optimization measurements).
 - **User testing:** in-game only (no comparison pages).
 
 ## 7. Phased plan (internal milestones of the one living-world PR)
@@ -174,7 +174,7 @@ Rule: values come from setup data or are code constants documented with their ad
 Scope notes (2026-10-04 answers): parks get no NPC skaters; no on/off switch in career free roam (the Free Play mode's
 "A.I. Skaters" option comes with Free Play, if ever); fixed time of day; zombie mode (cheat) turns ambient NPC skaters
 off; the character pool is the pros plus recruited teammates (record byte +9), not `ambient_skater_01..09`, so M1
-must convert the teammates' looks from the save / customiser data rather than only marquee recipes.
+must convert the teammates' looks from the save / customizer data rather than only marquee recipes.
 The PR can be opened as a draft after M4 (visible, moddable NPC skaters on recorded lines) with M5-M8 landing as
 further commits; the PR description keeps a checklist per milestone.
 

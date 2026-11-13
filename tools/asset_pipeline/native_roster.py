@@ -62,7 +62,7 @@ def roster(rows):
 # skaters (online uploads; EA's servers are gone) and teammate_01..04. A teammate qualifies only
 # when its save slot is filled (table 0x8309A800 + index*23904, word +8192 != 0), and its look is
 # loaded from that save (sub_827CE490): the disc has no marquee recipe for teammate_NN. Our
-# equivalent of the save slot is the player's customiser library, so a teammate is bound at
+# equivalent of the save slot is the player's customizer library, so a teammate is bound at
 # runtime to a library entry (settings/living_world_teammates.json, see bind_teammates()). The
 # generic ambient_skater_01..09 have +9 = 0 and are not in the free-roam pool.
 POOL_FIELD='Hash_9A19F602E62EC9E0'      # characters_marquee layout byte +9

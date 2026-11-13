@@ -44,7 +44,7 @@ that collide, can be pushed, grabbed, dragged and placed, with layouts saved per
   MVOBJ_* animations), MovingObjectNew condition leaves, walking from the ObjectMv stick.
 
 Their own design notes (phases 0 to 4) were in `docs/dynamic-props-and-grime.md` on their branch; upstream no
-longer tracks `docs/*.md`, so the key points are summarised here.
+longer tracks `docs/*.md`, so the key points are summarized here.
 
 ## Adaptations to current main (our commits and conflict notes)
 
@@ -70,7 +70,7 @@ No other changes to their code.
 ## Setup impact
 
 `tools/asset_pipeline/dynamic_props.py` and `map_writer.py` change, so the **`maps` and `environment` setup
-fingerprints change**: existing installs re-run those two groups once (the customiser and other groups are not
+fingerprints change**: existing installs re-run those two groups once (the customizer and other groups are not
 affected). Until then the old props package has no placements and the game logs the hint above; nothing else
 changes.
 
@@ -174,7 +174,7 @@ unique prop materials over BlackBoxPark, DownTown, Industrial, MaloofMoneyCup, U
   `g_envattributes`, `m_params`, `g_CSMSelfBias`, `CSM_Mat_Row0..2`, `WorldShadow_MatRow`; textures
   `shadowAtlasDepth`, `shadowWorld`. VS: `g_matVP`, `i_detailNormalUVScale`, `i_partArray`, `g_FogColour`, `g_FogK1`.
 - Same lighting model as our ported `environment.default` (family 1 in `retail_world.wgsl`): the same literals
-  (tangent weights 0.58 / 0.62 / 0.39, scale 2.3956, specular colour 2.1 / 1.8 / 1.5, power 10 + 290 x spec.g),
+  (tangent weights 0.58 / 0.62 / 0.39, scale 2.3956, specular color 2.1 / 1.8 / 1.5, power 10 + 290 x spec.g),
   detail normal added as `normal.xy*2 + detail.xy*2 - 2`, output `sqrt` (gamma 2). Differences: no lightmap (light
   comes from `g_vLightDir` / `g_envattributes` constants instead), and two 4-tap shadow lookups: the cascaded shadow
   map (`CSM_Mat_*`, `shadowAtlasDepth`) and a world shadow map (`WorldShadow_MatRow`, `shadowWorld`, 256 texel
@@ -186,7 +186,7 @@ unique prop materials over BlackBoxPark, DownTown, Industrial, MaloofMoneyCup, U
    own family; keep the bindings and `detailNormalUVScale`.
 2. Renderer: a `dynamicobject` branch that reuses family 1's normal / detail / specular code, with lighting from the
    retail constants instead of the lightmap. Open: where the CPU fills `g_envattributes` and `m_params` (find the
-   parameter handles by name like fix18 did for the ped colours), and how `shadowWorld` is built (static world shadow
+   parameter handles by name like fix18 did for the ped colors), and how `shadowWorld` is built (static world shadow
    atlas) versus our layer-28 dynamic shadow map (also see the bridge car shadow item: the world casts nothing there).
 3. `highlightPS` is likely the Move Object highlight and `ghostPS` the placement ghost: check against the object
    move state when D6 / placement work starts.
@@ -211,7 +211,7 @@ its own shade is very dark, the lit edge bright).
   s3 `i_detail`, s4 `i_diffuse`, s5 `i_specular`, s6 `i_normal`. VS: c0..c3 `g_matVP`, c4 `g_vViewPos`, c5
   `g_FogK1`, c6 `g_FogColour`, c7 `i_detailNormalUVScale`, c8 onward `i_partArray`.
 - [code] Instruction numbers are ALU slots of the PS. 10..14: detail fetched at uv x `detailNormalUVScale` (passed by
-  the VS in interpolator 6). 20..24: raw normal = (2 n.xy + 2 detail.xy - 2, 2 n.z - 1); 25..28 normalised (vnd);
+  the VS in interpolator 6). 20..24: raw normal = (2 n.xy + 2 detail.xy - 2, 2 n.z - 1); 25..28 normalized (vnd);
   29..34: world normal from the interpolated frame. 35..37: N.L with c9 and the step N.L >= 0. 58..60, 72..81: signs
   of the light in the unperturbed tangent frame times (0.58, 0.62). 86..88, 96: kd = (vnd . (0.58 sx, 0.62 sy,
   0.39)) x 2.3956 (same literals as `environment.default`).
@@ -219,13 +219,13 @@ its own shade is very dark, the lit edge bright).
   weights; 49..52 four `shadowWorld` taps, 65, 67, 69..82 the same for the world map; 84..85
   S = min(step(N.L) x csm, max(world, `g_CSMSelfBias.w`)).
 - [code] Light: 57, 64, 68, 88: a counter light, saturate(N . (-L.x, L.y, -L.z)) x `m_params[1].w`; 92..95, 97:
-  light = saturate(N.L) x S + counter + `m_params[1].rgb`; colour = kd x light x diffuse^2 (diffuse squared at 34..36).
+  light = saturate(N.L) x S + counter + `m_params[1].rgb`; color = kd x light x diffuse^2 (diffuse squared at 34..36).
 - [code] Specular: 61..63, 70, 81, 83 view direction in the tangent frame; 89..91 the pseudo light (0.58 sx, 0.62 sy,
   0.39) reflected about vnd; 66, 71, 92..95 power 10 + 290 x specular.g; 96, 98..100 x (2.1, 1.8, 1.5) x S x
   specular.r. Unlike `environment.default` (world-space light (-0.14, 0.5, 0.9) times lightmap.g) this one is
   tangent-space and shadowed.
 - [code] 98, 101: the result is scaled by `m_params[0].y` x the VS fog alpha (1 + `g_FogColour.w` x f), 102 adds the
-  fog colour, 103..112 the retail tone curve with `g_envattributes[2].x` and `sqrt`, identical to the tail of
+  fog color, 103..112 the retail tone curve with `g_envattributes[2].x` and `sqrt`, identical to the tail of
   `defaultenvironment_defaultPS` (70..79), so the engine's tone pass covers it as for the world. c11 and c12 are not
   read.
 - [data] `m_params` is authored in the attribulator class `material_dynamicobject` (keys `default` and `alphatest`,
@@ -291,7 +291,7 @@ parse upgrade, `supported`, tests), `crates/skate-game/src/retail_world.wgsl`.
 ## Contact material blocks, held and free (2026-10-08)
 
 **Problem.** The held prop's `{0.03, 0.02}` block was ported as "replace the combined contact friction with 0.03"
-(doc 26, Move Object item 3), labelled NOT RETAIL YET because its reader was not found. The free block was the
+(doc 26, Move Object item 3), labeled NOT RETAIL YET because its reader was not found. The free block was the
 authored MOBJ material, the upright / tipped choice retail makes was missing, and prop-vs-prop pairs combined the
 authored materials only.
 
@@ -328,7 +328,7 @@ In game the effect is small: against the {0, 0, 1} floor the held prop's dynamic
 a flat 0.03.
 
 **NOT RETAIL YET (updated 2026-10-08, see "Per-type DMO data" below).** The per-type values are now retail data.
-Still open: the second upright condition (the passed pose in 82C54B00) is not modelled; we test the current pose
+Still open: the second upright condition (the passed pose in 82C54B00) is not modeled; we test the current pose
 only. A prop whose type data is missing (setup older than the type map) keeps the authored MOBJ material.
 
 ### Per-type DMO data (2026-10-08)
@@ -400,7 +400,7 @@ upright 0.2 / 0.175, default 0.35 / 0.25, flag on; `basketball` 0.85, 0.85 / 0.8
 ### Per-type drag (2026-10-08)
 
 **Problem.** Prop bodies used the authored MOBJ damping (0.05 linear / 0.15 angular per second in the project
-defaults), labelled NOT RETAIL YET, although the type record carries `LinearDrag` and `AngularDrag`.
+defaults), labeled NOT RETAIL YET, although the type record carries `LinearDrag` and `AngularDrag`.
 
 **Retail mechanism.**
 - [code] 82C4E568 (called twice by the DMO physics component builder 82C4DA40, once per body build, guarded by a
@@ -419,7 +419,7 @@ defaults), labelled NOT RETAIL YET, although the type record carries `LinearDrag
   velocity from the step displacement: `v = (v dt) x max(frequency - drag, 0)`, so `v *= 1 - drag dt` per fixed
   step, drag in 1/s, clamped so 60 or more stops the body. The DMO simulation steps at the fixed 60 Hz
   (dt 0x3C888889); ours runs the prop step in FixedUpdate with the same `RetailSimulationStep`, so render fps does
-  not change it and the per-second unit is retail's own normalisation.
+  not change it and the per-second unit is retail's own normalization.
 - [data] Values (stock vault, parents included): most types 0 / 0; `lw_props` and its children (bottles, cans,
   bags, phones, papers) 0.1 / 0.35 (purse 0.5, popcan 0.4, taser_gun 0 / 0.35); `garbagebag` 0 / 0.5; barrels and
   spools (`metal_keg`, `oildrum`, `cable_spool`) 0 / 0.25; `pylon` 0 / 0.2, `drum_pylon` 0.4 / 0.35;
@@ -473,11 +473,11 @@ settles into a rocking contact cycle at y 0.428 with v.y about -0.8 m/s after ev
 overlap is the known solver gap (parity review item 5: our single impulse pass with shared impulses, 40 %
 positional correction and the 5 cm per tick cap versus retail's 25-iteration row solver 82AE27D0); it moves between
 -0.078 and -0.082 m with the floor material and is not changed by the block. The 37 m bench sink with the old code
-is most likely the same solver gap (inference, not traced): a box whose centre passes the one-sided floor face is
+is most likely the same solver gap (inference, not traced): a box whose center passes the one-sided floor face is
 pushed further down; it is sensitive to small changes (gone with the 0.02 dynamic friction). Neither is a
 small retail fix: the retail answers are the row solver (item 5) and the retail sleep rule (item 4, no rest snap).
 The game uses this floor material and the same prop step, so the in-game builds up to 1e61fe0 most likely show the
-same behaviour (placed props can keep rocking without sleeping; a dragged prop can sink); not checked in a game
+same behavior (placed props can keep rocking without sleeping; a dragged prop can sink); not checked in a game
 run.
 
 ### Per-type mass, inertia and velocity caps (2026-10-08)
@@ -490,7 +490,7 @@ and had no velocity caps (NOT RETAIL YET), although the same reader that sets th
 - [code] 82C4E568 (DMO physics component, run once per body build by 82C4DA40 for single-part assemblies): with
   r30 = Inertia (component +88 -> +0 -> +16) and the type block at component +208:
   - if any lane of the current inverse tensor is +inf (0x82FB4D70) it is first reset to (1, 1, 1) by 82AE6A00;
-  - 82C4E448 writes the body's centre-of-mass frame from data +48 (negated translation, see open items);
+  - 82C4E448 writes the body's center-of-mass frame from data +48 (negated translation, see open items);
   - Inertia +16 = 1.0 / data +304 (`fdivs`, inverse mass); +32 / +36 = data +308 / +336 (drag, section above);
     +24 = data +292 (maximum linear velocity), +28 = data +296 (maximum angular velocity); friction pair +320 /
     +328 and restitution +272 into the material block;
@@ -542,11 +542,11 @@ installed assets whose prop sidecars got the type map from the disc's `worlddmo.
 `template_meshes`; setup group `maps` not re-run): `installed_map_props_resolve_retail_type_data` passes on DownTown
 (40 templates), Industrial (28) and University (42), all with mass > 0 and caps > 0;
 `downtown_dragged_props_rest_on_the_floor` passes with the type data (benches 100 kg, bin 20 kg, newspaper boxes
-15 kg, worst gap -0.001 m; two of the eight ids grab a neighbouring prop, as before). Not run in game.
+15 kg, worst gap -0.001 m; two of the eight ids grab a neighboring prop, as before). Not run in game.
 
 **Still NOT RETAIL YET.**
-- Centre-of-mass offset data +48 (82C4E448 writes it into the body's mass frame): not ported; our body centre is
-  the box centre.
+- Center-of-mass offset data +48 (82C4E448 writes it into the body's mass frame): not ported; our body center is
+  the box center.
 - The AABB: retail uses the physics assembly definition's bounds (definition +128); ours is the AABB of the prop's
   collision instance points. Expected to be the same box for single-box props, not checked per template.
 - Multi-part assemblies (82C4DA40's part loop) do not go through 82C4E568; we build every prop as one box.
@@ -596,11 +596,11 @@ positional correction, 5 mm slop, 5 cm per tick cap) leaves resting jitter and o
 |---|---|---|---|
 | `dragged_props_rest_on_the_floor_after_release` | FAIL: vending -0.082 m | FAIL: vending -0.082 m (bench -0.036, bin -0.058, rail -0.049), none asleep | pass: worst gap 0.000 m for bench, bin, vending, rail; all asleep |
 | `placement_adjust_confirm_and_sleep` | FAIL: never slept | FAIL: never slept | pass |
-| `downtown_dragged_props_rest_on_the_floor` (ignored, assets) | FAIL: 5 props sank | FAIL: 6 props sank 0.146 to 0.212 m, none asleep | pass: 6 props measured, worst gap 0.000 m, all asleep (2 of the 8 ids grab a neighbouring prop and are skipped) |
+| `downtown_dragged_props_rest_on_the_floor` (ignored, assets) | FAIL: 5 props sank | FAIL: 6 props sank 0.146 to 0.212 m, none asleep | pass: 6 props measured, worst gap 0.000 m, all asleep (2 of the 8 ids grab a neighboring prop and are skipped) |
 
 Step A alone answers the question "does the rocking remain": yes. Without the snap, the old pass's resting jitter
 keeps every prop above E = 1e-5, so nothing sleeps (it also broke four sleep tests); the sleep rule needs the row
-solver. Behaviour changes in other tests: `depenetration_is_bounded_per_tick` tested a knob of the old pass and now
+solver. Behavior changes in other tests: `depenetration_is_bounded_per_tick` tested a knob of the old pass and now
 runs with `row_solver = false`; the new `retail_rows_push_a_deep_box_out_and_it_settles` shows the retail result:
 a box 0.4 m deep in the floor is moved out in one step with zero vertical velocity (position-only lane) and sleeps
 on step 2. All other prop tests pass unchanged (push speed caps, no tipping on flat ground, curb tip, yaw rate,
@@ -660,8 +660,8 @@ retail's option to reset moved objects once they have been moved, which we want 
   Invert X / Y, Cursor speed), Copy, Paste, Undo, Redo; natives EnableObjectDropper, DisableObjectDropper,
   Show / HideObjectDropperUI, HideObjectDropperCursor, object dropper input filters, IsObjectDropperEnabled,
   IsInDropper, IsInCatalogMode, IsInQuickMenu, SetCatalogFilter, getCatalogMap, item record `ObjectDropperItemInfo`.
-  [data] Its catalogue source, placement, limits and removal are not decoded (next step: the 0x830854A8 manager's
-  vfuncs and the catalogue map).
+  [data] Its catalog source, placement, limits and removal are not decoded (next step: the 0x830854A8 manager's
+  vfuncs and the catalog map).
 - Per-object phone actions, handler `sub_82666430` (vtable slot next to the cellphone's, context +12 = mode,
   +48 = the DMO id): in mode 1, FE input 1 = **Upright** (`cMsgUprightDMO` 0x905C8249, gate `sub_82666748`),
   FE input 2 = **Reset** (`cMsgResetDMO` 0x31806EF2, gate `sub_826666A8`), 16384 = `cMsgAddDMOToSessionMarker`
@@ -710,7 +710,7 @@ retail's option to reset moved objects once they have been moved, which we want 
   (`world_reset_moved_props`). A reset is a one-shot world action that leaves nothing behind, so there is nothing to
   clean up on mod disable.
 
-**NOT RETAIL YET.** The Object Dropper editor (catalogue, freecam, placement, snap, group select, delete, quick menu)
+**NOT RETAIL YET.** The Object Dropper editor (catalog, freecam, placement, snap, group select, delete, quick menu)
 is not ported: the row stays at 0.3 and LB + B is not wired, because pressing it in retail closes the phone and
 enters that editor. Decoded vs ours for the reset: the instant
 re-place on the spawn transform is decoded; ours are the authored map pose as the spawn record, refusing the held
@@ -728,7 +728,7 @@ lookup8 name guesser).
 **Verification.** `reset_to_spawn_returns_moved_body` (moved list, pose, rest, sleep, unknown id);
 `world_tuning_commands_deserialize_and_validate` extended with both reset commands and their Lua wrappers.
 
-**Open questions.** The dropper catalogue source and limits (manager 0x830854A8, `getCatalogMap`); what game modes
+**Open questions.** The dropper catalog source and limits (manager 0x830854A8, `getCatalogMap`); what game modes
 4 / 5 are; where the per-object phone context comes from (nearest or held DMO); retail's reset transition; the
 "Reset All Objects" row handler; the fe sound names.
 
@@ -775,7 +775,7 @@ Xenia):
 
 **NOT RETAIL YET.** The slot 28 gate (body field +28) is not decoded: ours refuses only an unknown id or a body without
 dynamics. The vector A at state block +72 is not identified: ours uses the body-space inverse inertia diagonal (it
-picks the fallback axis and the gain blend). The angle helper `sub_8296EBB0` is read as acos of the normalised dot.
+picks the fallback axis and the gain blend). The angle helper `sub_8296EBB0` is read as acos of the normalized dot.
 The phone row is not wired (same as Reset).
 
 **Files.** `crates/skate-game/src/physics/prop_dynamics.rs`, `crates/skate-game/src/physics.rs`,
@@ -844,7 +844,7 @@ export, the priority records):
   DMO records have no speed keys and no forward offset.
 - Cull `sub_826BAD98` [code]: horizontal distance beyond the cull radius, cullable objects only, the whole linked group
   (`sub_82C52600`); then at most one eviction per pass while the pool holds 49 or more.
-- Spawn `sub_826B9D58` [code]: placements within the outer radius (max 256), touching neighbours within 20 m join so
+- Spawn `sub_826B9D58` [code]: placements within the outer radius (max 256), touching neighbors within 20 m join so
   clusters come together, 49 spawns per pass (100 in fill mode); with the pool full a placement must outscore the
   eviction front, which then goes.
 - Score `sub_82C4A130` / `sub_82C55160` [code]: `s1 = 250 x priority x k_flag` (keepalways or flag 0x10: 2^31; a LIVE
@@ -857,9 +857,9 @@ export, the priority records):
 **Change.** skate-core `living_world/dmo.rs`: `DmoStreamSettings` (range, weights, cap 49, budgets 49 / 100, group
 radius 20; retail defaults, data-driven), `DmoPlacement`, `DmoView`, `score` / `score_value`, `DmoStream::step`
 (cull with groups, one eviction, spawn with group expansion and evict-if-better; held ids exempt), `set_position`
-(keep where left). Decisions are serialisable (`Spawn` / `Cull` / `Evict` with the map prop id) for a host.
+(keep where left). Decisions are serializable (`Spawn` / `Cull` / `Evict` with the map prop id) for a host.
 
-**NOT RETAIL YET / open.** Wired into the game in step 2 below. The score's count `n` (`sub_82C503F0`) is 1; the overlap blocker is not modelled; touching is bounding spheres (the
+**NOT RETAIL YET / open.** Wired into the game in step 2 below. The score's count `n` (`sub_82C503F0`) is 1; the overlap blocker is not modeled; touching is bounding spheres (the
 retail test's factor 0.5 is not decoded); the eviction queue order is the live score; the safety layer
 (`livingworld_dmo_safety`) is not found; multiple observers are ours.
 
@@ -886,10 +886,10 @@ pose there (the only writer after creation, `sub_82C50EE8`, writes authored matr
 separate moved-pose map (table+0x9090, 512 entries, `sub_82C50950` per tick for records with flag 0x40) that only
 rebuilds a record at a chunk reload [code; end-to-end medium]. So a knocked-over prop is back in place when the player
 returns. The safety layer is census painter layer 14, read by `sub_82C55A50` (max of the `livingworld_dynamicobject_safety`
-values at the centre and four points, any forbidden = 0); it never resets an object, it only stops a moved pose from
+values at the center and four points, any forbidden = 0); it never resets an object, it only stops a moved pose from
 being remembered and weighs the moved-pose priority [code / data].
 
-**NOT RETAIL YET / open.** The moved-pose map and chunk reloads are not modelled (so "keep where left" never happens);
+**NOT RETAIL YET / open.** The moved-pose map and chunk reloads are not modeled (so "keep where left" never happens);
 the skatepark / extended challenge range records (150 / 200, 100 / 130) are not selected (how retail picks them is
 open), all maps use `dynamicobjects`; retail's 49 pool also counts hand props (ours: separate pools); the safety layer
 is not exported. Not seen in game yet.
@@ -1091,7 +1091,7 @@ Every prop with grab splines as a grab-scene object of the world-object provider
 
 ### Prop grab assembly 82585F58
 
-82585F58 (b227): the part (assembly+8) is the prop's one body, its rates (part+0x4C) the body's rigid body: words 56..65 = its Inertia (inverse tensor, inverse mass, spherical, max linear / angular velocity, drags; the tensor's w lane is not read), +144 = angular velocity, +160 = centre of mass. Move Object reads +216 only as a null gate (82D442D0 / 82D44A10), so the stable prop id serves as part and rates identity.
+82585F58 (b227): the part (assembly+8) is the prop's one body, its rates (part+0x4C) the body's rigid body: words 56..65 = its Inertia (inverse tensor, inverse mass, spherical, max linear / angular velocity, drags; the tensor's w lane is not read), +144 = angular velocity, +160 = center of mass. Move Object reads +216 only as a null gate (82D442D0 / 82D44A10), so the stable prop id serves as part and rates identity.
 
 ### Prop world query
 
@@ -1099,7 +1099,7 @@ Prop volume against static world triangles: the physics/world query (TU3 8277B72
 
 ### Move Object command slot 9
 
-Move Object command for the held prop, as retail interface slot 9 applies it (spec section 7: 8275FF00 queue -> flush 827601F0 -> DMO handler 82C4C370 / 82C4C3E0 -> sinks 82D9CC78 / 82D9CCF0), once per 60 Hz physics step, before this step's contact solve: - skipped for an unknown, locked or non-dynamic body (retail gates DMO+4464 bit 0x08 and component+36; props have no lock state yet); - wakes the body and clears its sleep counter on EVERY command (82ADF7B8), zero or not; - linear: an acceleration with no mass factor at the centre of mass (`v += L dt`, no torque; the accumulator +144 already holds gravity, which our integrator adds for every prop); the vertical argument is dropped (82C4C370 forwards only &linear); - angular: the yaw command replaces the angular accumulator (+160 = (0, Y, 0), no inertia factor): any torque queued on the body is discarded and `w += (0, Y, 0) dt`; contacts still change pitch and roll in the solve; - marks the body commanded, so its parameter block switches to the commanded block on its next step (82C53EF8).  The command lasts one step: the carry re-sends it every tick and our prop step runs once per tick (no substeps). `grip` is used only when a mod turns `apply_at_com` off. Returns false if the id is unknown.
+Move Object command for the held prop, as retail interface slot 9 applies it (spec section 7: 8275FF00 queue -> flush 827601F0 -> DMO handler 82C4C370 / 82C4C3E0 -> sinks 82D9CC78 / 82D9CCF0), once per 60 Hz physics step, before this step's contact solve: - skipped for an unknown, locked or non-dynamic body (retail gates DMO+4464 bit 0x08 and component+36; props have no lock state yet); - wakes the body and clears its sleep counter on EVERY command (82ADF7B8), zero or not; - linear: an acceleration with no mass factor at the center of mass (`v += L dt`, no torque; the accumulator +144 already holds gravity, which our integrator adds for every prop); the vertical argument is dropped (82C4C370 forwards only &linear); - angular: the yaw command replaces the angular accumulator (+160 = (0, Y, 0), no inertia factor): any torque queued on the body is discarded and `w += (0, Y, 0) dt`; contacts still change pitch and roll in the solve; - marks the body commanded, so its parameter block switches to the commanded block on its next step (82C53EF8).  The command lasts one step: the carry re-sends it every tick and our prop step runs once per tick (no substeps). `grip` is used only when a mod turns `apply_at_com` off. Returns false if the id is unknown.
 
 ### Upright start
 
@@ -1143,7 +1143,7 @@ Layout persistence (`prop_layout.rs`): confirming a placement records `id -> (or
 
 Restrictions: grabbing requires `BipedGround`; a single prop at a time; the grab is kept while the held grab record qualifies (retail 82D44A10 -> CanGrabSpline 82E08EE8 at the grip, see `still_holds`), and dropped when it stops qualifying or when leaving the on-foot states (`BipedGround` / `OffBoardPushing`; never saves). While held, the retail grab-object byte (`OffBoard304`, published in `player_state/publication.rs`) keeps the selector in `OffBoardPushing` and the MotionGraph in MovingObjectNew, so carrying must not treat state 502 as leaving the ground. Drop keeps the current velocity, so releasing while moving throws gently; re-sleep is the natural cool-down.
 
-Locomotion while holding: retail's producer 8259C4B0 turns the raw left stick into OB_ObjectMvX/Z and the right stick X into OB_ObjectMvRot. The command reads them in the prop's latched grab-edge frame: Z pushes / pulls along the edge normal, X slides along the edge, an off-centre push turns the prop through the lever-arm curves, the right stick turns it.
+Locomotion while holding: retail's producer 8259C4B0 turns the raw left stick into OB_ObjectMvX/Z and the right stick X into OB_ObjectMvRot. The command reads them in the prop's latched grab-edge frame: Z pushes / pulls along the edge normal, X slides along the edge, an off-center push turns the prop through the lever-arm curves, the right stick turns it.
 
 Multiplayer: a `PropCarry` is one player slot's state; its Move Object controller is plain data (`controller_snapshot`), the command is a pure function per fixed tick. Prop bodies and layouts are host-local; a host would replicate held id, body poses / velocities and layout writes. No transport is implemented.
 
@@ -1169,7 +1169,7 @@ Path B of 82D44A10: the prop's best other record from the skater reference (82D4
 
 ### Carry weight and orbit logs
 
-CARRY_WEIGHT once per grab (b284: a held prop's weight is only these two curve outputs, set at the grab; a light dumpster means a light mass or yaw inertia here). CARRY_ORBIT while turning: retail turns the prop about its centre and the skater walks round it, so the skater's angle round the centre should follow the prop's heading.
+CARRY_WEIGHT once per grab (b284: a held prop's weight is only these two curve outputs, set at the grab; a light dumpster means a light mass or yaw inertia here). CARRY_ORBIT while turning: retail turns the prop about its center and the skater walks round it, so the skater's angle round the center should follow the prop's heading.
 
 ### Follow step
 
@@ -1211,7 +1211,7 @@ Hand IK of the held update (82D46610 sets +1200 bit 0x40, 82D45008 steps the wei
 
 ### Command 82D45318
 
-Port of 82D45318 steps 1 to 10, signs as in the code: lever = dot(-edge, centre - grip), rot = min(1, sign(lever) curve(|lever|) MvZ + MvRot), w = -(curve(|lever|) rot gain), fwd += 0.25 lever w, yaw command sent as (0, out, 0) about +Y (slot 9 angular sink, right-handed like our world). The yaw error is the target minus the measured yaw rate (the facing change since the previous tick x 60, same rotation sense: +Y turns +Z toward +X), so the feedback is negative. Edge direction: retail builds +320 from the hand points (82D45D30, sense not traced); taking it as `side_of(forward)` is the only choice for which an off-centre push turns the object the way the push torque does (r x F about +Y). With it a positive OB_ObjectMvRot gives a negative yaw rate (clockwise seen from above, a right turn for the skater). NOT RETAIL YET: the edge sense.
+Port of 82D45318 steps 1 to 10, signs as in the code: lever = dot(-edge, center - grip), rot = min(1, sign(lever) curve(|lever|) MvZ + MvRot), w = -(curve(|lever|) rot gain), fwd += 0.25 lever w, yaw command sent as (0, out, 0) about +Y (slot 9 angular sink, right-handed like our world). The yaw error is the target minus the measured yaw rate (the facing change since the previous tick x 60, same rotation sense: +Y turns +Z toward +X), so the feedback is negative. Edge direction: retail builds +320 from the hand points (82D45D30, sense not traced); taking it as `side_of(forward)` is the only choice for which an off-center push turns the object the way the push torque does (r x F about +Y). With it a positive OB_ObjectMvRot gives a negative yaw rate (clockwise seen from above, a right turn for the skater). NOT RETAIL YET: the edge sense.
 
 ### Heading latch
 
@@ -1219,7 +1219,7 @@ Heading latch [code, 0x82D455E0..0x82D4573C]: turning (|w| >= 0.1, 0x820641A8) s
 
 ### Yaw controller
 
-9. Vertical: lift gain x height error; stock 0 and not applied. 10. Yaw controller [code, 0x82D45BC8..0x82D45CD0]: 8296EC98(+384, now, axis (0, 1, 0) at 0x82139A20) = acos(dot) of the normalised facings, 2 pi - acos when cross(+384, now) . axis < 0 (2 pi at 0x821647F0), 0 for a vector shorter than 1e-2 (|v|^2 vs 1e-4 at 0x8209BE90); wrapped to [-pi, pi) with 1 / 2 pi (0x82139A60) and 2 pi (0x82139A50); then +384 = now (every tick, both latch branches). Rate = wrapped x 60 (0x822F860C); error = w - rate. For an upright object the signed angle about +Y is the heading change, which is what the port measures.
+9. Vertical: lift gain x height error; stock 0 and not applied. 10. Yaw controller [code, 0x82D45BC8..0x82D45CD0]: 8296EC98(+384, now, axis (0, 1, 0) at 0x82139A20) = acos(dot) of the normalized facings, 2 pi - acos when cross(+384, now) . axis < 0 (2 pi at 0x821647F0), 0 for a vector shorter than 1e-2 (|v|^2 vs 1e-4 at 0x8209BE90); wrapped to [-pi, pi) with 1 / 2 pi (0x82139A60) and 2 pi (0x82139A50); then +384 = now (every tick, both latch branches). Rate = wrapped x 60 (0x822F860C); error = w - rate. For an upright object the signed angle about +Y is the heading change, which is what the port measures.
 
 ### Board on grab
 
@@ -1237,11 +1237,11 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/dmo
 
 Dynamic objects (DMOs: benches, bins, cones, ...) streamed by the living-world census, as retail does (research b97; doc 27 "DMO streaming").
 
-Per census pass (`sub_826B7980`) [code]: 1. the circle from the `dynamicobjects` range record (same lerp as peds; retail data has no speed keys and no forward offset for DMOs); 2. cull (`sub_826BAD98`): a live, cullable DMO whose HORIZONTAL distance to the centre exceeds the cull radius goes, with its whole linked group (`sub_82C52600`); then, once per pass, when the pool holds `cap` (49) or more live objects, the front of the eviction queue goes; 3. spawn (`sub_826B9D58`): placements within the outer radius, expanded by touching neighbours within 20 m so clusters come together, up to `budget` (49, 100 in fill mode) per pass; with the pool full a placement spawns only when its score beats the eviction front's, which is evicted for it.
+Per census pass (`sub_826B7980`) [code]: 1. the circle from the `dynamicobjects` range record (same lerp as peds; retail data has no speed keys and no forward offset for DMOs); 2. cull (`sub_826BAD98`): a live, cullable DMO whose HORIZONTAL distance to the center exceeds the cull radius goes, with its whole linked group (`sub_82C52600`); then, once per pass, when the pool holds `cap` (49) or more live objects, the front of the eviction queue goes; 3. spawn (`sub_826B9D58`): placements within the outer radius, expanded by touching neighbors within 20 m so clusters come together, up to `budget` (49, 100 in fill mode) per pass; with the pool full a placement spawns only when its score beats the eviction front's, which is evicted for it.
 
 The score (`sub_82C4A130` placements / `sub_82C55160` live) weighs priority, a count and the distance, with the five `livingworld.dynamicobjects` values (2.5 in front of the camera, 2.0 for the keep flag, 250, 300, 450).
 
-NOT RETAIL YET: the score's count `n` (`sub_82C503F0`, meaning open) is 1; the overlap blocker (a live DMO in the placement's volume) is not modelled; touching (`factor 0.5`) is bounding spheres; the eviction queue is ordered by the live score (its insert point is not read); multiple observers are ours (retail runs this for one player).
+NOT RETAIL YET: the score's count `n` (`sub_82C503F0`, meaning open) is 1; the overlap blocker (a live DMO in the placement's volume) is not modeled; touching (`factor 0.5`) is bounding spheres; the eviction queue is ordered by the live score (its insert point is not read); multiple observers are ours (retail runs this for one player).
 
 ### DMO keep state
 
@@ -1297,7 +1297,7 @@ Detail moved out of the code comments of `crates/skate-game/src/living_world/dmo
 
 ### DMO streaming game side
 
-DMO streaming in the game (doc 27 "DMO streaming"): the map's placed props run through the retail DMO census (`skate_core::living_world::dmo`, census slot 2 of 4) and a culled or evicted prop goes dormant (`GamePhysics::stream_prop`: body asleep and still, collision parked, model hidden); a spawn brings it back at its authored pose, as retail respawns a culled DMO from its placement record (research b98: nothing writes the live pose into the record; the moved-pose map only rebuilds records at a chunk reload, not modelled). Props in the player's saved placement layouts (#15, not retail) are never streamed, so layouts survive.
+DMO streaming in the game (doc 27 "DMO streaming"): the map's placed props run through the retail DMO census (`skate_core::living_world::dmo`, census slot 2 of 4) and a culled or evicted prop goes dormant (`GamePhysics::stream_prop`: body asleep and still, collision parked, model hidden); a spawn brings it back at its authored pose, as retail respawns a culled DMO from its placement record (research b98: nothing writes the live pose into the record; the moved-pose map only rebuilds records at a chunk reload, not modeled). Props in the player's saved placement layouts (#15, not retail) are never streamed, so layouts survive.
 
 On by default, as retail streams its DMOs; `SKATE_DMO_STREAM=0` (or a mod) turns it off, and then every placed prop exists all the time. Logs `DMO_STREAM` (counts per change) and `DMO_STREAM_CHANGE` per decision.
 
@@ -1443,7 +1443,7 @@ Detail moved out of the fork-added code comments of `crates/skate-core/src/playe
 
 (2026-10-22, for the recomp comparison in research b509)
 
-- `SKATE_PROP_WATCH="x y z r"` (spaces or commas): the first tick a prop's centre is within `r` m of the point, the
+- `SKATE_PROP_WATCH="x y z r"` (spaces or commas): the first tick a prop's center is within `r` m of the point, the
   nearest one is armed (`PROP_WATCH_ARM id= template= distance= tick=`); from then on it writes
   `PROP_WATCH tick= id= pos=[] v=[] w=[] up=[] contacts= asleep=` every physics tick, held or not.
 - `contacts` counts the prop's static triangle manifolds plus prop pairs this tick (not contact points).
@@ -1481,7 +1481,7 @@ User report (2026-10-26, RPCS3 clip of a dumpster pushed through DownTown): prop
 no thumps going down stairs, no hits on other things. Retail has two sound objects per prop on MixMap slot 8
 ("Dynamic", 5 instances) fed by an audio-side table the physics fills every frame. Research: b625 (first pass,
 re-checked), the m-props findings, b628 (loop packets), b629 (loop banks), b630 (pushed prop object). Credit:
-the retail behaviour was read from the TU3 code with skate3recomp (rexglue, Xenia) and Ghidra + Xenon360.
+the retail behavior was read from the TU3 code with skate3recomp (rexglue, Xenia) and Ghidra + Xenon360.
 
 ### What retail does [code]
 - Audio table entry per prop and frame (sub_827A3FD8 / sub_827A8AD8): linear and angular velocity, the template's
@@ -1539,8 +1539,8 @@ manager (CSTATEMGR_DynamicObject, the same one that picks the five SFX objects) 
 (sub_824F5EB8) and owns two bus graphs `Sub0 -> Gai0 -> FSS0 -> PI20 -> PI20 -> Pn21 -> Sen0 (SFX Master)` that the
 banks' templates route the main loops (codes 2048 / 512) and the sliding start loop into: random gains by speed, a
 push / pull frequency shift (record 0xA4 / 0xA8), an LFO peaking EQ and a jittered second EQ (record class DCD364 via
-0x30); retail quirks kept (graph B's second EQ centre is never written; its jitter reads graph A's base gain; the
-second centre's timer runs twice per tick).
+0x30); retail quirks kept (graph B's second EQ center is never written; its jitter reads graph A's base gain; the
+second center's timer runs twice per tick).
 - `skate_audio::world::moveable`: packets (incl. the cross-set words), the start / main updates from the Moving
   outputs, `Judder`, `EqManager`, the one-shot interval; `bus/dynamic.rs`: the two graphs (dsp gain / fss / peaking /
   pan), `Output::Dynamic`, the mixer routes codes 2048 / 512 mono into them.
@@ -1564,7 +1564,7 @@ first push / loop then takes the decoded data, so only `load_bank` runs on the g
 same calls in the same order. A bank still queued when the push comes loads on the game thread as before.
 Test: `shared_prop_banks_are_prefetched_and_load_without_decoding` (data-gated).
 
-### Not modelled / open
+### Not modeled / open
 - Prop-on-prop contacts post against "no material" (143): retail's other-body surface for a DMO pair is not traced.
 - The two runtime terms of the sliding choice (characteristics bool 0x14C with entry +0x4C; entry +0x4E with +0x4F)
   need DMO flags we do not have; the type's rolls flag alone decides.

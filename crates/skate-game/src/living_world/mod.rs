@@ -138,8 +138,8 @@ pub(crate) struct LivingWorldSettings {
     /// The NPC skaters' retail obstacle avoider (`skate_core::living_world::avoid`, doc 26 "NPC
     /// skater obstacle avoider"); retail values by default, mod-tunable (`npc_avoid`).
     pub npc_avoid: skate_core::living_world::avoid::AvoidSettings,
-    /// The ped behaviour runtime: the stock ped AI graph on each ped's brain (doc 26 "Ped
-    /// behaviour runtime"); retail values, mod-tunable (`ped_brain`).
+    /// The ped behavior runtime: the stock ped AI graph on each ped's brain (doc 26 "Ped
+    /// behavior runtime"); retail values, mod-tunable (`ped_brain`).
     pub ped_brain: PedBrainSettings,
     /// Mod horn values per traffic driver record (`livingworld_vehicle_drivers` name, or `all` first), read at
     /// spawn (`traffic_horn`); empty = the disc's values.
@@ -233,7 +233,7 @@ impl LivingWorldSettings {
         self.ped_brain.vehicle_flee.enabled = choices.vehicle_flee;
     }
 
-    /// The draw distance in effect (sanitised: non-finite or non-positive = retail, clamped).
+    /// The draw distance in effect (sanitized: non-finite or non-positive = retail, clamped).
     pub(crate) fn draw_distance(&self) -> skate_core::living_world::DrawDistance {
         skate_core::living_world::DrawDistance::new(self.npc_draw_distance)
     }
@@ -288,7 +288,7 @@ pub(crate) struct LivingWorldSpawn(pub SpawnRecord);
 #[derive(Message, Clone, Debug, PartialEq)]
 pub(crate) struct LivingWorldDespawn(pub DespawnRecord);
 
-/// Serialisable form of a decision (what a host would send; mod events use the same fields).
+/// Serializable form of a decision (what a host would send; mod events use the same fields).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) enum WireRecord {
     Spawn { kind: String, id: u64, tick: u64, position: [f32; 3], heading: f32, seed: u64, initial: bool, choice: WireChoice },
@@ -402,6 +402,9 @@ pub(crate) struct PopulationState {
     /// lanes; none = no cars).
     pub roads: Option<skate_core::living_world::traffic::RoadNetwork>,
     pub vehicles: Option<skate_core::living_world::VehicleCatalog>,
+    /// The loaded catalog before mods' `vehicles` tuning (new entities, spawn tables); `vehicles` = this + the patch.
+    vehicles_stock: Option<skate_core::living_world::VehicleCatalog>,
+    vehicle_patch: (std::collections::BTreeMap<String, String>, std::collections::BTreeMap<String, Vec<String>>),
     /// Replay-tier lines and voices of the loaded district (milestone 3).
     pub npc: npc_skaters::NpcData,
     /// The ranges from `tables.json` (re-applied after settings changes).
@@ -416,6 +419,9 @@ pub(crate) struct PopulationState {
     pending: Vec<Decision>,
     /// The lines challenge AI skaters may ride (sorted; the challenge's path filter, b972), while a challenge runs.
     pub scripted_lines: Option<std::sync::Arc<Vec<[u8; 16]>>>,
+    /// The running contest's riders: at a line end each rides on to a line it has not done yet and never walks back
+    /// (ours, the user's spec for contests; retail's chain would walk it to a far start, b1017).
+    pub contest_riders: Vec<LivingWorldId>,
 }
 
 impl Default for PopulationState {
@@ -426,6 +432,8 @@ impl Default for PopulationState {
             skaters: None,
             roads: None,
             vehicles: None,
+            vehicles_stock: None,
+            vehicle_patch: Default::default(),
             npc: npc_skaters::NpcData::default(),
             data_config: PopulationConfig::retail(),
             loaded_for: None,
@@ -435,6 +443,7 @@ impl Default for PopulationState {
             last_report: 0,
             pending: Vec::new(),
             scripted_lines: None,
+            contest_riders: Vec::new(),
         }
     }
 }
@@ -469,10 +478,28 @@ impl PopulationState {
         self.census = data.census;
         self.skaters = data.skaters;
         self.roads = data.roads;
-        self.vehicles = data.vehicles;
+        self.vehicles_stock = data.vehicles;
+        self.patch_vehicles();
         self.npc = data.npc;
         self.status = data.status;
         self.loaded_for = Some((map.to_string(), generation));
+    }
+
+    /// Mods' `vehicles` tuning (new entities, spawn tables), kept across world loads; cars already out keep theirs.
+    pub(crate) fn set_vehicle_patch(&mut self, entities: std::collections::BTreeMap<String, String>, tables: std::collections::BTreeMap<String, Vec<String>>) {
+        self.vehicle_patch = (entities, tables);
+        self.patch_vehicles();
+    }
+
+    fn patch_vehicles(&mut self) {
+        let (entities, tables) = &self.vehicle_patch;
+        self.vehicles = self.vehicles_stock.as_ref().map(|stock| {
+            let (catalog, unknown) = stock.patched(entities, tables);
+            if !unknown.is_empty() {
+                warn!("LIVING_WORLD vehicles tuning: unknown entities {unknown:?} left out");
+            }
+            catalog
+        });
     }
 
     /// Client side: mirror records from a host (no rules, no RNG). Transport is not built.
@@ -625,7 +652,7 @@ pub(crate) struct LivingWorldObservers {
 /// compares |v|^2 against `0x8209BE90` = 1e-4 [code]).
 const FOCUS_STILL_SPEED2: f32 = 1e-4;
 
-/// Census focus of one player: the character's centre of mass, not the board (826BDB50): docs/hails-additions/26b-living-world-population.md#census-focus
+/// Census focus of one player: the character's center of mass, not the board (826BDB50): docs/hails-additions/26b-living-world-population.md#census-focus
 pub(crate) fn player_focus(position: [f32; 3], velocity: [f32; 3]) -> Observer {
     let still = velocity.iter().map(|v| v * v).sum::<f32>() <= FOCUS_STILL_SPEED2;
     Observer { position, velocity: if still { [0.0; 3] } else { velocity } }
@@ -660,7 +687,7 @@ fn gather_observers(
     mut out: ResMut<LivingWorldObservers>,
 ) {
     use skate_core::physics::board::BodyId;
-    // The player's character (on board, walking or bailing): the skeleton's physical centre of
+    // The player's character (on board, walking or bailing): the skeleton's physical center of
     // mass (Skeleton16144/16160) and its velocity (Skeleton16176), as published each tick into
     // the reckoning fields (`physics/render_pose.rs`).
     let character = skater.as_ref().map(|s| {
@@ -974,7 +1001,7 @@ fn log_zombie_mode(settings: Res<LivingWorldSettings>, mut last: Local<Option<bo
     }
 }
 
-/// The ped behaviour runtime's switch and values.
+/// The ped behavior runtime's switch and values.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PedBrainSettings {
     pub enabled: bool,
@@ -998,10 +1025,19 @@ pub(crate) struct PedBrainSettings {
     pub speed_bump: skate_core::living_world::peds::anim::SpeedBump,
     /// The strafe poster's edges (`sub_82E2AFC0`, b686).
     pub strafe: skate_core::living_world::peds::anim::StrafeRules,
+    /// `livingworld_entity_headtracking` (`default`: on for every shipped ped type, b1019) and the
+    /// `livingworld_entity_animation_postadjust` `default` record's values.
+    pub head_tracking: bool,
+    pub head_look: skate_core::living_world::peds::head_look::HeadLookSettings,
+    /// Eye height above the root for the look's pitch, m. NOT RETAIL: retail measures from the animated head.
+    pub head_look_eye_height: f32,
+    /// With nothing to look at the head follows the path; this far off the facing (degrees) it looks ahead instead
+    /// (`0x820E5748`, 80, b1018).
+    pub head_look_path_limit: f32,
 }
 
 impl Default for PedBrainSettings {
     fn default() -> Self {
-        Self { enabled: true, mood: true, flee: Default::default(), run_from_honker: Default::default(), object_flee: Default::default(), vehicle_flee: Default::default(), values: Default::default(), plugins: Default::default(), scatter_hold: false, speed_bump: Default::default(), strafe: Default::default() }
+        Self { enabled: true, mood: true, flee: Default::default(), run_from_honker: Default::default(), object_flee: Default::default(), vehicle_flee: Default::default(), values: Default::default(), plugins: Default::default(), scatter_hold: false, speed_bump: Default::default(), strafe: Default::default(), head_tracking: true, head_look: Default::default(), head_look_eye_height: 1.6, head_look_path_limit: 80.0 }
     }
 }

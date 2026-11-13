@@ -1,4 +1,4 @@
-# MixMap (`MixMapSK8.mxb`): behavioural specification for a native Rust port
+# MixMap (`MixMapSK8.mxb`): behavioral specification for a native Rust port
 
 Written 2026-10-02 in our own words (no code transliterated from PR #4/#1, the recomp or b5-decomp; constants,
 offsets, addresses and EA's record names are facts). Companion notes: `aems-reference.md`,
@@ -81,7 +81,7 @@ Record = (2 + n) words:
   - `+4`: curve kind per quadrant: q0 bits 28–31, q2 bits 24–27, q3 bits 20–23, q1 bits 16–19. The low 16
     bits are the Doppler speed constant c (0 = no Doppler).
   - `+8, +12, +16, +20`: one range per direction d0..d3. Bits 0–14 = min distance; bits 16–30 = max
-    distance (integers, metres).
+    distance (integers, meters).
 
 **C: SubMixCh (clamped sums).** Header `{count, …}`. Record = (2 + n) words:
 - `w0` = `0xD0` top byte (type C), bits 16–23 = n, bits 8–15 = slot, low byte = index.
@@ -251,7 +251,7 @@ Q15 linear (0..32767), mB (1/100 dB, 602 per halving), or cents.
 
 ### 5.1 Input stage
 For each input entry, in run order (§4.3):
-- raw = the source value in **linear flavour**:
+- raw = the source value in **linear flavor**:
   - controller → the raw i32 input word;
   - A key → the referenced product's *shaped input* (its entry's lin, not the product value);
   - B → its Q15 roll-off;
@@ -269,7 +269,7 @@ lag, or the initial 32767 on the first tick).
   - w bit 15 set ("cut", w is negative mB): offset = 0; ratio = 32767 − (mB→lin(w)).
 - x = 32767 − (((32767 − lin)·ratio) >> 15); dB = offset + lin→mB(x).
 - Result: a cut gives ≈ w mB at lin 0 and ≈ 0 at lin 32767; a boost gives ≈ 0 → ≈ +w.
-- Scale list: acc = 32767; for each reference, acc = (v·acc) >> 15, with v in **linear flavour**.
+- Scale list: acc = 32767; for each reference, acc = (v·acc) >> 15, with v in **linear flavor**.
 - **value = (acc·dB) >> 15.** The scales shrink the dB amount, which acts as a gate or depth control.
 
 ### 5.3 B: 3DMixCtl lookups (per instance)
@@ -334,7 +334,7 @@ offset (ms); start = level at stage start; level (Q15); out (mB).
 - Kinds other than 0/1/3 never leave stage 0 (level 0, so out = 0 mB). F184 is kind 4.
 
 ### 5.5 C: sums (per instance, build order)
-- value = Σ references in **mB flavour**:
+- value = Σ references in **mB flavor**:
   - A → its value;
   - B → its dB;
   - F → its out;
@@ -346,7 +346,7 @@ offset (ms); start = level at stage start; level (Q15); out (mB).
 
 ### 5.6 E: output sums
 - Output block disabled (word 15 bit 0 = 0) → value = −10000.
-- Otherwise value = base + Σ non-B references (mB flavour). B references are not summed; G uses them.
+- Otherwise value = base + Σ non-B references (mB flavor). B references are not summed; G uses them.
 
 ### 5.7 Output write (per E record, per G output word)
 v = value + offset; b = the special B reference, if any.
@@ -438,7 +438,7 @@ B0 reads SFXCTL `0x60060000` + g·0x800:
 
 ### 6.4 Player components (slot 1, per player instance g)
 Common pattern for each SFX object:
-- out0 = raw azimuth of B[Player.2] (or B0 for body-centred objects such as Clothing, OffBoard, HandGrabs,
+- out0 = raw azimuth of B[Player.2] (or B0 for body-centered objects such as Clothing, OffBoard, HandGrabs,
   Takedown, DropIn).
 - Volume outputs = base + B dB (via B2/B0/B4) + Player C sums + Global ducks + per-object A/F terms.
 - Pitch outputs = B1 Doppler (c 275) + C1 / C3 / C7 / C9… (each clamped ±5000).
@@ -455,7 +455,7 @@ Player B lookups:
 - B4: #2, 4–60 / 2–50 / 1–40 / 2–50 m.
 - Others are listed in `catalog.txt`.
 
-### 6.5 Ducking catalogue (Global section; all AHR envelopes, gated on a controller input)
+### 6.5 Ducking catalog (Global section; all AHR envelopes, gated on a controller input)
 - **Master.in1–in4** are category gains:
   - via A4/A0 → Music;
   - A5/A1 → nearly every SFX sum;
@@ -515,7 +515,7 @@ Free-skate values (PR #4 capture statistics):
 ### 7.5 Ambience in0 = the bed fade; emitter SFXCTL `0x60060000`: writer not traced (see §10).
 
 ---------------------------------------------------------------------------------------------------------
-## 8. Port checklist (behaviour that is easy to get wrong)
+## 8. Port checklist (behavior that is easy to get wrong)
 
 1. 0 mB → 32730, not 32767. Volume outputs never exceed 32730.
 2. The kind-0 curve interpolates with a 4-bit fraction of at most ≈0.5 (§5.0).
@@ -589,7 +589,7 @@ Free-skate values (PR #4 capture statistics):
 
 ---------------------------------------------------------------------------------------------------------
 ## 11. Sources & credits
-| source | author | link | licence | what it contributed |
+| source | author | link | license | what it contributed |
 |---|---|---|---|---|
 | Upstream PR #4 (`skate-audio-core/src/mixmap/*`, docs `player-audio-retail-drivers.md`, `wheel-audio-handoff-2026-09-17.md`, `engine-defects.md`) | andrewnakas | https://github.com/SK8-ENGINE/skate-3-rust-engine/pull/4 (commit 368a433) | none (read-only reference) | The retail function map, stage order, controller/reader functions, input writers, instance counts, capture match rate. Its port is our golden oracle via the PoC. Described in our words only. |
 | Upstream PR #1 (`mx/audio-engine-vehicles`) | andrewnakas | https://github.com/SK8-ENGINE/skate-3-rust-engine/pull/1 | none | Same MixMap core (PR #4 is a superset); first "PathFinder 5.03 MixMap" identification |

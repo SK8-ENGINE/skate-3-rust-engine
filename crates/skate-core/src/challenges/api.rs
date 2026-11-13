@@ -60,12 +60,14 @@ pub struct SkaterFacts {
     pub on_ground: bool,
     /// An air ended this frame without a wipeout (ObjectiveAir.AirCompleted; also the group's AirCompleted message).
     pub air_completed: bool,
-    /// ObjectiveAir.GetTimeToGrind (82C65E70, b1013): while a grind is predicted on the centre trajectory (air output
+    /// ObjectiveAir.GetTimeToGrind (82C65E70, b1013): while a grind is predicted on the center trajectory (air output
     /// +0x1BB), predicted contact time minus time in the air (+0xB4 - +0xB0), else [`NO_GRIND_TIME`].
     pub time_to_grind: f32,
     /// The board adjust now (82BE1AE8 copies the animation attribute packet's value: 1 left, 2 right, 3 up, 4 down,
     /// [`BOARD_ADJUST_UP`] ...), 0 for none (ObjectiveAir.IsDoingSpecificBoardAdjust 82C65FD0).
     pub board_adjust: u32,
+    /// Follow the leader (b1006): the player's distance to each AI competitor (competitor 1 first), m; None = not there.
+    pub competitor_distances: [Option<f32>; 4],
 }
 
 impl Default for SkaterFacts {
@@ -74,7 +76,7 @@ impl Default for SkaterFacts {
             in_air: false, right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pump_acceleration: 0.0, last_pump_user: false,
             grind_rail: None, in_sequence: false, sequence_completed: false, wiping_out: false, off_board: false,
             went_off_board: false, went_on_board: false, grinding: false, on_board: false, on_ground: false,
-            air_completed: false, time_to_grind: NO_GRIND_TIME, board_adjust: 0,
+            air_completed: false, time_to_grind: NO_GRIND_TIME, board_adjust: 0, competitor_distances: [None; 4],
         }
     }
 }
@@ -94,12 +96,14 @@ pub enum FlowCommand {
     Reset(usize),
     /// ObjectiveGameInfo.SetFractionValue: the "n of m" HUD counter of this objective (numerator, denominator).
     Fraction(f32, f32),
+    /// Leader.AddFollowIndicator / RemoveFollowIndicator: the trail over the leader (b1006 / b566 style trail_follow).
+    FollowIndicator(bool),
 }
 
 /// The functions this API answers (last name segment). A group whose programs call anything else does not run:
 /// an unported call errors, and an erroring completion condition defaults to true (retail), so it would complete
 /// at once.
-pub const PORTED: [&str; 47] = ["BeganTrick", "BeganTrickGroup", "GetTimeToGrind", "IsDoingSpecificBoardAdjust", "EnteredVolume", "IsInVolume", "IsSequenceNewlyCompletePoints", "GetGroupAccumulatedPoints",
+pub const PORTED: [&str; 51] = ["GetDistanceToNearestAISkater", "GetDistanceToSkater", "AddFollowIndicator", "RemoveFollowIndicator","BeganTrick", "BeganTrickGroup", "GetTimeToGrind", "IsDoingSpecificBoardAdjust", "EnteredVolume", "IsInVolume", "IsSequenceNewlyCompletePoints", "GetGroupAccumulatedPoints",
     "GetGroupPointsRequirement", "GetAccumulatedPoints", "ActivateObjective", "DeactivateObjective", "ResetObjective",
     "GetObjectiveStatus", "GetTotalNumCompletedObjectives", "IsInSequence", "SequenceCompleted", "IsWipingOut",
     "IsOffBoard", "WentOffBoard", "WentOnBoard", "JustUsedSessionMarker", "JustSetSessionMarker", "SetFractionValue",
@@ -245,6 +249,19 @@ impl Api for ObjectiveApi<'_> {
                 };
                 if short == "GetNumTricksDoneInTrickGroup" { num(count as i32) } else { Value::Bool(count > 0) }
             }
+            // Follow the leader (b1006): the nearest AI competitor's distance (FTL rows fail at their max follow
+            // distance), or competitor n's (ftl_indu_02 asks for 1). No competitor: 0 [ours: never a failure].
+            "GetDistanceToNearestAISkater" => {
+                num_f(self.skater.competitor_distances.iter().flatten().copied().reduce(f32::min).unwrap_or(0.0))
+            }
+            "GetDistanceToSkater" => {
+                let n = match args.first() { Some(Value::Num(n)) if *n >= 1.0 => *n as usize, _ => return Err(Error::Type("a competitor number")) };
+                num_f(self.skater.competitor_distances.get(n - 1).copied().flatten().unwrap_or(0.0))
+            }
+            "AddFollowIndicator" | "RemoveFollowIndicator" => {
+                self.flow.push(FlowCommand::FollowIndicator(short == "AddFollowIndicator"));
+                Value::Nil
+            }
             "SetFractionValue" => {
                 let n = |i: usize| match args.get(i) { Some(Value::Num(v)) => *v, _ => 0.0 };
                 self.flow.push(FlowCommand::Fraction(n(0), n(1)));
@@ -307,5 +324,35 @@ mod tests {
         assert!(call(0, "kickflip", &o, &[]) && !call(0, "heelflip", &o, &[]));
         assert!(call(1, "fliptricks", &o, &[]) && !call(1, "grabs", &o, &[]));
         assert!(call(2, "grabs", &o, &[5]) && !call(2, "fliptricks", &o, &[5]));
+    }
+
+    #[test]
+    fn leader_calls_read_competitor_distances_and_push_the_indicator() {
+        let names = ["Leader.GetDistanceToNearestAISkater".to_owned(), "Leader.GetDistanceToSkater".to_owned(),
+            "Leader.AddFollowIndicator".to_owned(), "Leader.RemoveFollowIndicator".to_owned()];
+        let o = spot(&[]);
+        let far = |func: u16, args: Vec<Expr>, limit: f32, d: [Option<f32>; 4], flow: &mut Vec<FlowCommand>| {
+            let p = Program { locals: 0, body: vec![Stmt::Return(Expr::Cmp(CmpOp::Ge,
+                Box::new(Expr::Api { func, args }), Box::new(Expr::Lit(Value::Num(limit)))))] };
+            condition(&p, &mut ObjectiveApi { names: &names, objective: &o, ctx: Context::default(), volume: &|_: &str| None,
+                inside: &[], statuses: &[], flow, skater: SkaterFacts { competitor_distances: d, ..Default::default() },
+                tricks_this_frame: &[], tricks_began: &[], trick_groups: &Default::default(), key: &|_: &str| 0u64 },
+                &mut [], &mut [], false)
+        };
+        let mut flow = Vec::new();
+        let d = [Some(60.0), Some(30.0), None, None];
+        assert!(!far(0, vec![], 40.0, d, &mut flow), "nearest competitor is 30 m away");
+        assert!(far(0, vec![], 40.0, [Some(60.0), None, None, None], &mut flow));
+        assert!(far(1, vec![Expr::Lit(Value::Num(1.0))], 50.0, d, &mut flow) && !far(1, vec![Expr::Lit(Value::Num(2.0))], 50.0, d, &mut flow));
+        assert!(!far(0, vec![], 40.0, [None; 4], &mut flow), "no competitor never fails");
+        let call = |func: u16, flow: &mut Vec<FlowCommand>| {
+            let p = Program { locals: 0, body: vec![Stmt::Call(Expr::Api { func, args: vec![] }), Stmt::Return(Expr::Lit(Value::Bool(true)))] };
+            condition(&p, &mut ObjectiveApi { names: &names, objective: &o, ctx: Context::default(), volume: &|_: &str| None,
+                inside: &[], statuses: &[], flow, skater: SkaterFacts::default(), tricks_this_frame: &[], tricks_began: &[],
+                trick_groups: &Default::default(), key: &|_: &str| 0u64 }, &mut [], &mut [], false)
+        };
+        call(2, &mut flow);
+        call(3, &mut flow);
+        assert_eq!(flow, vec![FlowCommand::FollowIndicator(true), FlowCommand::FollowIndicator(false)]);
     }
 }

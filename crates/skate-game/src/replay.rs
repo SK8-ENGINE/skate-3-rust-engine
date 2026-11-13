@@ -109,13 +109,13 @@ fn reset_popup(all: bool) -> skate_core::fe_popup::PopupRequest {
 
 /// The film pack's replay mode (b557: retail renderer flags +0x347AC / +0x347B4 / +0x347B0, set only through events
 /// 0x6BD9CB5A / 0xF81BE84E / 0x02217C9B): local view state, back to the defaults when the replay closes (`82610828`).
-/// Greenscreen draws only the characters over a flat colour; the other two hide the player or every other character.
+/// Greenscreen draws only the characters over a flat color; the other two hide the player or every other character.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ReplayViewMode {
     pub greenscreen: bool,
     pub player: bool,
     pub skaters: bool,
-    /// The greenscreen clear colour (retail's value at the renderer's +0x7DF0 is not read yet; data).
+    /// The greenscreen clear color (retail's value at the renderer's +0x7DF0 is not read yet; data).
     pub greenscreen_colour: [f32; 3],
 }
 

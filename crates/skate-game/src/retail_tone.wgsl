@@ -2,7 +2,7 @@
 @group(0) @binding(0) var source: texture_2d<f32>;
 @group(0) @binding(1) var source_sampler: sampler;
 @group(0) @binding(2) var<storage, read> exposure: vec4<f32>;
-// The retail colour grade (postfx_visualfxPS): near rows 0..2, far rows 3..5 (rgb . row.xyz + row.w), the depth
+// The retail color grade (postfx_visualfxPS): near rows 0..2, far rows 3..5 (rgb . row.xyz + row.w), the depth
 // weights (mult.x, mult.y, add.x, add.y), (camera near, 0, 0, 0) and the replay tint RGBA (row 8). The base record is
 // the identity.
 @group(0) @binding(3) var depth: texture_depth_2d;
@@ -20,7 +20,7 @@ fn fragment(i: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let t = saturate(1.0-xe);
     let tm = max(xe*0.25+0.75,vec3<f32>(1.0))-t*t;
     let curve = sqrt(max(tm*0.5,vec3<f32>(0.0)))*1.41;
-    // The colour matrix after the curve, before the clamp: near and far mixed linearly in view depth (reverse-Z
+    // The color matrix after the curve, before the clamp: near and far mixed linearly in view depth (reverse-Z
     // infinite perspective: view depth = near / depth; depth 0 = far away).
     let size = vec2<f32>(textureDimensions(depth));
     let d = textureLoad(depth, vec2<i32>(clamp(i.uv * size, vec2<f32>(0.0), size - 1.0)), 0);

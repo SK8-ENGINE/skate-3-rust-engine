@@ -39,9 +39,9 @@ asking for the task it describes, or by name (for example `/regression-check`).
 | `make-mod` | Write and validate Lua API 2 mods, including the audio and world-audio mod APIs; moddability rules for engine features. |
 | `prior-work-check` | Search upstream PRs/issues, forks and sibling projects before starting work. |
 | `conflict-resolution` | Merge branches without losing lines: reuse existing resolutions, hunk-level reuse, a lost-line checker, semantic-conflict detection, stacking conflicting PRs. |
-| `optimisation` | Performance work with proof of identical behaviour: measure first, byte-identical e2e hashes, an adversarial review checklist, worked examples from the native audio passes. |
-| `recomp-research` | Reverse-engineer retail behaviour with the skate3recomp research build: find code, write guarded trace hooks, drive the game, analyse traces, port in your own words. |
-| `recomp-scripted-runs` | Unattended scripted recomp sessions (pad scripts, teleport routes, background mode, screenshots), passive sessions, the trace line catalogue, recomp artefacts to discount. |
+| `optimisation` | Performance work with proof of identical behavior: measure first, byte-identical e2e hashes, an adversarial review checklist, worked examples from the native audio passes. |
+| `recomp-research` | Reverse-engineer retail behavior with the skate3recomp research build: find code, write guarded trace hooks, drive the game, analyze traces, port in your own words. |
+| `recomp-scripted-runs` | Unattended scripted recomp sessions (pad scripts, teleport routes, background mode, screenshots), passive sessions, the trace line catalog, recomp artefacts to discount. |
 | `recomp-audio-trace` | Build the recomp research build (title update, clang toolchain) and trace which audio banks/samples retail plays. |
 | `ghidra` | Read retail TU3 (title update 3) functions as Ghidra pseudocode (Ghidra 12.1 + the Xenon360 XEX/XEXP loader with VMX128): where to get the latest releases, setup from your own install, a batch decompile tool, a headless wrapper, an optional language patch for five missing VMX128 instructions, known quirks. |
 | `aems-port` | The native Rust port of the retail audio runtime (AEMS evaluator, voice graph, MixMap, grain bed, Splice, player and world components): workflow, oracles, specs, the console-cadence rule. |
@@ -59,7 +59,7 @@ asking for the task it describes, or by name (for example `/regression-check`).
 |---|---|
 | `conflict-resolution/tools` | `check_lines_kept.py` (lines a branch added that the merge lost), `resolve_like.py` (resolve hunks exactly like a reference branch), `pick_hunks.py` (resolve conflict hunks by a per-hunk choice) |
 | `optimisation/tools` | `e2e_bench.sh`, `compare_runs.sh`, `timing_summary.py` (headless audio bench and identity check), `audio_timing_summary.py` (`AUDIO_TIMING` readout), `frame_log_summary.py` (`SKATE_FRAME_LOG` readout) |
-| `recomp-research/tools` | `trace.py` (shared trace reader + malformed-line check), `first_pass.py` (summarise first-pass hooks), `fn.sh` (dump a recompiled function), `fnstrings.py` (strings a function references) |
+| `recomp-research/tools` | `trace.py` (shared trace reader + malformed-line check), `first_pass.py` (summarize first-pass hooks), `fn.sh` (dump a recompiled function), `fnstrings.py` (strings a function references) |
 | `recomp-scripted-runs/tools` | `recomp_script_run.sh` (boot, script, trace, stop), `screen_loop.ps1` (window screenshots), `stop_dev_recomp.ps1`, `make_location_script.py` (Challenge Map teleport scripts) |
 | `aems-port/tools` | `e2e/` (scenario writer, render comparisons, frame levels, retail capture windows), `grec_level.py` (retail rolling-bed levels from GREC lines) |
 | `audio-tuning/tools` | `check_sets_vs_trace.py`, `long_run_stats.py`, `check_bed_level.py` (world audio vs recomp traces) |
@@ -82,7 +82,7 @@ search, vault inspection, setup equivalence) are in `tools/` (upstream PR #37, m
 - For the recomp skills: you build [skate3recomp](https://github.com/mchughalex/skate3recomp) yourself from your own
   copy (including the title update the recomp's sources expect), plus research hooks (script player, background
   mode, trace writer and hooks) as described in `recomp-research` and `recomp-scripted-runs`. Credit skate3recomp,
-  its rexglue SDK and Xenia whenever you use findings from it. skate3recomp has no licence: it is a reference to run
+  its rexglue SDK and Xenia whenever you use findings from it. skate3recomp has no license: it is a reference to run
   and read locally; never copy its code or generated code into the engine.
 - Audio skills (`aems-port`, `audio-tuning`, `audio-autotest`, the audio parts of `make-mod`) describe the native
   audio engine (upstream PR #32, merged 2026-10-06, and its follow-ups).
@@ -96,8 +96,8 @@ search, vault inspection, setup equivalence) are in `tools/` (upstream PR #37, m
   levels, weightings or timings; label values with their source.
 - **Moddable from the start:** data-driven values (retail values as defaults from setup data), stable identities a
   mod can override, a mod-facing API next to the engine-facing one, cleanup when a mod is disabled.
-- **Multiplayer-ready:** stable ids, serialisable events, deterministic ticks.
-- **Optimise only with proof of identical behaviour.**
+- **Multiplayer-ready:** stable ids, serializable events, deterministic ticks.
+- **Optimize only with proof of identical behavior.**
 - **No game code or data in the repo**, and credit every project you learn from.
 - **One game instance at a time** (engine or recomp), hard time limits on every automated run, and clean up
   processes and temporary output afterwards.

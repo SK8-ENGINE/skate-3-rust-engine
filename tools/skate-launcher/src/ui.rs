@@ -179,7 +179,7 @@ pub struct App {
     fixed_t: Option<f32>,
     last_act: (u8, bool, Instant),
     powered_off: bool,
-    /// A game's window took over: the panel is folding shut, then the window minimises.
+    /// A game's window took over: the panel is folding shut, then the window minimizes.
     folding: bool,
 }
 
@@ -557,7 +557,7 @@ impl App {
         if !lit_ok { sb.ok = false; }
         if row == 0 && k == N - 1 && drawn > w * h / 50 { sb.ok = false; }
         sb.text.push_str(&format!("{} {k}: open {open:.2}, screen lit {lit}/{seen}, drawn left of the hinge {drawn} px{}\r\n", if row == 0 { "fold" } else { "reopen" }, if lit_ok { "" } else { "  DARK" }));
-        // The sheet: 7 x 2 tiles at a third of the size over a dark grey.
+        // The sheet: 7 x 2 tiles at a third of the size over a dark gray.
         let (tw, th) = (w / 3, h / 3);
         if sb.sheet.is_empty() {
             sb.size = (tw * N, th * 2);

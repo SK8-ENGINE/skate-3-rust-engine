@@ -249,7 +249,7 @@ pub fn oneshot_interval(r: &OneShotRecord, speed: f32, rand: &mut dyn FnMut() ->
 pub struct LfoRecord {
     pub q: f32,
     pub gain: f32,
-    /// km/h low / high, centre Hz at low / high speed (the low one is also the floor).
+    /// km/h low / high, center Hz at low / high speed (the low one is also the floor).
     pub speed: [f32; 2],
     pub hz: [f32; 2],
     pub period_ms: f32,
@@ -267,7 +267,7 @@ pub struct JitterRecord {
     pub gain: [i32; 2],
 }
 
-/// Graph A PI20 #2's random centre (0x100..0x11C): km/h low / high, max hold (ms) at low / high speed, Hz range
+/// Graph A PI20 #2's random center (0x100..0x11C): km/h low / high, max hold (ms) at low / high speed, Hz range
 /// (milli-Hz).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FreqRecord {
@@ -413,7 +413,7 @@ impl EqManager {
         let lfo = |p: usize| Peak { freq: self.lfo[p].hz, gain: r.lfo[p].gain, q: r.lfo[p].q };
         [
             DynamicParams { gain: gain_a, shift, peaks: [lfo(0), Peak { freq: self.freq.hz, gain: self.jitter[0].gain, q: r.jitter[0].q }], angle },
-            // Graph B's PI20 #2 centre is never written (0: the EQ's frequency floor).
+            // Graph B's PI20 #2 center is never written (0: the EQ's frequency floor).
             DynamicParams { gain: gain_b, shift, peaks: [lfo(1), Peak { freq: 0.0, gain: self.jitter[1].gain, q: r.jitter[1].q }], angle },
         ]
     }

@@ -2,7 +2,7 @@
 //! records the conditions read (entered volumes, tricks, session marker flags), which messages evaluate an
 //! objective, and the Flow / Reset controls. The condition itself is a callback here; setup translates retail's
 //! predicates into data for it (docs/hails-additions/42-challenges.md "Decision: objectives as data, not Lua").
-//! Retail behaviour: research b841, b860, b863, b864, b865.
+//! Retail behavior: research b841, b860, b863, b864, b865.
 use std::collections::VecDeque;
 
 /// Retail objective states (`obj+0x4F8`).

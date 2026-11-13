@@ -23,7 +23,7 @@ pub use skate_audio_fma::{Choice as FmaChoice, Path as FmaPath, active as fma_pa
 pub const INV_32767: f32 = 0.000_030_518_509;
 
 /// `i % len` for ring-buffer indices, without the integer division in the common cases (`i` below
-/// `2·len`, as every caller's index is): the same value for every `i` and `len > 0` (optimisation
+/// `2·len`, as every caller's index is): the same value for every `i` and `len > 0` (optimization
 /// pass 2026-10-03; test `wrap_is_the_remainder`).
 #[inline]
 pub fn wrap(i: usize, len: usize) -> usize {

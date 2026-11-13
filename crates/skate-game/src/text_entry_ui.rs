@@ -13,7 +13,7 @@ impl bevy::prelude::Plugin for TextEntryUiPlugin {
     }
 }
 
-/// Retail panel colours (the Extras popup's `controls/panel` draws): the cream paper fills, the paper tint of the
+/// Retail panel colors (the Extras popup's `controls/panel` draws): the cream paper fills, the paper tint of the
 /// body's inner corners and edges, the title band, the body, text on paper, the title.
 const CREAM: [f32; 4] = [0.996, 0.918, 0.753, 1.0];
 const PAPER_TINT: [f32; 4] = [0.749, 0.710, 0.616, 1.0];
@@ -152,7 +152,7 @@ fn panel(out: &mut Vec<Draw>, x0: f32, y0: f32, x1: f32, y1: f32) {
     }
 }
 
-/// Text in a retail font with its top-left at (x, y) (centred on x when asked); glyphs as `apt_scene` lays a text
+/// Text in a retail font with its top-left at (x, y) (centered on x when asked); glyphs as `apt_scene` lays a text
 /// field's line out (shadow fonts draw their black pass, then the foreground one pixel right).
 fn text(out: &mut Vec<Draw>, font: Option<&Font>, s: &str, height: f32, x: f32, y: f32, centred: bool, colour: [f32; 4]) {
     let Some(font) = font else { return };
@@ -207,7 +207,7 @@ fn prompts(out: &mut Vec<Draw>, fonts: &KeyboardFonts, items: &[(&str, String)],
     }
 }
 
-/// The keyboard's draws, centred on the stage; nothing while it is closed or hidden under a popup.
+/// The keyboard's draws, centered on the stage; nothing while it is closed or hidden under a popup.
 pub(crate) fn draws(view: &TextEntryView, fonts: &KeyboardFonts, language: &std::collections::BTreeMap<String, String>) -> Vec<Draw> {
     let mut out = Vec::new();
     let Some(keyboard) = view.keyboard.as_ref().filter(|_| !view.hidden) else { return out };

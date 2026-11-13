@@ -1,5 +1,5 @@
-//! Retail post FX colour matrices (`post_fx` records, b100), built like 827F13D8.
-//! Formula: docs/hails-additions/35-world-shading-parity.md#colour-matrix-records
+//! Retail post FX color matrices (`post_fx` records, b100), built like 827F13D8.
+//! Formula: docs/hails-additions/35-world-shading-parity.md#color-matrix-records
 
 /// One band's record values (`near_*` / `far_*`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -53,7 +53,7 @@ pub fn build(b: &ColourBand) -> [[f32; 4]; 3] {
     })
 }
 
-/// Apply a matrix to a colour.
+/// Apply a matrix to a color.
 pub fn apply(m: &[[f32; 4]; 3], rgb: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|i| m[i][0] * rgb[0] + m[i][1] * rgb[1] + m[i][2] * rgb[2] + m[i][3])
 }
@@ -76,7 +76,7 @@ mod tests {
     }
 
     /// The zombie near band (`colour_matrix_zombiemode`: multiply (2.0, 1.4, 1.0), saturation 0.5, contrast 1.3,
-    /// midpoint 0.5, add 0): grey stays grey before the multiply, so mid grey comes out yellow (1.0, 0.7, 0.5).
+    /// midpoint 0.5, add 0): gray stays gray before the multiply, so mid gray comes out yellow (1.0, 0.7, 0.5).
     #[test]
     fn the_zombie_band_turns_grey_yellow() {
         let near = ColourBand { multiply: [2.0, 1.4, 1.0], add: [0.0; 3], contrast: 1.3, contrast_midpoint: 0.5, saturation: 0.5 };
@@ -85,7 +85,7 @@ mod tests {
         // Saturation 0.5 halves the distance to luma: pure red (contrast 1, multiply 1) -> (0.65, 0.15, 0.15).
         let sat = build(&ColourBand { saturation: 0.5, ..Default::default() });
         assert!(close(apply(&sat, [1.0, 0.0, 0.0]), [0.65, 0.15, 0.15]));
-        // The far band's add -0.4 darkens: mid grey with contrast 1.5 -> 0.1 before the multiply.
+        // The far band's add -0.4 darkens: mid gray with contrast 1.5 -> 0.1 before the multiply.
         let far = ColourBand { multiply: [1.0; 3], add: [-0.4; 3], contrast: 1.5, contrast_midpoint: 0.5, saturation: 1.0 };
         assert!(close(apply(&build(&far), [0.5; 3]), [0.1; 3]));
     }

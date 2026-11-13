@@ -113,7 +113,7 @@ pub fn board_bounds(frame: Frame, offset: Vector, extents: Vector) -> Bounds {
 }
 
 ///82D2E250 with argument7=true (the riding skitch query, 82D39BB8): the frame's own forward (row2, not
-///flattened), right = row0 with y removed and normalised, up = forward x right; same placement as
+///flattened), right = row0 with y removed and normalized, up = forward x right; same placement as
 ///[`board_bounds`].
 pub fn skitch_bounds(frame: Frame, offset: Vector, extents: Vector) -> Bounds {
     let forward = frame[2];

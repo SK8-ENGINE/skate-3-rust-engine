@@ -20,6 +20,8 @@ pub(crate) struct Rider {
     pub slot: u32,
     pub npc: Option<LivingWorldId>,
     pub moving: bool,
+    /// The speed multiplier the host sets (1 for contests; follow the leader's follower band).
+    pub scale: f32,
 }
 
 pub(crate) struct ContestAi {
@@ -50,7 +52,7 @@ impl ContestAi {
             .collect();
         let riders = competitors.iter().enumerate().map(|(i, row)| {
             let (look, name_id) = looks.get(row).cloned().unwrap_or_else(|| (row.clone(), row.clone()));
-            Rider { id: i as u32 + 1, row: row.clone(), look, name_id, slot: slots[i], npc: None, moving: false }
+            Rider { id: i as u32 + 1, row: row.clone(), look, name_id, slot: slots[i], npc: None, moving: false, scale: 1.0 }
         }).collect::<Vec<_>>();
         info!("SKATE_CONTEST {contest}: {} AI riders (id, row, slot) {:?} on {} lines", riders.len(),
             riders.iter().map(|r| (r.id, r.row.as_str(), r.slot)).collect::<Vec<_>>(), lines.len());
@@ -94,6 +96,7 @@ impl ContestAi {
             let hex: String = line.iter().map(|b| format!("{b:02x}")).collect();
             info!("SKATE_CONTEST rider {} ({}): slot {} npc {:?} line {hex} at {at:?}", r.id, r.row, r.slot, r.npc);
         }
+        population.contest_riders = self.riders.iter().filter_map(|r| r.npc).collect();
     }
 
     /// run_round: UnpinAI + StartPath.
@@ -115,6 +118,7 @@ impl ContestAi {
         }
         crate::living_world::merge_npc_lines(population, &self.lines, false);
         population.scripted_lines = None;
+        population.contest_riders.clear();
     }
 
     /// One update: a pinned rider's clock is held for the world ticks since the last update, a released one runs.
@@ -126,7 +130,7 @@ impl ContestAi {
             match clocks.get_mut(entity) {
                 Ok(mut clock) => {
                     clock.moving = r.moving;
-                    clock.scale = 1.0;
+                    clock.scale = r.scale;
                     if !r.moving {
                         clock.held += ticks * FRAMES_PER_TICK;
                     }

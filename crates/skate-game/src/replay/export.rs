@@ -411,7 +411,7 @@ pub(crate) fn wide_path(path: &Path) -> Vec<u16> {
 mod tests {
     use super::*;
 
-    /// Two seconds of moving colour and a tone through `open_sink`: an .mp4 with Windows' encoder, else the PNG + WAV
+    /// Two seconds of moving color and a tone through `open_sink`: an .mp4 with Windows' encoder, else the PNG + WAV
     /// folder; either way something real is written (no window, no game).
     #[test]
     fn exports_frames_and_sound_to_a_file() {

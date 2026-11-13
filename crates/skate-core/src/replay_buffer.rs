@@ -109,7 +109,7 @@ impl ReplayBuffer {
         }
     }
 
-    /// Record `pose` for `id` in the current frame. Skipped when it quantises to the last key.
+    /// Record `pose` for `id` in the current frame. Skipped when it quantizes to the last key.
     pub fn record(&mut self, id: u64, pose: &ActorPose) {
         let Some(&now) = self.frames.back() else { return };
         let previous_frame = self.frames.len().checked_sub(2).map(|i| self.frames[i]);
@@ -336,7 +336,7 @@ fn put_f32s(out: &mut Vec<u8>, v: &[f32; 3]) {
     }
 }
 
-/// Normalised, w kept non-negative (q and -q are the same rotation), each component x 32767.
+/// Normalized, w kept non-negative (q and -q are the same rotation), each component x 32767.
 fn put_quat(out: &mut Vec<u8>, q: [f32; 4]) {
     let len = q.iter().map(|c| c * c).sum::<f32>().sqrt();
     let q = if len > 1.0e-12 && len.is_finite() { q.map(|c| c / len) } else { [0.0, 0.0, 0.0, 1.0] };

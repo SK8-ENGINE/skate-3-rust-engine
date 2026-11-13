@@ -226,7 +226,7 @@ impl AiPath {
             .sum()
     }
 
-    /// Polyline length in metres.
+    /// Polyline length in meters.
     pub fn length(&self) -> f32 {
         self.nodes
             .windows(2)
@@ -235,7 +235,7 @@ impl AiPath {
     }
 }
 
-/// Decoded node orientation: 4 bytes `(b - 128) / 127`, renormalised (component order not confirmed).
+/// Decoded node orientation: 4 bytes `(b - 128) / 127`, renormalized (component order not confirmed).
 pub fn decode_orientation(raw: [u8; 4]) -> [f32; 4] {
     let q = raw.map(|b| (f32::from(b) - 128.0) / 127.0);
     let norm = q.iter().map(|c| c * c).sum::<f32>().sqrt();

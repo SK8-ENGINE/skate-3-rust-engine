@@ -45,7 +45,7 @@ pub struct LaneId {
 }
 
 /// A cubic Hermite curve with its arc-length table (`arc[k]` = length from the start to parameter
-/// `k / 15`): a lane piece's centre line or a turn connector [data].
+/// `k / 15`): a lane piece's center line or a turn connector [data].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Curve {
     pub start: Vec3,
@@ -490,7 +490,7 @@ impl RoadNetwork {
     }
 
     /// Point and direction on a lane at `distance` along the segment. `lane` may be fractional
-    /// (a lane change blends between two lanes); 0.0 is the centre of lane 0.
+    /// (a lane change blends between two lanes); 0.0 is the center of lane 0.
     pub fn lane_frame(&self, segment: usize, lane: f32, distance: f32) -> Frame {
         let s = &self.segments[segment];
         let p = &s.pieces[self.piece_at(segment, distance)];
@@ -499,7 +499,7 @@ impl RoadNetwork {
         let c = p.centre.point(t);
         let across_s = sub(p.right_start, p.left_start);
         let across_e = sub(p.right_end, p.left_end);
-        // Fraction of the way from the centre to the right edge: -1 left edge, +1 right edge.
+        // Fraction of the way from the center to the right edge: -1 left edge, +1 right edge.
         let f = 2.0 * (lane + 0.5) / s.lanes as f32 - 1.0;
         let half: Vec3 = std::array::from_fn(|i| 0.5 * (across_s[i] + (across_e[i] - across_s[i]) * t));
         let position = std::array::from_fn(|i| c[i] + half[i] * f);

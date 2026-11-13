@@ -77,7 +77,7 @@ fn a_commit_on_an_empty_lane_is_lost_like_retail() {
 }
 
 /// b461 tests 1 / 2 / 4 / 5: the base game's B writes the segment between the clip markers (hard keys on speed and
-/// shake), the neighbours keep their values, and over a hard key nothing is written.
+/// shake), the neighbors keep their values, and over a hard key nothing is written.
 #[test]
 fn a_base_commit_writes_the_segment_between_clip_markers() {
     let mut edit = ReplayEdit::default();
@@ -194,7 +194,7 @@ fn replay_look_replaces_the_world_grade_terms_it_sets() {
     assert!((look.record.far.saturation - 2.0).abs() < 1e-6);
     assert!((look.record.near.add[0] - 0.4).abs() < 1e-6 && (look.record.far.add[2] - 0.4).abs() < 1e-6);
     assert!((look.record.near.contrast - 2.0).abs() < 1e-6);
-    // Mid-grey red at x2 saturation (contrast and brightness neutral): twice the distance from luma.
+    // Mid-gray red at x2 saturation (contrast and brightness neutral): twice the distance from luma.
     let mut neutral = look.record.near;
     neutral.contrast = 1.0;
     neutral.add = [0.0; 3];

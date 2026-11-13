@@ -19,7 +19,7 @@ class MenuTextureDecodeTests(unittest.TestCase):
                 for trial in range(20):
                     data = bytearray(rng.getrandbits(8) for _ in range(blocks * block + rng.randint(0, 7)))
                     if trial % 3 == 0:
-                        # Three-colour blocks (c0 <= c1) and six-step alpha (a0 <= a1).
+                        # Three-color blocks (c0 <= c1) and six-step alpha (a0 <= a1).
                         for k in range(blocks):
                             o = k * block + block - 8
                             data[o:o + 4] = bytes((1, 0, 2, 0))

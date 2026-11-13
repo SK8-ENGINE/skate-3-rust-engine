@@ -5587,6 +5587,7 @@ dependencies = [
  "gltf",
  "half",
  "image",
+ "libc",
  "naga",
  "naga_oil",
  "sdl3",

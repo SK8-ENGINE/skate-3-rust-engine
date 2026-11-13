@@ -89,7 +89,7 @@ fn valid(t: &Teleporter) -> bool {
     !t.exits.is_empty() && t.exits.iter().all(|e| e.matrix.iter().flatten().all(|v| v.is_finite()))
 }
 
-/// A teleporter was confirmed (serialisable: the authority decides, peers apply; multiplayer-ready, no transport).
+/// A teleporter was confirmed (serializable: the authority decides, peers apply; multiplayer-ready, no transport).
 #[derive(Message, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TeleporterUsed {
     pub body: String,

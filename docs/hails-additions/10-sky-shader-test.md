@@ -1,6 +1,6 @@
 # Sky shader validation test
 
-Branch: `gameplay/water`. Status: **done**; test-only change, no game behaviour changes.
+Branch: `gameplay/water`. Status: **done**; test-only change, no game behavior changes.
 
 ## Problem
 
@@ -21,7 +21,7 @@ declared only under `#ifdef VERTEX_POSITIONS`
 (`vendor/bevy_pbr/src/render/mesh.rs`, `shader_defs.push("VERTEX_POSITIONS")`), so
 the shader compiles in the game. The test's `validate` helper
 (`crates/skate-game/src/retail_shader_tests.rs`) composes shaders with its own
-def list, which included the UV/tangent/colour/normal defs but not
+def list, which included the UV/tangent/color/normal defs but not
 `VERTEX_POSITIONS`. The world shader never reads `Vertex.position`, so only the
 sky test tripped over it.
 

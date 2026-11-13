@@ -18,12 +18,12 @@ pub type VehicleKey = u32;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VehicleSnapshot {
     pub id: VehicleKey,
-    /// Mover `+16`: the car's length along its lane (its centre is the cursor point).
+    /// Mover `+16`: the car's length along its lane (its center is the cursor point).
     pub length: f32,
     /// Mover `+92`: speed, m/s.
     pub speed: f32,
     pub place: Place,
-    /// Mover `+68` (on a lane) or `+60` (on a connector): metres along it.
+    /// Mover `+68` (on a lane) or `+60` (on a connector): meters along it.
     pub distance: f32,
     /// Mover `+100` (`+3516`): look-ahead distance; FollowingLane runs the query once the stop
     /// line is within `look_ahead + speed x 1 s`.
@@ -147,7 +147,7 @@ pub struct EntryQuery<'a> {
     pub check_lights: bool,
 }
 
-/// FollowingLane runs the query once the stop line is within `look_ahead + speed` metres.
+/// FollowingLane runs the query once the stop line is within `look_ahead + speed` meters.
 pub fn query_due(me: &VehicleSnapshot, to_line: f32) -> bool {
     me.look_ahead + me.speed >= to_line
 }

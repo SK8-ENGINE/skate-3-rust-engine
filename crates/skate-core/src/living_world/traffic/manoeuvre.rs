@@ -1,5 +1,5 @@
-//! The traffic manoeuvre decider (b69, b71 to b74; 82C3D830, 82C41CD0): overtake, lane change, pull-over.
-//! Retail mechanism: docs/hails-additions/26h-living-world-traffic.md#traffic-manoeuvres
+//! The traffic maneuver decider (b69, b71 to b74; 82C3D830, 82C41CD0): overtake, lane change, pull-over.
+//! Retail mechanism: docs/hails-additions/26h-living-world-traffic.md#traffic-maneuvers
 
 /// Per-car values (spec and driver records; retail defaults from the setup data, a mod may override them).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -191,7 +191,7 @@ mod tests {
     }
 }
 
-/// The car's manoeuvre state (Vehicle.xml states, b74): following its lane (lane changes included, see
+/// The car's maneuver state (Vehicle.xml states, b74): following its lane (lane changes included, see
 /// `Car::passage`), pulling over to its reserved spot, parked there, pulling out again.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Manoeuvre {

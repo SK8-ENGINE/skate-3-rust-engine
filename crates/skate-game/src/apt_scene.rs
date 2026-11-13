@@ -1,7 +1,7 @@
 //! Retained movie traversal. All geometry and glyphs come from the owned APT.
 //!
 //! Shapes are the retail GEO units (pre-tessellated, one render type each; doc 31 "Milestone 4"):
-//! `solid` units draw their unit colour, `texture_clamped` / `texture_wrapped` units sample the
+//! `solid` units draw their unit color, `texture_clamped` / `texture_wrapped` units sample the
 //! bitmap character the unit names (GEO unit +0x14 -> bitmap character -> texture resource) with
 //! UVs from the unit's UV matrix (GEO unit +0x18, divided by the texture size at export). The
 //! texture a unit draws with comes from a `ShapeSource`, so menus can resolve imported shapes and
@@ -59,7 +59,7 @@ pub trait ShapeSource {
     fn texture(&self, _character: i32, shape: &Shape) -> String {
         shape.texture.as_ref().map_or_else(String::new, |t| t.rgba.clone())
     }
-    /// Retail unit colour rule (825D5580: unit colour * multiply + add as one colour, skip at
+    /// Retail unit color rule (825D5580: unit color * multiply + add as one color, skip at
     /// alpha <= 0). The HUD keeps its earlier `texel * multiply + add` until it is checked in game.
     fn retail_unit_colour(&self) -> bool {
         false
@@ -71,7 +71,7 @@ impl ShapeSource for Shapes {
     }
 }
 pub struct Draw {
-    /// Texture key ("" for solid units: draw the colour only).
+    /// Texture key ("" for solid units: draw the color only).
     pub texture: String,
     pub vertices: Vec<Vertex>,
     pub multiply: [f32; 4],
@@ -103,7 +103,7 @@ pub fn draw(movie: &Movie, vm: &Vm, shapes: &dyn ShapeSource) -> Result<Vec<Draw
 }
 pub const IDENTITY: [f32; 6] = [1., 0., 0., 1., 0., 0.];
 /// Draws a movie whose root sits under `parent` (a movie loaded into a clip of another movie on the
-/// front-end stage), with the parent's colour transform.
+/// front-end stage), with the parent's color transform.
 pub fn draw_from(
     movie: &Movie,
     vm: &Vm,
@@ -205,7 +205,7 @@ fn visit(
                 continue;
             }
             let (unit_multiply, unit_add) = if shapes.retail_unit_colour() {
-                // Retail draw 825D5580: colour = unit colour * cxform multiply + add, one colour
+                // Retail draw 825D5580: color = unit color * cxform multiply + add, one color
                 // for the whole unit (TheSimpleDraw sub_82805368); nothing drawn when its alpha <= 0.
                 let colour: [f32; 4] = std::array::from_fn(|i| shape.color[i].mul_add(multiply[i], add[i]));
                 if colour[3] <= 0. {
@@ -259,7 +259,7 @@ fn visit(
             let mut vertices = Vec::new();
             for (row, value) in lines.iter().enumerate() {
             let width = font.width(value, height);
-            // 82CA23B4: 1 right, 2 and 3 centred (factor 0.5 at 0x8209975C), else left.
+            // 82CA23B4: 1 right, 2 and 3 centered (factor 0.5 at 0x8209975C), else left.
             let mut x = bounds[0]
                 + advance_x
                 + font.offset[0] * sx
@@ -302,7 +302,7 @@ fn visit(
                 16,
             )
             .map_err(|e| e.to_string())?;
-            // Script `TextField.textColor` replaces the authored colour (alpha kept); settings rows set it per state.
+            // Script `TextField.textColor` replaces the authored color (alpha kept); settings rows set it per state.
             let rgb = match vm.get(id, "textColor") {
                 crate::apt_vm::Value::Undefined => argb & 0xFF_FFFF,
                 v => crate::apt_vm::to_integer(&v) as u32 & 0xFF_FFFF,

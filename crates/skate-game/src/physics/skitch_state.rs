@@ -42,7 +42,7 @@ impl Default for SkitchSettings {
     }
 }
 
-/// The per-skater state 104 (state offsets in the field docs; serialisable plain data).
+/// The per-skater state 104 (state offsets in the field docs; serializable plain data).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct SkitchState {
     pub settings: SkitchSettings,

@@ -11,7 +11,7 @@ PREFIX = 'data/scene/trickguide/'
 ICE = 'data/scene/ice_000.bin'
 SET_MODEL = 'world/models/DIST_TrickGuide'
 SET_TEXTURES = 'world/models/DIST_TrickGuide_Textures'
-# FE 62's preview stage (MarqueeViewer): the Create-a-Skater set, modelled in world space around (-4..0, 200, -15..0)
+# FE 62's preview stage (MarqueeViewer): the Create-a-Skater set, modeled in world space around (-4..0, 200, -15..0)
 # where the viewer places the skater and camera (research b585; the disc spells it CreateSakter).
 STAGE_MODEL = 'world/models/DIST_CreateSakter'
 STAGE_TEXTURES = 'world/models/DIST_CreateSakter_Textures'

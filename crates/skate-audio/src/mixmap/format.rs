@@ -24,7 +24,7 @@ pub struct Variant {
     pub curves: [u32; 4],
     /// Doppler speed constant (0 = none).
     pub doppler: u32,
-    /// (min, max) metres per direction d0..d3.
+    /// (min, max) meters per direction d0..d3.
     pub ranges: [(u32, u32); 4],
 }
 

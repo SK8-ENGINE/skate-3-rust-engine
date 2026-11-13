@@ -56,7 +56,7 @@ Fence program items that needed no change (checked, our port already matches):
   the blend state table 0x8307DE80 and entry 1 of the rasterizer table 0x830782DC (checked in the recomp code).
 - [code] Those objects are built once in `sub_82CF5A10` (descriptor contents recovered by constant propagation of
   its stores; not re-derived by hand): depth state 2 = test on, LESSEQUAL, write on, stencil off; blend state 27 =
-  SRC_ALPHA / INV_SRC_ALPHA / ADD for colour and alpha, colour write RGB only, alpha test on, GREATEREQUAL,
+  SRC_ALPHA / INV_SRC_ALPHA / ADD for color and alpha, color write RGB only, alpha test on, GREATEREQUAL,
   reference 16 (read as 16/255, the convention under which the world alpha-test state's reference 30 matches our
   `ALPHA_REF = 30/255`), alpha to coverage off; rasterizer state 1 = the one-sided cull the opaque world
   techniques use.
@@ -100,7 +100,7 @@ had no family either and drew as family 1, which wrongly added the lightmap, sha
   (3) times `m_params.y` (c3, slot 4); fog (5); the full output curve (6..13); output alpha = diffuse alpha (14).
   No lightmap, shadow or `kd`.
 - [code] Technique setter `sub_82CED6D8` (verified by hand: depth entry 2, blend entry 24, rasterizer entry 1).
-  Blend state 24 (descriptor decoded from the recomp code, not re-derived by hand): SRC_ALPHA / INV_SRC_ALPHA / ADD for colour and alpha,
+  Blend state 24 (descriptor decoded from the recomp code, not re-derived by hand): SRC_ALPHA / INV_SRC_ALPHA / ADD for color and alpha,
   RGBA writes, no alpha test; depth state 2 writes depth; rasterizer 1 is one-sided.
 
 ## Evidence (retail traffic lights)
@@ -141,7 +141,7 @@ The DownTown memorial flag (6 materials). It had no family and drew as family 1,
   0.2).
 - [code] Technique setter `sub_82CF1528` (decoded from the recomp code): depth 2, blend 1 (alpha test, no blending), rasterizer 0
   (no culling).
-- [data] Its second TEXCOORD is four normalised shorts; our decoder kept only xy (the lightmap UVs).
+- [data] Its second TEXCOORD is four normalized shorts; our decoder kept only xy (the lightmap UVs).
 
 Our engine before this change: `AlphaMode::Blend` made Bevy turn depth write off
 (`vendor/bevy_pbr/src/render/mesh.rs`, the `BLEND_ALPHA` arm) and write alpha with Bevy's blend, and blended
@@ -155,7 +155,7 @@ materials had cutoff -1, so nothing was alpha-tested; the shader's test compared
   and 33) uses it at its refracted lightmap UV. Trees (9, 10), proxy (11), incandescent (12, 14), ocean (31,
   32) and the unknown-shader fallback (0) keep the single tap.
 - `retail_render.rs`: new render class `BlendedDepthWrite` for family 16 (whatever the material's stored alpha
-  mode): blended, depth write on, colour writes RGB only, one-sided culling; cutoff `TRANSPARENT_ALPHA_REF` =
+  mode): blended, depth write on, color writes RGB only, one-sided culling; cutoff `TRANSPARENT_ALPHA_REF` =
   16/255 (`class_and_cutoff`).
 - `retail_world.wgsl`: for family 16 the alpha test compares the output alpha (diffuse alpha squared).
 - Advertisements: new family 17 (`ADVERTISEMENT_FAMILY`). The converter maps `advertisement.default` to it
@@ -347,9 +347,9 @@ Detail moved out of the code comments of `crates/skate-game/src/retail_backdrop.
 
 ### District backdrop
 
-The district's global presentation model: retail's world record points each district at one extra model outside its world stream (world fields `951898F6C0FA6856` model / `CA5A157A65E75934` textures, for example `DIST_Water_Industrial`). It holds Industrial's sea (`ocean.reflection` around the docks and harbour), the far sea planes of DownTown and University (`environment.reflective_simple`) and the distant tree walls. Setup exports it to `private/native-backdrops/<map>.skate` (`tools/asset_pipeline/backdrop.py`).
+The district's global presentation model: retail's world record points each district at one extra model outside its world stream (world fields `951898F6C0FA6856` model / `CA5A157A65E75934` textures, for example `DIST_Water_Industrial`). It holds Industrial's sea (`ocean.reflection` around the docks and harbor), the far sea planes of DownTown and University (`environment.reflective_simple`) and the distant tree walls. Setup exports it to `private/native-backdrops/<map>.skate` (`tools/asset_pipeline/backdrop.py`).
 
-Without it Industrial's harbour shows the clear colour: a black void.
+Without it Industrial's harbor shows the clear color: a black void.
 
 Far-proxy terrain: retail also streams `proxy<District>_100_Proxy.big` (`proxyworld.default` hills plus their trees) and swaps it per grid cell: while the full-detail cell `cPres_X_Z_high` is active its partner `cPres_X_Z_high_proxy` is deactivated (TU3 proxy world manager sub_8247EF40, streamer sub_8247BB50 -> sub_82C985A8). The engine keeps every district cell loaded, so setup exports only the unpaired proxy cells to `private/native-backdrops/<map>.proxy.skate` (Industrial's south hills under the tree wall; DownTown and University have none). Its draws carry [`ProxyTerrain`] and follow `BackdropSettings::proxy_terrain`.
 
@@ -359,9 +359,9 @@ Moddability: `BackdropSettings` is the one authority; mods reach it through `sdk
 
 Detail moved out of the code comments of `crates/skate-core/src/colour_matrix.rs`; each comment there links its section here.
 
-### Colour matrix records
+### Color matrix records
 
-Retail post FX colour matrices (`post_fx` vault records `colour_matrix`, `colour_matrix_zombiemode`, ...; research b100). Each record has a near and a far band; a band's values build one 3x4 affine colour matrix with `sub_827F13D8` [code]: contrast about a midpoint plus an add, then saturation with luma weights (0.3, 0.6, 0.1), then a per-channel multiply: `out = multiply * Sat_s(contrast * (x - midpoint) + midpoint + add)`.
+Retail post FX color matrices (`post_fx` vault records `colour_matrix`, `colour_matrix_zombiemode`, ...; research b100). Each record has a near and a far band; a band's values build one 3x4 affine color matrix with `sub_827F13D8` [code]: contrast about a midpoint plus an add, then saturation with luma weights (0.3, 0.6, 0.1), then a per-channel multiply: `out = multiply * Sat_s(contrast * (x - midpoint) + midpoint + add)`.
 
 The multiply-last order is [inferred] from the instruction order (b100); the base record is the identity.
 
@@ -421,11 +421,11 @@ Water look: one fine layer at a larger ripple scale tiles visibly over large str
 
 ### Fountain shading
 
-Water look fountains: flat family 30 pixels (basins) take the map's large-water program, with the donor's PCA textures (macro = normal, detail = normal2; its diffuse in decal is not read) and rows (p.fountain, bound by retail_render::bind_fountain_donor) in world space at fountain.x metres per tile; steep pixels (cascades) keep their own flow and gain foam. Blended by slope so stepped fountains do not seam.
+Water look fountains: flat family 30 pixels (basins) take the map's large-water program, with the donor's PCA textures (macro = normal, detail = normal2; its diffuse in decal is not read) and rows (p.fountain, bound by retail_render::bind_fountain_donor) in world space at fountain.x meters per tile; steep pixels (cascades) keep their own flow and gain foam. Blended by slope so stepped fountains do not seam.
 
 ### Park projected lightmap
 
-29..30, 54..56, 66..67, 77..78: min(lerp(dynamic colour, 1, blurred visibility), lerp(exponential colour, 1, saturate(10 N.L) * exponential visibility), projected lightmap). Retail has two shadow terms; our one shadow map feeds both (ours). The park's projected lightmap (skateparkProjectedLightmap, one tap, used linearly; b439 / b440 / b444): g_skateparkProjectedTransform from the world's bounds, the ground projection along the sun (L = the sun direction, toward the sun): u = (z - z0) / dz + y lz / (ly |dz|), v = (x - x0) / dx - y lx / (ly |dx|). Texture rows are flipped at export (map_writer), so v is flipped back. No bounds: neutral 1.
+29..30, 54..56, 66..67, 77..78: min(lerp(dynamic color, 1, blurred visibility), lerp(exponential color, 1, saturate(10 N.L) * exponential visibility), projected lightmap). Retail has two shadow terms; our one shadow map feeds both (ours). The park's projected lightmap (skateparkProjectedLightmap, one tap, used linearly; b439 / b440 / b444): g_skateparkProjectedTransform from the world's bounds, the ground projection along the sun (L = the sun direction, toward the sun): u = (z - z0) / dz + y lz / (ly |dz|), v = (x - x0) / dx - y lx / (ly |dx|). Texture rows are flipped at export (map_writer), so v is flipped back. No bounds: neutral 1.
 
 ## Code reference: retail_shader_tests.rs (fork additions)
 
@@ -435,9 +435,9 @@ Detail moved out of the fork-added code comments of `crates/skate-game/src/retai
 
 Families 7 / 8 are `environmentsimple.alphatest` / `environmentsimple.diffuse` (`tools/asset_pipeline/retail_material.py`), whose VLT effects are `alphatestdefaultenvironment` / `environmentdiffuse`. Both retail programs (`shaders_final.big`, instructions 27-34 / 26-34) compute `min(avg4(lightmap)^2, vis + floor) * diffuse^2 * m_params[0].y` with no kd term, so kd is exactly 1 for them. The other families without a normal map keep the flat-normal kd `0.39 * 2.3956` of the normal-mapped programs.
 
-### Kd normal normalisation
+### Kd normal normalization
 
-Which programs normalise the tangent normal before the kd dot product. `environment.default` (family 1, VLT effect `baseenvironment`) does (`baseenvironment_defaultPS` 29-33: rsq of the combined normal, kd from the normalised xy at 66). `environmentsimple.default` (family 2, effect `defaultenvironment`) and `environment.reflective_simple` (family 6, effect `baseenvironmentreflective_simple`) do not: `defaultenvironment_defaultPS` takes kd from the raw `2n - 1` (38, 61, 63, 67) and `baseenvironmentreflective_simple_defaultPS` from the raw `2n - 1` (14-22, 45, 63, 74-76); their rsq instructions normalise only the view vector, the world normal used for specular / reflection and the tangent-frame sun whose signs pick the kd weights.
+Which programs normalize the tangent normal before the kd dot product. `environment.default` (family 1, VLT effect `baseenvironment`) does (`baseenvironment_defaultPS` 29-33: rsq of the combined normal, kd from the normalized xy at 66). `environmentsimple.default` (family 2, effect `defaultenvironment`) and `environment.reflective_simple` (family 6, effect `baseenvironmentreflective_simple`) do not: `defaultenvironment_defaultPS` takes kd from the raw `2n - 1` (38, 61, 63, 67) and `baseenvironmentreflective_simple_defaultPS` from the raw `2n - 1` (14-22, 45, 63, 74-76); their rsq instructions normalize only the view vector, the world normal used for specular / reflection and the tangent-frame sun whose signs pick the kd weights.
 
 ## Code reference: retail_material_bindings.wgsl (fork additions)
 
@@ -451,7 +451,7 @@ Cloth sway of the retail `animated.flag` (family 21), vertexanimate_defaultVS sl
 
 - The meter reads what retail's CPU meter (`sub_827F0B78`) reads: the alpha of the bloom downsample
   (bloom_dof_tap4_minusthresholdPS), `dp3_sat(sat(tm/2), (0.3, 0.4, 0.3))` (`meter_luminance`), stored 8-bit and read
-  back as byte / 255, centre-weighted, scaled by 2.515 and fed to the native multiplicative evaluator (`sub_827F0D00`).
+  back as byte / 255, center-weighted, scaled by 2.515 and fed to the native multiplicative evaluator (`sub_827F0D00`).
 - NOT RETAIL: it samples a 16x16 bilinear grid of the HDR target instead of the console's 4-tap downsample chain (box
   averages; same mean).
 - The weights and the scale are a mod tuning domain (`exposure`, `ExposureMeter`).

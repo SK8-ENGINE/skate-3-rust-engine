@@ -40,7 +40,7 @@ Gate: `[owner+28]` record present and its `+52` active. Then:
    else if `+238` → `+468` = 10. Both counters then decrement (when > 0).
 5. Poster `sub_824E9FD8`; if on foot: walking voices `sub_824E9D10`; jump voices `sub_824E9678(on
    foot, footplant ended)`; `sub_824EBA08` (remote players only: sends message 0x2056/294 on leaving
-   foot: not modelled); stores `+404` on foot, `+460` = `+768`, `+54/+55/+238/+239` = this frame's
+   foot: not modeled); stores `+404` on foot, `+460` = `+768`, `+54/+55/+238/+239` = this frame's
    copies; splash `sub_824EBB58` (§2.5, not ported).
 
 ### 2.1 Poster `sub_824E9FD8`
@@ -140,7 +140,7 @@ holder+12 × 360/65536 (`0x822F88E8`). So env level and pan are those of the las
 start. Port: `SpliceHost::set_submix(Some(Submix))` before each foot start (host default ignores it);
 the route carries `owner_env` = the env level. Read 2026-10-02: Sen0 #2 is never posted = class default 1.0
 (`ATTRIBUTE_SETGAIN`; recomp SEND lines: 1.0 on all 8 graphs); Sen0 #1 also starts at 1.0 until the first post;
-Pn21 constructor args = descriptor defaults (front 30, side 110, rear 150) with arg 2 (normalisation/law) overwritten
+Pn21 constructor args = descriptor defaults (front 30, side 110, rear 150) with arg 2 (normalization/law) overwritten
 by 0.0 → law gain 1.0 (as the voice open).
 
 ### 2.6 Splash `sub_824EBB58` (not ported)

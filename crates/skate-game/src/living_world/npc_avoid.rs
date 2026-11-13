@@ -10,7 +10,7 @@ use skate_core::living_world::avoid::{self, AvoidMode, AvoidOutput, AvoidSelf, A
 use skate_core::living_world::replay::{node_flags, project_on_line};
 use std::collections::BTreeMap;
 
-/// Board position step of the AI board path, metres per 60 Hz tick (`82C05EC0`, 2 cm).
+/// Board position step of the AI board path, meters per 60 Hz tick (`82C05EC0`, 2 cm).
 pub(crate) const LATERAL_STEP: f32 = 0.02;
 
 /// Retail's skater obstacle size is not decoded per gatherer; the skater gatherer
@@ -27,7 +27,7 @@ pub(crate) struct NpcAvoid {
     pub last: AvoidOutput,
     /// Recorded 60 Hz frames the cursor is held back (fractional; the cursor uses the whole part).
     pub lag: f32,
-    /// Lateral offset of the drawn skater, metres right of the line, now and one tick back.
+    /// Lateral offset of the drawn skater, meters right of the line, now and one tick back.
     pub offset: f32,
     pub previous_offset: f32,
     /// The controller sub-mode state (`ctrl+568` ..., `skate_core::living_world::ai_controller`) and the line it
@@ -100,7 +100,7 @@ pub(crate) fn avoid(
     time: Res<Time>,
     peds: Query<(&Pedestrian, &PedBody)>,
     cars: Query<(&TrafficCar, &CarMotion)>,
-    mut npcs: Query<(&NpcSkater, &mut NpcReplay, Has<crate::autopilot::Possessed>)>,
+    mut npcs: Query<(&NpcSkater, &mut NpcReplay, Has<crate::autopilot::Possessed>, Option<&super::npc_sim::NpcSim>)>,
     mut events: MessageWriter<NpcSkaterEvent>,
 ) {
     let _span = super::timing::span(super::timing::NPC_AVOID);
@@ -170,7 +170,7 @@ pub(crate) fn avoid(
         }
         // Other NPC skaters (their last sample).
         // The autopilot's NPC is the player's body (in the players above); its line sample is no obstacle.
-        let mut list: Vec<_> = npcs.iter().filter(|(_, _, possessed)| !possessed).filter_map(|(n, r, _)| r.last.as_ref().map(|l| (n.id, l.position, l.velocity))).collect();
+        let mut list: Vec<_> = npcs.iter().filter(|(_, _, possessed, _)| !possessed).filter_map(|(n, r, _, _)| r.last.as_ref().map(|l| (n.id, l.position, l.velocity))).collect();
         list.sort_by_key(|x| x.0);
         for (id, p, v) in list {
             obstacles.push(circle(id.to_u64(), ObstacleKind::Skater, p, v, SKATER_SIZE, 1.8));
@@ -180,8 +180,8 @@ pub(crate) fn avoid(
     track.tick = tick;
     let lines = super::npc_skaters::npc_lines(&state);
     let mut sorted: Vec<_> = npcs.iter_mut().collect();
-    sorted.sort_by_key(|(n, _, _)| n.id);
-    for (npc, mut replay, possessed) in sorted {
+    sorted.sort_by_key(|(n, _, _, _)| n.id);
+    for (npc, mut replay, possessed, sim) in sorted {
         let replay = &mut *replay;
         let a = &mut replay.avoid;
         a.previous_offset = a.offset;
@@ -204,10 +204,14 @@ pub(crate) fn avoid(
         let forward = if speed > 1e-3 { sample.velocity.map(|c| c / speed) } else { [0.0, 0.0, 1.0] };
         let here = project_on_line(line, replay.cursor.node, sample.position, 1.0);
         let width = here.map_or(1.0, |p| if a.offset < 0.0 { p.width_left } else { p.width_right });
-        // The skater's actual velocity (retail vtable +16, b112): sample motion this tick; jumps use the recorded one.
+        // The skater's actual velocity (retail vtable +16, b112; own speed +0x1760 from pc+0xA0): a simulated skater's
+        // physics body; on the replay tier the sample's motion this tick (jumps use the recorded one). The line sample of
+        // a simulated skater is its cursor, which races ahead while it catches up on lag (ask 612: own 18.6 m/s while the
+        // body did 8.4 m/s, the floor / cap flip).
         let dt = time.delta_secs();
-        let actual = match a.moved_from {
-            Some(p) if dt > 0.0 && length(sub(sample.position, p)) < MAX_TICK_MOVE => sub(sample.position, p).map(|c| c / dt),
+        let actual = match (sim, a.moved_from) {
+            (Some(sim), _) => sim.deck_velocity(),
+            (None, Some(p)) if dt > 0.0 && length(sub(sample.position, p)) < MAX_TICK_MOVE => sub(sample.position, p).map(|c| c / dt),
             _ => sample.velocity,
         };
         a.moved_from = Some(sample.position);
@@ -241,14 +245,19 @@ pub(crate) fn avoid(
         if out.mode != a.last.mode {
             let target = out.steer_target.and_then(|id| out.entries.iter().find(|e| e.id == id));
             info!(
-                "NPC_AVOID #{} {} mode {} -> {} target {} cap {} floor {} lateral {:.2} lag {:.1} entries {} tick {tick}",
+                "NPC_AVOID #{} {} mode {} -> {} target {} cap {} floor {} own {:.2} sample {:.2} lateral {:.2} lag {:.1} entries {} tick {tick}",
                 npc.id.serial,
                 npc.character,
                 a.last.mode.name(),
                 out.mode.name(),
-                target.map_or("none".to_string(), |e| format!("{:?}#{} ttc {:.2}", e.kind, e.id, e.time_to_contact)),
+                target.map_or("none".to_string(), |e| {
+                    let v = near.iter().find(|o| o.id == e.id).map_or(0.0, |o| length(o.velocity));
+                    format!("{:?}#{} ttc {:.2} v {:.2}", e.kind, e.id, e.time_to_contact, v)
+                }),
                 if out.cap < f32::MAX { format!("{:.2}", out.cap) } else { "none".into() },
                 if out.floor_valid { format!("{:.2}", out.floor) } else { "none".into() },
+                out.own_speed,
+                speed,
                 out.lateral,
                 a.lag,
                 out.entries.len()

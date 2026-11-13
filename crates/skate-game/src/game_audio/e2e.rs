@@ -375,7 +375,7 @@ fn e2e_render() {
         let (hits, transitions) = p.seam_hits();
         eprintln!("{name}: {} frames (+60 settle); Class_Seams hits {hits} ({transitions} material changes)", rows.len());
         if timing && !game_us.is_empty() {
-            // The raw times for the optimisation bench (`tools/audio-bench/`):
+            // The raw times for the optimization bench (`tools/audio-bench/`):
             // one line per measured game-thread call and per rendered block.
             let mut raw = std::io::BufWriter::new(std::fs::File::create(dir.join(format!("{name}.ours.timing.tsv"))).unwrap());
             writeln!(raw, "kind\tus").unwrap();

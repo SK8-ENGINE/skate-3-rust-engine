@@ -1,5 +1,5 @@
 //! The self-contained opcodes: everything that only reads and writes its own block (plus the bank's
-//! tables, the shared RNG and the tick scale). Behaviour per `audio-specs/aems-evaluator-spec.md`
+//! tables, the shared RNG and the tick scale). Behavior per `audio-specs/aems-evaluator-spec.md`
 //! §4; the ops that touch other objects (0–5, 27, 37–39) live in `eval/mod.rs`.
 //!
 //! Every word is an i32 with wrapping arithmetic; floats are f32 with one rounding per operation.

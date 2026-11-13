@@ -275,7 +275,7 @@ struct FrameLogSink(log::FrameLog);
 
 #[derive(Component)]
 struct FrameOverlay;
-/// The counter and, centred under it, the session timer: moved between the corners as one.
+/// The counter and, centered under it, the session timer: moved between the corners as one.
 #[derive(Component)]
 struct FrameStack;
 /// The two top corners the counter can sit in (graphics menu "FPS Counter Position"); the warning stays left.
@@ -580,7 +580,7 @@ fn spawn_overlay(mut commands: Commands) {
         GlobalZIndex(100),
         FrameCorner { right: true },
     ));
-    // The counter with the session timer centred under it (place_overlay moves the pair between the corners).
+    // The counter with the session timer centered under it (place_overlay moves the pair between the corners).
     let stack = commands
         .spawn((
             Name::new("Frame-time stack"),
@@ -628,7 +628,7 @@ fn spawn_overlay(mut commands: Commands) {
                     }
                 });
         });
-    // Attached to the FPS overlay: centred under it (the stack), sized from the window (show_session_timer).
+    // Attached to the FPS overlay: centered under it (the stack), sized from the window (show_session_timer).
     commands.spawn((
         Name::new("Session timer"),
         SessionTimer,
@@ -893,7 +893,7 @@ mod tests {
 
     /// Diagnostics never change the game: no system here writes any resource
     /// but `FrameTiming`, and only `show` writes components (UI nodes, text and
-    /// colours, filtered to this module's overlay markers).
+    /// colors, filtered to this module's overlay markers).
     #[test]
     fn systems_touch_only_their_own_state() {
         use bevy::ecs::system::{IntoSystem, System};

@@ -37,7 +37,7 @@ pub enum Output {
 /// (`sub_82488DD0`: Sub0 → Sen0 env at the owner's level → Sen0 to the eEQChain bus), 0 = none.
 /// `mono`: that bus is mono (the collision manager's per-voice "Collision SubMix",
 /// `sub_824D25E0`): the voice's six channels sum into it (routes 6 → 1, LFE dropped) and it sends
-/// on into its bus's centre (1 → 6).
+/// on into its bus's center (1 → 6).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Route {
     pub output: Output,

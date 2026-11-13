@@ -56,7 +56,7 @@ fn data() -> PedData {
     catalog.categories.insert("aletown".into(), vec!["jock02".into(), "bum02".into()]);
     catalog.categories.insert("empty".into(), vec![]);
     for (e, m, recipe, voice) in [("jock02", "jock02", "male_jock_2", 55), ("bum02", "bum02", "male_bum_2", 60)] {
-        catalog.entities.insert(e.into(), PedEntity { model: Some(m.into()), anim_set: Some("default".into()) });
+        catalog.entities.insert(e.into(), PedEntity { model: Some(m.into()), anim_set: Some("default".into()), ..Default::default() });
         catalog.models.insert(m.into(), PedModel { recipe: recipe.into(), voice: Some(voice), ..Default::default() });
     }
     let rig = PedRig {
@@ -195,7 +195,7 @@ fn living_world_ped_motion_follows_from_the_record_and_tick_at_any_frame_rate() 
             feet_down: [false; 2],
             body_fall: 0.0,
             taunt: Default::default(),
-            plugin_motion: Default::default(),
+            plugin_motion: Default::default(), head_look: Default::default(),
         };
         for _ in 0..ticks {
             body.player.intent = body.path.intent(tick_seconds(60.0), body.player.state);
@@ -204,7 +204,7 @@ fn living_world_ped_motion_follows_from_the_record_and_tick_at_any_frame_rate() 
             body.heading += out.root.yaw;
         }
         assert_eq!((body.position, body.heading, body.player.state), (pos, heading, state));
-        // It walked: the test path moves it a few metres from the spawn point.
+        // It walked: the test path moves it a few meters from the spawn point.
         assert!(pos.distance(Vec3::new(3.0, 0.0, 10.0)) > 1.0, "moved {pos}");
     }
 }
@@ -266,7 +266,7 @@ fn living_world_ped_mod_overrides_and_render_helpers() {
         feet_down: [false; 2],
         body_fall: 0.0,
         taunt: Default::default(),
-        plugin_motion: Default::default(),
+        plugin_motion: Default::default(), head_look: Default::default(),
     };
     let g = ped_globals(&d.rig, &body, &d, 0.0, &f).unwrap();
     assert!((g[1].w_axis.y - 0.92).abs() < 1e-5);
@@ -320,6 +320,13 @@ fn living_world_ped_data_loads_from_the_export() {
     // The hand prop attach bone (b87 / b89; right hand: every carry channel is *RH).
     assert_eq!(d.rig.names.iter().position(|n| n.eq_ignore_ascii_case("RightHandProp")), Some(26));
     assert!(d.clips.len() > 50);
+    // The head look-at records (b1019): marquee pros turn only head and neck; granny inherits default's rates.
+    let pa = &d.catalog.head_look;
+    assert_eq!(pa["default"].bones, [10.0, 5.0, 5.0, 5.0, 5.0, 5.0]);
+    assert_eq!(pa["ip_with_skateboard"].bones, [10.0, 5.0, 5.0, 0.0, 0.0, 0.0]);
+    assert_eq!((pa["granny"].bones[0], pa["granny"].pitch_limit, pa["granny"].overflow_yaw_speed), (8.0, 5.0, 180.0));
+    assert_eq!((d.catalog.head_tracking["default"], d.catalog.head_tracking["noheadtracking"]), (true, false));
+    assert!(d.catalog.entities.values().any(|e| e.postadjust.as_deref() == Some("ip_with_skateboard")));
     // The sit plugin's cycle and the Avoid graph's jump off a seat resolve in the stock sets (the seat-moved avoid).
     let sit_sets = d.anim_sets.values().filter(|s| s.entries.contains_key(super::peds::SIT_CYCLE)).count();
     let avoid_sets = d.anim_sets.values().filter(|s| s.entries.contains_key(skate_core::living_world::peds::avoid::SEATED_CLIPS[0])).count();
@@ -338,10 +345,10 @@ fn living_world_ped_data_loads_from_the_export() {
     }
     let look = d.catalog.choose("aletown", 1, &PedOverrides::default()).unwrap();
     let set = &d.anim_sets[&look.anim_set];
-    let body = PedBody { player: PedAnimPlayer::new(set, 1).unwrap(), path: skate_core::living_world::peds::anim::TestPath::new(1), nav: Default::default(), blocked: 0.0, reaction_due: None, position: Vec3::ZERO, velocity: Vec3::ZERO, heading: 0.0, ticks: 0, feet_down: [false; 2], body_fall: 0.0, taunt: Default::default(), plugin_motion: Default::default() };
+    let body = PedBody { player: PedAnimPlayer::new(set, 1).unwrap(), path: skate_core::living_world::peds::anim::TestPath::new(1), nav: Default::default(), blocked: 0.0, reaction_due: None, position: Vec3::ZERO, velocity: Vec3::ZERO, heading: 0.0, ticks: 0, feet_down: [false; 2], body_fall: 0.0, taunt: Default::default(), plugin_motion: Default::default(), head_look: Default::default() };
     let g = ped_globals(&d.rig, &body, &d, 0.0, &[]).unwrap();
     assert!((0.8..1.1).contains(&g[1].w_axis.y), "hips height {}", g[1].w_axis.y);
-    // The hand prop bone hangs off the right hand, a few centimetres away (rig reference local).
+    // The hand prop bone hangs off the right hand, a few centimeters away (rig reference local).
     assert_eq!(d.rig.parents[26], 12);
     let gap = g[26].w_axis.truncate().distance(g[12].w_axis.truncate());
     eprintln!("RIGHTHANDPROP to RIGHTHAND {gap:.3} m");
@@ -377,7 +384,7 @@ fn living_world_ped_pose_dump_for_a_render_check() {
         "bones": reference.iter().map(|m| m.to_cols_array().to_vec()).collect::<Vec<_>>()})];
     for (set_name, model) in &looks {
         let set = &d.anim_sets[set_name];
-        let mut body = PedBody { player: PedAnimPlayer::new(set, 1).unwrap(), path: skate_core::living_world::peds::anim::TestPath::new(1), nav: Default::default(), blocked: 0.0, reaction_due: None, position: Vec3::ZERO, velocity: Vec3::ZERO, heading: 0.0, ticks: 0, feet_down: [false; 2], body_fall: 0.0, taunt: Default::default(), plugin_motion: Default::default() };
+        let mut body = PedBody { player: PedAnimPlayer::new(set, 1).unwrap(), path: skate_core::living_world::peds::anim::TestPath::new(1), nav: Default::default(), blocked: 0.0, reaction_due: None, position: Vec3::ZERO, velocity: Vec3::ZERO, heading: 0.0, ticks: 0, feet_down: [false; 2], body_fall: 0.0, taunt: Default::default(), plugin_motion: Default::default(), head_look: Default::default() };
         // Scripted intents: idle 0.5 s, walk to 4 s, stop, turn right, then turn left.
         let mut captures: Vec<(u32, String)> = Vec::new();
         let mut turned = 0;
@@ -662,7 +669,7 @@ fn standing_body(at: Vec3) -> PedBody {
         feet_down: [false; 2],
         body_fall: 0.0,
         taunt: Default::default(),
-        plugin_motion: Default::default(),
+        plugin_motion: Default::default(), head_look: Default::default(),
     }
 }
 
@@ -690,7 +697,7 @@ fn living_world_cars_push_peds_out_of_the_way_and_report_the_contact() {
     assert!((e.car_speed - 8.0).abs() < 1e-5 && (e.closing - 8.0).abs() < 1e-5);
     assert!((a - Vec3::new(5.0, 0.0, 7.55)).length() < 1e-4, "pushed off the bumper: {a}");
     assert_eq!(b, Vec3::new(9.0, 0.0, 5.0), "a ped clear of the car is untouched");
-    // Same inputs, same result (deterministic), and the event serialises for a host.
+    // Same inputs, same result (deterministic), and the event serializes for a host.
     let (again, a2, _) = run(VehicleContactParams::default());
     assert_eq!((again, a2), (events.clone(), a));
     let wire = serde_json::to_string(&events[0]).unwrap();
@@ -722,7 +729,7 @@ fn living_world_car_box_matches_the_car_proxy() {
     };
     let pose = Transform::from_translation(Vec3::new(10.0, 2.0, 3.0)).with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
     let b = car_box(&car, &pose);
-    // Facing +x after a quarter turn; the bounds' 0.3 m forward offset moves the centre along +x.
+    // Facing +x after a quarter turn; the bounds' 0.3 m forward offset moves the center along +x.
     assert!((b.forward[0] - 1.0).abs() < 1e-5 && b.forward[1].abs() < 1e-5);
     assert!((b.center[0] - 10.3).abs() < 1e-5 && (b.center[1] - 2.7).abs() < 1e-5 && (b.center[2] - 3.0).abs() < 1e-5);
     assert_eq!(b.half, [1.0, 0.7, 2.3]);
@@ -752,7 +759,7 @@ fn living_world_a_skater_knocks_a_ped_down_or_makes_it_stumble() {
     }
 }
 
-/// Ped behaviour runtime step 1 (data-gated): the stock ped AI and motion graphs load, bind and
+/// Ped behavior runtime step 1 (data-gated): the stock ped AI and motion graphs load, bind and
 /// compile on the shared graph runtime; the AI graph runs on the ped brain host, wanders on its
 /// own and leaves wander for flee when a flee want is raised.
 #[test]
@@ -1147,4 +1154,48 @@ fn ped_tint_keep_holds_the_most_recently_used_and_evicts_the_oldest() {
     let mut off = super::peds::PedTintKeep::with_cap(0);
     off.touch(key(3), || unreachable!("cap 0 keeps nothing"));
     assert!(off.keys().is_empty());
+}
+
+/// The head look-at's axes on the real rig (b1019: yaw about each bone's local X, pitch about the head's local Z): a yaw
+/// turns the head about world up towards the side `target_angles` calls positive, a pitch about a level axis.
+#[test]
+fn living_world_head_look_turns_the_head_about_world_up() {
+    let Some(raw) = std::env::var_os("SKATE3_ASSET_ROOT") else {
+        eprintln!("skipped: set SKATE3_ASSET_ROOT");
+        return;
+    };
+    let Some(root) = std::env::split_paths(&raw).find(|r| r.join(skate_data::ped_anim::PED_BANK).exists() && r.join("private/living_world/tables.json").exists()) else {
+        eprintln!("skipped: no single root holds both the ped bank and living_world/tables.json");
+        return;
+    };
+    let d = PedData::load(&root);
+    let look = d.catalog.choose("aletown", 1, &PedOverrides::default()).unwrap();
+    let set = &d.anim_sets[&look.anim_set];
+    let mut body = PedBody { player: PedAnimPlayer::new(set, 1).unwrap(), path: skate_core::living_world::peds::anim::TestPath::new(1), nav: Default::default(), blocked: 0.0, reaction_due: None, position: Vec3::ZERO, velocity: Vec3::ZERO, heading: 0.0, ticks: 0, feet_down: [false; 2], body_fall: 0.0, taunt: Default::default(), plugin_motion: Default::default(), head_look: Default::default() };
+    let head = d.rig.names.iter().position(|n| n.eq_ignore_ascii_case("Head")).expect("Head bone");
+    for bone in skate_core::living_world::peds::head_look::BONES {
+        eprintln!("{bone}: {:?}", d.rig.names.iter().position(|n| n.eq_ignore_ascii_case(bone)));
+    }
+    let rest = ped_globals(&d.rig, &body, &d, 0.0, &[]).unwrap()[head];
+    let turned = |body: &PedBody| {
+        let g = ped_globals(&d.rig, body, &d, 0.0, &[]).unwrap()[head];
+        let delta = bevy::prelude::Quat::from_mat4(&g) * bevy::prelude::Quat::from_mat4(&rest).inverse();
+        let (axis, angle) = delta.to_axis_angle();
+        (axis, angle.to_degrees())
+    };
+    // A target to the ped's +x side (facing +z): which sign does the yaw carry?
+    let (yaw_sign, _, _) = skate_core::living_world::peds::head_look::target_angles([0.0; 3], 0.0, 1.6, [5.0, 1.6, 5.0]);
+    body.head_look.yaw = vec![30.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+    let (axis, angle) = turned(&body);
+    eprintln!("yaw 30: axis {axis:?} angle {angle:.1}; target_angles yaw for +x {yaw_sign:.1}");
+    assert!((angle - 30.0).abs() < 0.5 && axis.y.abs() > 0.95, "yaw turns about world up: {axis:?} {angle}");
+    // Rotating +z towards +x is a positive turn about +y.
+    assert_eq!(axis.y > 0.0, yaw_sign > 0.0, "a positive target yaw turns the head towards the target");
+    body.head_look.yaw = vec![0.0; 6];
+    body.head_look.pitch = 20.0;
+    let (axis, angle) = turned(&body);
+    eprintln!("pitch 20: axis {axis:?} angle {angle:.1}");
+    assert!((angle - 20.0).abs() < 0.5 && axis.y.abs() < 0.3, "pitch about a level axis: {axis:?}");
+    // Up: a +z-facing head tips its face up = a negative turn about +x.
+    assert!(axis.x < 0.0, "a positive pitch looks up: {axis:?}");
 }

@@ -22,14 +22,14 @@ Needs the dev mod `mods/audio-content-test` (in upstream main since PR #32) with
 
 ## Muted run (any time no game runs)
 `powershell -File .claude\skills\audio-autotest\tools\audio_mod_autotest.ps1 -Worktree <checkout> -Pass both`.
-Minimised window, `--mute`, 5 s steps. It waits while another skate3 / skate3rust process runs or
+Minimized window, `--mute`, 5 s steps. It waits while another skate3 / skate3rust process runs or
 `.local\GAME_LOCK.txt` exists, and writes and removes only its own lock. One game instance at a time.
 
 ## Audible run (a person listens)
 1. Only when the listener says they are ready, and check they can see and hear the game.
 2. `-Audible`: 15 s steps, 3 s quiet gap, compact top-left HUD (step, name, seconds left, what to listen for); the red
    "MUTED TEST" label shows only on muted runs. Point the listener to the step list.
-3. Write the listener's verdict down word for word; in PRs, quote it exactly rather than summarising.
+3. Write the listener's verdict down word for word; in PRs, quote it exactly rather than summarizing.
 
 ## Design rules learned the hard way
 - Every step needs its own clearly different sound; one shared beep is too confusing.

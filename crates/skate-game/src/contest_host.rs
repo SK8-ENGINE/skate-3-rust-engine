@@ -102,7 +102,7 @@ pub(crate) struct Contest {
     pub map: Option<String>,
     #[serde(default)]
     pub demo: bool,
-    /// Mission.GetTitle on the results dialog: the localised title from setup, else its text id.
+    /// Mission.GetTitle on the results dialog: the localized title from setup, else its text id.
     #[serde(default)]
     pub title: Option<String>,
     #[serde(default)]
@@ -258,6 +258,12 @@ fn arm(mut contests: ResMut<Contests>, config: Res<crate::config::Config>, map: 
 }
 
 impl Contests {
+    /// The player is pinned at its start slot: setup_round pins every competitor, run_round unpins them and end_round
+    /// pins them again until the contest's cleanup (contest_shared, b877).
+    pub(crate) fn player_pinned(&self) -> bool {
+        self.run.as_ref().is_some_and(|r| !matches!(r.run.state(), State::RunRound | State::EndChallenge | State::EndOptions | State::Complete))
+    }
+
     fn take_pending(&mut self) -> Vec<Command> {
         std::mem::take(&mut self.pending)
     }

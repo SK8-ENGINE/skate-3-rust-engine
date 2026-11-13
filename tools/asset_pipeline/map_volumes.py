@@ -105,7 +105,7 @@ def _box(raw, sections, index, item_matrix):
 
 
 def _matches_aabb(shape, lo, hi, tolerance=0.25):
-    # Retail bounds of rotated boxes differ from the box by a few centimetres
+    # Retail bounds of rotated boxes differ from the box by a few centimeters
     # (wrongway_vol_01: 7 cm); this only proves the link names the right box.
     extent = [sum(abs(shape['axes'][a][c]) * shape['half_extents'][a] for a in range(3)) + shape['fatness']
               for c in range(3)]

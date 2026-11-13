@@ -51,7 +51,7 @@ pub fn percent_roll(chance: f32, unit: f32) -> bool {
 }
 
 impl DriverBits {
-    /// `sub_82C42348` (bit 0x01 then 0x02; the roll order of the other bits is not modelled).
+    /// `sub_82C42348` (bit 0x01 then 0x02; the roll order of the other bits is not modeled).
     pub fn roll(p: &HornParams, rand: &mut dyn FnMut() -> f32) -> Self {
         let horn = percent_roll(p.enabled_chance, rand());
         let blocked_long = percent_roll(p.blocked_long_chance, rand());

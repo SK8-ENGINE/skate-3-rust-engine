@@ -388,6 +388,10 @@ function sdk.audio.teleport_effect(amount) submit{kind="audio_teleport_effect",a
 -- yaw_replaces_torque, ignore_vertical, wake_on_command, by_template[<MOBJ template>] = {material_held, material_free,
 -- material_free_upright, upright_pair, restitution, record_272, linear_drag, angular_drag, mass,
 -- maximum_linear_velocity, maximum_angular_velocity, inertia_scale, inertia_offset})
+-- or the traffic cars ("vehicles": entities = {new = existing} adds a car type copied from an existing one,
+-- spawn_tables = {category = {entity, ...}} replaces what a census category spawns ({} = none), models = {entity =
+-- livingworld_models record}, glbs = {model record = GLB path}, paint_gain, retail 1; names as in vehicles.json,
+-- sdk.engine.inspect(key, "world_tuning:vehicles") lists the live tables; cars already on the road keep theirs)
 -- or the dynamic shadow floor on the baked world ("shadows": world_floor =
 -- {r, g, b}, each 0..1, retail {0.05, 0.09, 0.13}) or the district backdrop ("backdrop": visible,
 -- retail true: Industrial's sea, far sea planes, tree walls; proxy_terrain, retail true: the far-proxy hills

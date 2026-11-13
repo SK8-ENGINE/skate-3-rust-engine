@@ -1,11 +1,11 @@
 # Water
 
-Branch: `gameplay/water`. Status: **behaviour matched to retail footage (shallow water solid, deep water floats, board floats, water camera with vignette, entry splash, `water.alpha` look approved in play; small bodies calmer and waves slowed, awaiting check).**
+Branch: `gameplay/water`. Status: **behavior matched to retail footage (shallow water solid, deep water floats, board floats, water camera with vignette, entry splash, `water.alpha` look approved in play; small bodies calmer and waves slowed, awaiting check).**
 
 ## Problem
 
 Water does nothing in play: the skater rides over it or falls through it as if it
-were ordinary ground or empty space. The retail game has water-specific behaviour
+were ordinary ground or empty space. The retail game has water-specific behavior
 (the `IsInWater` motion-graph condition, the water ragdoll profile, and the
 "special surface" path in the wipeout state).
 
@@ -44,9 +44,9 @@ water triangles carry a surface ID.
 
 Render materials agree: `water.alpha` / `water.flowingalpha` appear only in
 DownTown and `water.default` / `water.flowing` only in University. Industrial's
-harbour/sea is only the backdrop `ocean.reflection` mesh
+harbor/sea is only the backdrop `ocean.reflection` mesh
 (`assets/private/native-backdrops/Industrial.skate`), with no water collision
-under it; the harbour bed is ordinary collision at about y = -3 (see change 4).
+under it; the harbor bed is ordinary collision at about y = -3 (see change 4).
 
 ### 2. The skater never learns it is in water (the missing link)
 
@@ -69,7 +69,7 @@ University where the data exists.
 The board already computes the matching values (`collision_flags` bit 25 and
 `surface_twelve_height`), and the board manager (`offboard/board_manager/runtime.rs`
 `surface()`) and the player state (`player_state/publication.rs`) already read bit 25.
-The likely retail behaviour is that the physics output fill copies the board's
+The likely retail behavior is that the physics output fill copies the board's
 `Body872` bit 25 → `Collision+3481` and `Body864` → `Collision+28`. **This
 is a hypothesis; the retail write site has not been found yet.**
 
@@ -86,7 +86,7 @@ body the most likely retail source of Collision+3481/+28.
 
 The user remembers that falling into Industrial's sea respawned the player in
 retail, and suggests the sea may simply be out of reach in retail. Industrial's
-harbour floor uses ordinary surfaces (concrete and so on) and its sea has no
+harbor floor uses ordinary surfaces (concrete and so on) and its sea has no
 collision of any kind on the disc (the proxy archives are visual only), so no
 data-driven water detection is possible there. Not handled by this change.
 
@@ -122,7 +122,7 @@ water, unless the skater is already in WipeoutGround, Teleporting or Sleeping.
 It then takes the ordinary path: state flag 65 → `PhysicsWantsWipeOut` →
 WipeoutGround, where `Collision+3481` starts the water ragdoll and the
 respawn timer. Logged as `WATER_BAIL tick=… state=…`. **Project choice**, not
-recovered retail behaviour.
+recovered retail behavior.
 
 ### Water is not solid (skater sinks in and floats, board sinks)
 
@@ -160,7 +160,7 @@ up when below height + 0.1) agrees.
   where deep, decided per contact point: `query_primitives` drops a water contact
   only if `water_shallow_at(contact point)` finds no geometry within `FLOAT_DEPTH`
   (0.5 m) under it. On-foot support uses the same rule (`contact_toolkit` line hit
-  point / nearby centre, `ground_query` lines via `Mesh.world`). Body buoyancy and
+  point / nearby center, `ground_query` lines via `Mesh.world`). Body buoyancy and
   the board's buoyancy/drag apply only over deep water (`deep_water_surface_at`),
   so nothing pushes a body resting on solid shallow water (no jitter). Traces:
   University channel, lowest body part 67.996 on a 67.94 surface, calm (0.06 m/s);
@@ -184,7 +184,7 @@ up when below height + 0.1) agrees.
   was pushed up every step (the retail push includes a constant +0.1 term),
   lifted off, lost the push and its water drag at the line, fell back, repeat.
   Masked, the body lies in the channel on the concrete with its parts half
-  under the water (part centres at the surface), calm (headless trace: mean
+  under the water (part centers at the surface), calm (headless trace: mean
   part speed 0.05 m/s once settled). Deep water is unchanged: the body floats about 1 m
   deep with the top just above the surface (reservoir trace).
 - `apply_board_drag` (just before the solve, after every state sets its drag):
@@ -206,16 +206,16 @@ up when below height + 0.1) agrees.
   first; no ripple rings; the camera goes high above and behind, looking down
   ~60 degrees and drifting toward overhead, with a dark rounded vignette;
   respawn after ~1-3.5 s; Thrasher "Hall of Meat" points count while floating.
-  Retail water close up: even steel blue-grey with fine dark streaks
+  Retail water close up: even steel blue-gray with fine dark streaks
   (~10-20 cm) that shimmer in place (PCA loop: principal component analysis, frame means plus weights) with a slow drift.
 - **Board floats** (`apply_board_drag`): besides water drag, board parts in
-  water get buoyancy that cancels gravity with the part centre at the surface,
+  water get buoyancy that cancels gravity with the part center at the surface,
   rising linearly to 3 g at 5 cm below and zero 5 cm above. Trace (Aletown):
   deck settles at 8.91 against an 8.93 surface. Project-chosen values.
 - **Ripple scale:** family 33 (`water.alpha`: DownTown fountains, Aletown canal)
   uses 4x the decoded normal-map scale. Compared with `--verify` captures (scratch
   camera mod aimed at the canal) against the RPCS3 frames: 1x gives ~1 m blobs,
-  4x matches the streak size, 8x is too fine and noisy. Colour/contrast still
+  4x matches the streak size, 8x is too fine and noisy. Color/contrast still
   differ (ours darker navy with bright reflection bands; retail an even steel
   blue). Project choice; the user asked for a loose match.
 - **Water camera (final):** `camera/water.rs` `WaterView`, applied to the final
@@ -248,13 +248,13 @@ up when below height + 0.1) agrees.
   like snow to the user; the retail sprite fixed that; the first sprite version was
   "a bit strong" and was reduced (18 -> 13 sprites, lower alpha/brightness).
   Without the sprite file there is no splash (logged).
-- **Water colour (tried, rejected):** adding a steel-blue body colour under the
+- **Water color (tried, rejected):** adding a steel-blue body color under the
   lighting and toning reflections down (strengths 1-3) made the water milky and
   flat; the user judged it worse, so it was removed.
-- **Water look (contrast, not colour):** measured water-only crops of the
+- **Water look (contrast, not color):** measured water-only crops of the
   RPCS3 canal frame (`rpcs3_2lxnl5eGDi.gif` frame 0) against our capture from
-  the same side of the canal. The mean colour already matched, which is why
-  adding a body colour only washed it out. Contrast was the difference:
+  the same side of the canal. The mean color already matched, which is why
+  adding a body color only washed it out. Contrast was the difference:
 
   | | mean sRGB | luma p5/p50/p95 | broad stdev (1/8 scale) | fine detail (vs 4 px blur) |
   |---|---|---|---|---|
@@ -269,7 +269,7 @@ up when below height + 0.1) agrees.
   - **Cube blur:** the cube is read 3 mips blurrier. Tested +2/+3/+3.5/+4/+6/+9:
     +3 matched the broad and fine statistics, and +4 or more was flat.
   - **Tint:** the reflection is multiplied by (0.82, 1.0, 1.04). Unmodified, it
-    read grey (the user saw a slightly different colour).
+    read gray (the user saw a slightly different color).
   - **Anti-tiling and swells:** the normal used one fine layer at the 4x ripple
     scale, which tiled visibly over large stretches (user screenshots of the
     DownTown fountain). The normal is now the fine PCA wave plus the same wave
@@ -373,7 +373,7 @@ replacing the `ShaderStorageBuffer` asset's data every frame. Bevy 0.18's
 (`create_buffer_with_data`), but each world material's bind group cloned the
 first buffer at preparation and never sees the new one, so every world shader
 read the initial state: clock 0, no PCA frame. Pre-existing upstream bug; it also
-froze family 14 UV scrolling and the shadow floor colour.
+froze family 14 UV scrolling and the shadow floor color.
 
 `retail_render.rs`: the buffer is created once with `COPY_DST`; `FrameStateData`
 is extracted to the render world (`ExtractResourcePlugin`) and
@@ -389,7 +389,7 @@ what we do). The same routine also keeps the water shader's time: +1/60 per call
 (once per 30 Hz frame), restarting after 5. So retail water time runs at half
 real-time speed and loops every 10 s. `retail_render::water_time` reproduces
 that in `clock.z`, used only by the water path (families 30/33); family 14 keeps
-real time (its retail time source is unconfirmed). Behaviour re-implemented,
+real time (its retail time source is unconfirmed). Behavior re-implemented,
 not copied; the disassembly was reference only.
 
 The 5-unit restart then showed as a hard reset every 10 s (user): each scroll
@@ -429,7 +429,7 @@ Root cause, two parts:
    `ocean.default` (family 31, the sea surface: 204 vertices, x -8166..8005,
    z -4980..8529, y -7.7..-3.3, with normal, normal2, environment cube,
    lightmap and macro overlay), 13 `ocean.reflection` sheets (family 32, the
-   harbour reflections, top at y -6.5, e.g. mesh 16 at x -827..-525,
+   harbor reflections, top at y -6.5, e.g. mesh 16 at x -827..-525,
    z -271..-77), distant shore and pier geometry (`environment.default` /
    `environmentsimple.*`, x down to -1131, z up to 1141, in no district
    stream), one reflective building and the tree wall. The district map has no
@@ -443,8 +443,8 @@ Root cause, two parts:
    together with the prop package; the props were restored later (PR #15),
    the backdrop never was. No upstream commit, PR or issue mentions removing
    it on purpose. So since then the tree walls and DownTown's/University's far
-   sea planes were missing too, and Industrial's harbour showed the clear
-   colour.
+   sea planes were missing too, and Industrial's harbor showed the clear
+   color.
 
 Change:
 
@@ -471,7 +471,7 @@ Change:
 Verification: `--verify` captures with a scratch camera mod, camera at
 (-520, 30, -90) looking at (-580, -7, -170) (player teleported to
 (-470, 2, -150)). With `sdk.world.set_tuning('backdrop', {visible = false})`
-(the state before this change) the harbour is a flat black area; with the
+(the state before this change) the harbor is a flat black area; with the
 backdrop it shows the sea and the tree wall on the hills; the user confirmed
 the ocean now shows. The log shows `SKATE_BACKDROP: Industrial triangles=7768
 materials=27` and no unsupported-family fallback for the backdrop materials.
@@ -542,7 +542,7 @@ DownTown 0, University 0), `retail_backdrop::tests::proxy_terrain_visibility_is_
 `modding::world_tuning::tests::proxy_terrain_defaults_to_retail_set_and_reset_on_disable`,
 skate-mods `world_tuning` patch validation.
 
-Retail's in-water rule at the docks is not part of this change: the harbour
+Retail's in-water rule at the docks is not part of this change: the harbor
 has no water collision (section 4) and the free-skate water/out-of-bounds
 reset is skater state (`IsInWater` action-graph condition, not traced; see
 the local trigger volumes research note, section 4).
@@ -585,7 +585,7 @@ floor above ends a fall into Industrial's sea long before). A skater who bails m
 restarts the count and gets the wipeout auto reset instead (vault `physics_wipeout`:
 TeleportMinTimeForAutoReset 3.5 s, TeleportMinTimeAfterSettlingForAutoReset 2.5 s,
 TeleportMaxTime 20.0 s, TeleportAutoResetFadeOutTime 0.5 s [data]). Both were already ported;
-this change adds diagnosis, a mod entry point and a respawn event. Behaviour at retail defaults
+this change adds diagnosis, a mod entry point and a respawn event. Behavior at retail defaults
 is unchanged.
 
 Change:
@@ -596,7 +596,7 @@ Change:
   `physics_unrideable` contact: `boundary`, anything else: `requested`; `water` stays reserved for
   type-12 water, which no decoded path resets; the first request before the reply is kept).
   `publish_special_surface` returns a `BoundaryContact { state, packed_surface }` when its type-6
-  or ragdoll +214 branch raises +69 (no behaviour change); `player_state/publication.rs` records
+  or ragdoll +214 branch raises +69 (no behavior change); `player_state/publication.rs` records
   it with `note_boundary`. Log lines:
   `AIR_TIMEOUT_RESPAWN air_frames=.. position=.. checkpoint=.. on_board=..` (position = deck at
   the request tick) and `BAIL_CHECKPOINT reason=.. position=..` for every checkpoint respawn; for
@@ -620,7 +620,7 @@ Tests:
 - `skate-game` world tuning: `respawn_air_timeout_defaults_to_retail_set_and_reset_on_disable`.
 - `skate-game` `physics/air_timeout_tests.rs` (asset-backed, `--ignored`): a skater moved 5 km off
   DownTown falls with no ground below and respawns with reason `air_timeout`, `air_frames` 301,
-  301..320 ticks after leaving the ground; the event serialises with `"reason":"air_timeout"`.
+  301..320 ticks after leaving the ground; the event serializes with `"reason":"air_timeout"`.
 - `skate-core` special surface: `type_six_contacts_report_a_boundary_request` (board type 6,
   ragdoll +214, feet packed 768 report the branch; types 0/9/12 and ragdoll water do not).
 - `skate-game` `physics/respawn.rs`: `type_six_board_contact_resets_with_reason_boundary`,
@@ -657,17 +657,17 @@ reports):
   the character shaders as `i_params.x`, which scales the output alpha.
 
 Change:
-- `skate_core::player::ghost` (`GhostFade`, `GhostSettings`): the timer and curve, generalised
+- `skate_core::player::ghost` (`GhostFade`, `GhostSettings`): the timer and curve, generalized
   as opacity = clamp(timer / fade_in_seconds, 0, 1) (identical at the retail 1.0 s). Time-based,
   so the curve is the same at any tick rate.
 - Every completed teleport of our skater ends in one reset (`physics/frame.rs`, the `teleported`
   branch): checkpoint respawns, wipeout auto resets, teleport menu / map / mod teleports and the
   session marker return. It now counts the placement (`respawn::Runtime::placements`, retail
   +1864). `skater_ghost::emit_placements` turns a new count, or a newly loaded skater (spawn, map
-  change), into a serialisable `SkaterPlaced { player_id, placement }` message; `step_fades`
+  change), into a serializable `SkaterPlaced { player_id, placement }` message; `step_fades`
   restarts that player's fade and steps all fades on the fixed tick.
 - Drawing: while the local player's opacity is below 1, every mesh under `PlayerRoot` (body,
-  hair, clothes, board parts; `CharacterMaterial`, the customiser `SkaterMaterial` and plain
+  hair, clothes, board parts; `CharacterMaterial`, the customizer `SkaterMaterial` and plain
   `StandardMaterial`) draws a blended copy of its own material with the alpha scaled
   (`CharacterMaterial`: `tint.a`, which the shader already multiplies into its output alpha).
   At 1.0 the mesh gets its original material handle back and the copy is dropped, so solid
@@ -723,7 +723,7 @@ Retail (TU3):
   and bits to `sub_827F0B78`.
 - `sub_827F0B78` walks every pixel of that surface (16 bytes, 4 pixels per step).
   Each big-endian u32 becomes `u32 / 2^24` (`vcuxwfp128 ..,24`), so its top byte,
-  times 1/255 (vector at 0x8232F5D0). It multiplies that by the centre weight
+  times 1/255 (vector at 0x8232F5D0). It multiplies that by the center weight
   `(c - |x*y|)^2` and sums. `sub_827F0D00` multiplies the sum by 2.515
   (0x821A01E8), divides by w*h, and runs the evaluator.
 - The top byte of an A8R8G8B8 word read big-endian (0xAARRGGBB) is alpha. The
@@ -743,7 +743,7 @@ Retail (TU3):
 Change (`crates/skate-game/src/retail_exposure.wgsl`, `retail_exposure.rs`):
 - Each meter sample is now the tone curve at the current exposure: tm/2 per
   channel, saturated, dotted with the meter weights, saturated, and rounded to 8
-  bits (`meter_luminance`, mirrored in the shader). The centre weighting,
+  bits (`meter_luminance`, mirrored in the shader). The center weighting,
   2.515 scale, evaluator and 30 Hz time basis are unchanged.
 - NOT RETAIL: the meter samples a 16x16 bilinear grid of our HDR target, not the
   console's 4-tap downsample chain.
@@ -782,7 +782,7 @@ Problem: the world surface radiance check (the local frame brightness todo,
 "World surface radiance vs retail") found two possible mismatches in
 `retail_world.wgsl`: families 7 / 8 multiplied the lightmap by the flat-normal kd
 0.93429 (about 7 % darker grass cards, foliage and simple diffuse surfaces), and
-families 2 / 6 did not normalise the tangent normal before kd.
+families 2 / 6 did not normalize the tangent normal before kd.
 
 Which retail program each family is [data, VLT (vault, EA's attribute database) `skatercollections.vlt`, effect
 field `effect`, class and key names checked with `tools/asset_pipeline/vlt.py`
@@ -801,20 +801,20 @@ Retail [code, `shaders_final.big`, `*_defaultPS.fpo` read with `xenos_disasm.py`
 - `defaultenvironment_defaultPS`: kd is built from the raw `2n - 1` tangent normal
   (38), weighted by the signs of the tangent-frame sun times (0.62, 0.58) (56-61),
   plus 0.39 times the raw z (63, 64, 66), times 2.3956 (67). The `rsq` at 46-55
-  normalise the view vector, the world normal used for specular, and the
-  tangent-frame sun whose signs only are used. So kd is NOT normalised.
+  normalize the view vector, the world normal used for specular, and the
+  tangent-frame sun whose signs only are used. So kd is NOT normalized.
 - `baseenvironmentreflective_simple_defaultPS`: the same, kd from the raw `2n - 1`
-  (14-22, 45, 58-63, 74-76). Not normalised.
-- `baseenvironment_defaultPS` (family 1) does normalise (29-33, kd from the
-  normalised normal at 66).
+  (14-22, 45, 58-63, 74-76). Not normalized.
+- `baseenvironment_defaultPS` (family 1) does normalize (29-33, kd from the
+  normalized normal at 66).
 
 Change (`crates/skate-game/src/retail_world.wgsl:322-325`): kd
 starts at 1.0 for families 7 / 8 (`select(0.93429, 1.0, fam == 7u || fam == 8u)`),
 so their radiance is `min(lightmap^2, vis + floor) * diffuse^2 * m_params[0].y`
 as in retail. Families 2 / 6 already take kd from the raw normal (`fam != 2u &&
-fam != 6u` guard on the normalise), which matches retail, so they are unchanged.
+fam != 6u` guard on the normalize), which matches retail, so they are unchanged.
 The research note's mismatch 2 was a misreading of which vector the `rsq`
-normalises.
+normalizes.
 
 Verification: new tests in `crates/skate-game/src/retail_shader_tests.rs`,
 `simple_diffuse_and_alphatest_families_have_no_kd_term` and
@@ -981,7 +981,7 @@ clock); a local research note.
 FNV-1 hash 0xE5A76988 registered by sub_826DD6B8 [code, decoded from the recomp]). sub_82791628, the only caller of
 0x82790858, adds dt to its `.x` every update and nothing resets it [code, verified in skate3_recomp.34.cpp:
 `lvx128 v63` from block +0x40000+17024+336, `vaddfp128` with the splatted dt, `stvx128` back]. So retail scrolls
-seamlessly and the seamless clock is the retail behaviour; our 1000-unit loop only keeps f32 precision (invisible,
+seamlessly and the seamless clock is the retail behavior; our 1000-unit loop only keeps f32 precision (invisible,
 every authored speed completes whole repeats). The 0x82790858 value (this+316) has no known reader.
 **Rate measured (2026-10-15):** recomp watch list (no hook build) on `*(0x83083C60)+0x443D0` and the loop counter
 `0x830CEC9C`, 52 s idle at the spawn, muted background run: `g_fAnimationTime.x` rises at **1.0025 per second** with
@@ -1069,7 +1069,7 @@ body areas, `slow_pca`, `water_time`, tests), `retail_world.wgsl`, `retail_mater
 - `crates/skate-game/src/verification.rs` (`SKATE_VERIFY_AT`).
 - `crates/skate-game/src/physics/offboard/contact_toolkit/world.rs`, `offboard/ground_query/lines.rs` (water skipped for on-foot support).
 - `crates/skate-game/src/tests/water_drop.rs` (ignored diagnostic), registered in `physics.rs`.
-- `crates/skate-game/src/retail_render.rs` (frame state written in place, `water_time`, per-shader fallback log), `retail_world.wgsl` (water uses `clock.z`; family 33 ripple scale, cube blur and tint, anti-tiling and swells, size calming, `pca_slow`), `retail_material_bindings.wgsl` (`FrameState.pca_slow`), `retail_character.rs` (test initialiser).
+- `crates/skate-game/src/retail_render.rs` (frame state written in place, `water_time`, per-shader fallback log), `retail_world.wgsl` (water uses `clock.z`; family 33 ripple scale, cube blur and tint, anti-tiling and swells, size calming, `pca_slow`), `retail_material_bindings.wgsl` (`FrameState.pca_slow`), `retail_character.rs` (test initializer).
 - `crates/skate-game/src/water_bodies.rs` (new: water body areas, tests), `main.rs`.
 - `tools/asset_pipeline/test_ocean_pca.py`.
 - `crates/skate-data/src/xex/{mod,aes,lzx}.rs`, `crates/skate-data/src/ocean_pca.rs`, `crates/skate-data/src/lib.rs`.
@@ -1080,7 +1080,7 @@ body areas, `slow_pca`, `water_time`, tests), `retail_world.wgsl`, `retail_mater
 
 ### Better Water frame cost, measured (2026-10-18)
 
-The user's final living world todo: optimise the Better Water opt-in so it is efficient and
+The user's final living world todo: optimize the Better Water opt-in so it is efficient and
 looks clean and realistic without looking out of place in the game.
 
 Method: `tools/dev-bench/water-look-bench.ps1` (release build of world/living-world b87342e6, `--teleport
@@ -1178,7 +1178,7 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
     pool) bound there (its normal, `normal2` and diffuse, repeating) and its `water` rows in a new `WorldParams.fountain`
     (17 rows now). Bound after page sizing and with the presence flags as authored, so the retail program and page
     layout are unchanged. Family 30 bodies also get an area (`decal.y`, grouped apart from family 33).
-  - Frame-state row `fountain` (tile metres, calming floor, foam, cascade clock) from new `WaterLook` keys
+  - Frame-state row `fountain` (tile meters, calming floor, foam, cascade clock) from new `WaterLook` keys
     `fountain_water` (Better Water on), `fountain_tile` 4 m, `fountain_waves` 0.5, `cascade_rate` 1.5, `cascade_foam`
     0.6. Retail look: row zero, so family 30 runs exactly as before.
   - Shader: with the row on, the slope of each family 30 pixel picks the look. Flat pixels (basins) run the large
@@ -1203,10 +1203,10 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 - **Open:** a mod-chosen donor (load-time key); whether University basins should take the donor's mask too (a look
   choice for the user's eyes, not retail).
 
-## Better Water: fountain basins keep their own colour (2026-10-21, laptop session)
+## Better Water: fountain basins keep their own color (2026-10-21, laptop session)
 
 - **Problem:** the user reported the fountain near the PCU library looked bad with Better Water on, as if it
-  used a wrong texture: the PCU basin read as a flat pale grey-lavender sheet with orange blotches.
+  used a wrong texture: the PCU basin read as a flat pale gray-lavender sheet with orange blotches.
 - **Cause [code, reproduced with a verify capture]:** with `fountain_water` on, a flat basin pixel took the donor's
   diffuse (University's large pool `water.default`: its floor texture with leaves), so the fountain showed a pool floor.
 - **Change (look layer, not retail):** basins keep their own diffuse (University's: black); the donor still gives
@@ -1215,17 +1215,17 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
 
 ## Better Water: fountain basins in line with the Aletown canal (2026-10-21, laptop session)
 
-- **Problem:** after the basins kept their own colour (section above), the user found the PCU library fountain
+- **Problem:** after the basins kept their own color (section above), the user found the PCU library fountain
   water too blue and asked to bring it in line with the DownTown Aletown canal water.
 - **Cause [code + data]:** University's fountain diffuse is black and its specular mask plain white (about 0.9, b356),
-  so a basin pixel is almost only the steel-blue tinted sky reflection. The canal gets its colour from its own diffuse,
+  so a basin pixel is almost only the steel-blue tinted sky reflection. The canal gets its color from its own diffuse,
   under a flat mask of about 0.18 (`pool_S_30per`).
 - **Change (look layer, not retail):** `WaterLook` keys, frame-state row `fountain_body`: `fountain_colour` (the
-  basin's body colour under the lighting, linear rgb) and `fountain_reflection` (share of the material's mask on
-  basins). Steep cascades keep their own. Mods: `sdk.graphics.water_look` keys of the same names (colour 0..1 per
+  basin's body color under the lighting, linear rgb) and `fountain_reflection` (share of the material's mask on
+  basins). Steep cascades keep their own. Mods: `sdk.graphics.water_look` keys of the same names (color 0..1 per
   channel, reflection 0..2), released on disable. Log: `WATER_BODY` per water material (family, body area, bounds) at
   map load, so a water report can name the body (PCU basin: x 340..343, z -330..-283, y 67.9).
-- **Ripple:** the user, same session, found the fountain did not ripple enough. With a flat colour the basin shows its waves
+- **Ripple:** the user, same session, found the fountain did not ripple enough. With a flat color the basin shows its waves
   only through the lighting, and the waves barely tilt it (luma stdev 1.8 over the water vs the canal's 13 to 17).
   Third key `fountain_ripple` (frame-state row `fountain_ripple`): a gain on the basin normal's tilt (0..8). Better
   Water's `fountain_waves` goes 0.5 -> 1 and `fountain_tile` 4 -> 2 m (finer ripple).
@@ -1237,11 +1237,11 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
   | Aletown canal (Better Water) | 70..86, 79..96, 88..104 | 18 | 12.7..17.5 |
   | PCU basin, before (b1841cc5 look) | 105, 128, 138 | 33 | 1.8 |
   | PCU basin, matched to the canal | 84, 96, 106 | 22 | 10.0 |
-  | PCU basin, new defaults (user ask: a little more blue-grey tint) | 83, 98, 113 | 30 | 10.9 |
+  | PCU basin, new defaults (user ask: a little more blue-gray tint) | 83, 98, 113 | 30 | 10.9 |
 
-  Defaults: `fountain_colour` {0.018, 0.024, 0.032} (canal match {0.018, 0.022, 0.026}, then a little more blue-grey on the
+  Defaults: `fountain_colour` {0.018, 0.024, 0.032} (canal match {0.018, 0.022, 0.026}, then a little more blue-gray on the
   user's look at the capture), `fountain_reflection` 0.15, `fountain_ripple` 7. Reflection 0
-  barely changed the basin (100, 122, 128), so the colour, not the sky, made it blue.
+  barely changed the basin (100, 122, 128), so the color, not the sky, made it blue.
 - **Verification:** `basins_take_their_colour_and_reflection_from_the_look`, `fountains_only_with_better_water_and_mods_can_set_them`
   (`water_look`), the frame-state encoder test. Not looked at by the user yet.
 
@@ -1254,8 +1254,8 @@ Open: the look itself (clean, realistic, fitting Skate 3) needs the user's eyes 
   specular, and got white foam (`cascade_foam` 0.6) that also raised their alpha; the fully steep ones skipped the
   look block altogether (`steep<1.0` gate). So the falls drew as bright opaque sheets next to the dark canal.
 - **Change (look layer, not retail):** `cascade_foam` defaults to 0 (the key stays for mods); the falls keep retail's
-  shading. A first version also gave every family 30 pixel the basin look (`fountain_body` colour and reflection
-  share); the user then found the DownTown falls drawn as incomplete and mispositioned grey cards (the user's
+  shading. A first version also gave every family 30 pixel the basin look (`fountain_body` color and reflection
+  share); the user then found the DownTown falls drawn as incomplete and mispositioned gray cards (the user's
   clip of 2026-10-27). Fly cam captures (`DEBUG_CAM_POSE` spots [-215.97, 5.62, 498.61] and
   [-242.81, 2.55, 563.18], `tools/dev-bench/falls-capture.sh`): with Better Water off both falls are dark reflective
   water filling the opening, with it on a flat pale sheet. That part was taken out again. The dark band on the right of
@@ -1279,7 +1279,7 @@ ask 390): docs/hails-additions/27-dynamic-props.md#sunk-props-come-to-rest-moved
 - **Better Water (ours, user 2026-10-26):** in deep water a prop bounces, bobs and floats with the
   water; in shallow water it sinks if heavy and floats near the top if small or light; the heavy dumpster always
   sinks; where the water is deep enough (like the ocean) for the prop to disappear, it fades out as it sinks. (`physics/prop_water.rs`, `PropDynamics::apply_water`):
-  - Buoyancy from 8 box samples (octant centres, submerged share each), so a prop tips and settles naturally; the
+  - Buoyancy from 8 box samples (octant centers, submerged share each), so a prop tips and settles naturally; the
     displaced volume is the solver mass over the prop's material density, because retail masses are pushing masses
     (the converted DownTown props come out at 13 to 20 kg/m3 by box volume).
   - Material density per type: `PropTuning::water_density` (mod world tuning `props`), else by template name
@@ -1336,7 +1336,7 @@ Detail moved out of the code comments of `crates/skate-game/src/water_bodies.rs`
 
 ### Water body sizes
 
-Water body sizes for the water shader. Maps split one body of water into several render materials along a 100 m grid (DownTown's Aletown canal is six chunks, some a few metres wide), so a material's own extent says little. Triangles of the water materials that share a vertex position are grouped into bodies; each material gets the surface area of the largest body it belongs to. The shader calms small bodies (fountains): a project choice.
+Water body sizes for the water shader. Maps split one body of water into several render materials along a 100 m grid (DownTown's Aletown canal is six chunks, some a few meters wide), so a material's own extent says little. Triangles of the water materials that share a vertex position are grouped into bodies; each material gets the surface area of the largest body it belongs to. The shader calms small bodies (fountains): a project choice.
 
 ## Fly cam pose log
 
@@ -1354,7 +1354,7 @@ Water body sizes for the water shader. Maps split one body of water into several
   who had switched Better Water on before: the user's file kept `cascade_foam` 0.6 after the default went to 0, and
   that foam drew the DownTown falls as opaque pale sheets (fly cam capture with `cascade_foam = 0`: dark water again).
 - **Change:** the menu saves only `{"version": 2, "enabled": ...}`. A file without `version` (written by older builds)
-  gives only `enabled`; a version 2 file still honours hand-edited keys. Mods keep using their patch.
+  gives only `enabled`; a version 2 file still honors hand-edited keys. Mods keep using their patch.
 - **Verification:** `missing_or_partial_file_keeps_the_defaults` (old dump, save, reload).
 
 ## Better Water: falls keep retail flow

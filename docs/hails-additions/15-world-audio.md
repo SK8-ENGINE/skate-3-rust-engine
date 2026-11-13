@@ -42,7 +42,7 @@ remove the component. Owner ids are `Entity::to_bits()`, so a reused index count
 | `speed` | `+148` | m/s | the vehicle system | the length of the velocity |
 | `load` | `+144` | the driver's signed acceleration in m/s². G1 measured −15.6 in a hard stop, up to +3 pulling away, and 0 while cruising. It goes into the engine and skid words × 3000. | the driving AI | derived from the speed change |
 | `horn` | `+156` | `None`, `Honk(1..=5)` or `Alarm` | the AI (honk decisions) | `None` |
-| `skidding` | `+160` | the tyres skid | the AI (hard braking or a swerve) | false |
+| `skidding` | `+160` | the tires skid | the AI (hard braking or a swerve) | false |
 
 ### `PedAudio` (retail `SFXObj_PedestrianSFX` / `PedestrianSpeech`, ped state S, G2)
 
@@ -114,7 +114,7 @@ is unchanged. The setting is read at start. The runtime has one NPC grain bed, s
 1 has granular rolling. Default: off (retail).
 
 **Remote multiplayer players (not retail; user decision 2026-10-03):** another real player nearby
-takes the NPC skater instance, ahead of the NPCs in the list order. Retail's online behaviour is
+takes the NPC skater instance, ahead of the NPCs in the list order. Retail's online behavior is
 not traced. The remote state carries only the body and pose, so the bridge gives remote players a
 lite state from their root transform. The material under them comes from the same stock line query
 the wheel lines use.
@@ -215,8 +215,8 @@ the spot where the mod starts:
   mod menu, or run with `SKATE3_MODS_ENABLE=dev-world-audio-test`. While it publishes, the game logs one
   `WORLD_AUDIO cars N/audible M, peds N/M (footsteps K), skaters N/M, posts +P (npc +Q), speech lines +S`
   line per second.
-- Debug **boxes**: green = holds an instance (audible), grey = not. An on-screen line shows the
-  audible counts, the limits and the ghost's status. **F9** re-centres everything on the skater.
+- Debug **boxes**: green = holds an instance (audible), gray = not. An on-screen line shows the
+  audible counts, the limits and the ghost's status. **F9** re-centers everything on the skater.
 
 ## Proofs and tests
 
@@ -255,7 +255,7 @@ the spot where the mod starts:
   - command validation per kind, and the event options;
   - the Lua wrappers cross the serde boundary;
   - the bundled test mod runs 400 frames with no Lua error or invalid command, stays within 128
-    commands per callback, and its F9 re-centre spawns everything again.
+    commands per callback, and its F9 re-center spawns everything again.
 
   `check_mod` validates the mod.
 
@@ -486,7 +486,7 @@ recomp". Reference only: the TU3 (title update 3) recompilation (skate3recomp / 
 
 ### Speech details
 - **PEAK filter:** a head shadow by azimuth. The owner's raw azimuth, folded front / back, goes through three
-  curves of the speech record (centre 600 → 4000 Hz at the side → 600, gain 0.4 → 0.1, Q 3; setup export
+  curves of the speech record (center 600 → 4000 Hz at the side → 600, gain 0.4 → 0.1, Q 3; setup export
   `world_tuning.speech_voice`). Every recomp PEAK (6 / 6) lies on the curves at one azimuth; ours at the estimated
   geometry 3 / 6 within 10 %. The mixer plays speech on the stream graph (PEAK, Send A, gain, then the filters).
 - **Two sends, and the echo submix (ported):** the stream system (`sub_82C5CEF0`) multiplies the gain and both
@@ -498,7 +498,7 @@ recomp". Reference only: the TU3 (title update 3) recompilation (skate3recomp / 
   the environment bus). The **post-filter** send (`desc+32`, `+0x7D0`) carries out15 (skater out10) straight to
   the environment bus. Correction to the first decode: it had out15 feeding the echo; the code says the pre-gain
   send does. Recomp: the pre-gain send = out21 in 17 of 29 lines within 25 % (out15: 10); the post-filter send =
-  out15 in 19 of 27. Modelled mono: the graph's two-channel Pn21 / Sen0 routing is a unity tap (its gains are not
+  out15 in 19 of 27. Modeled mono: the graph's two-channel Pn21 / Sen0 routing is a unity tap (its gains are not
   traced).
 - **Value 49 = a phone call:** the ped's phone rings (CellPhone_Rings container 5, now part of setup) and when the
   ring ends the ped asks for value 64 (`4402_cell_greet`). Recomp 164620: both rings answered 1.00 / 1.19 s
@@ -561,7 +561,7 @@ recomp". Reference only: the TU3 (title update 3) recompilation (skate3recomp / 
   a phone call, F4 the photographer, F3 the ghost sees your trick, F2 the ghost switches between its AI voice and
   a pro's (24) and crashes.
 - Setup data (`world_tuning`): `ped_objects` (fall containers, eq bus, ring container, the tazer hold from the ped
-  state graph) and `speech_voice` (the PEAK curves, the echo delay factor / per-metre / cap / refresh frames);
+  state graph) and `speech_voice` (the PEAK curves, the echo delay factor / per-meter / cap / refresh frames);
   `ped_models` gained `cast_bit` / `cast_word` / `cast_word2`; `speech_tuning["0"]` (the main cast's) is now used;
   `speech/maincast.json` + the opt-in decode; `CellPhone_Rings.bnk` decoded with its patch tree;
   `world_audio.py` joined the audio group's fingerprint. Every field defaults to the retail value and the world
@@ -737,7 +737,7 @@ checked against all 38 recorded sessions; no new session was run.
 - **The request** (`sub_824AA858`):
   - the event's vault tuning (bank 3, already exported in `speech_tuning["3"]`);
   - the game-state gate the main cast also has (record `+48`, `sub_8279E180`, system `+104` / `+997`; not
-    modelled, as for the main cast);
+    modeled, as for the main cast);
   - word 0 = the announcer's id (from model `+1036`'s `char_ID_Ann`) when the caller left it 0 and a challenge
     names one; word 8 = 5 / 6 (system `+1089`);
   - the manager's timers are kept per announcer (104 → slot 35);
@@ -763,7 +763,7 @@ checked against all 38 recorded sessions; no new session was run.
   - level = out2 × a vault multiplier, truncated to an integer. The multiplier (`sub_824A8250`) depends on the
     console language (English, Italian and Spanish use the `other` arrays: 1.1 / 1.25 / 1.1 for speaker 35 / 36 /
     31; with the challenge byte `+1044`: 0.9 / 1.0 / 1.0);
-  - pitch out1, azimuth out0 (no MixMap term: centre), high pass out4, low pass out3, environment send out5;
+  - pitch out1, azimuth out0 (no MixMap term: center), high pass out4, low pass out3, environment send out5;
   - voice float 1.0, PEAK flat (96 kHz, gain 1, Q 3), no echo send (`sub_824A3C28`'s constants);
   - no level cut (that is the ped / skater owners' rule).
 
@@ -1264,7 +1264,7 @@ Same-moment pairs of the riderless board's deck speed (`SKATEB`) and \|v48\|: 0.
   - the `TrafficCarPhysics.in0` writer (|v_car − v_listener| clamped to 35, slewed by 100 /s,
     × 32767 / 35; opens the A11 near boost);
   - the 3DObjPos 4.1 / 4.2 points (front and rear ±1 m along the heading, R+80 / R+96, likely);
-  - retail's frozen record when a held car leaves the 40 m list (recorded behaviour, not ported).
+  - retail's frozen record when a held car leaves the 40 m list (recorded behavior, not ported).
 - The per-model tables from `aud_characteristics` (shoe class, kind, far threshold 20 / 30 m) as a
   setup export, so the engine names a model and gets the rest. The horn kinds per model are open.
 - Moving process / update into `mixmap_frame` (retail's split; the inputs are one console frame

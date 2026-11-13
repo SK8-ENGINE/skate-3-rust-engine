@@ -14,7 +14,7 @@ pub struct PlacementRules {
     /// The share of a car's length counted before its position (`0x8209975C` = 0.5).
     pub half: f32,
     /// Seconds of the follower's speed kept free behind the new car (the speed in m/s is added
-    /// as metres in `sub_82E14928`, i.e. one second).
+    /// as meters in `sub_82E14928`, i.e. one second).
     pub behind_seconds: f32,
     /// Radius of the overlap query after placing (`0x820996EC` = 20 m).
     pub clear_radius: f32,
@@ -123,7 +123,7 @@ pub fn pick_lane(lanes: &[u8], draw: u32, rules: &PlacementRules) -> u8 {
     lanes[(roll % lanes.len() as u32) as usize]
 }
 
-/// Step 6: does a car of `radius` at `position` overlap any obstacle (centre, radius) within the
+/// Step 6: does a car of `radius` at `position` overlap any obstacle (center, radius) within the
 /// query radius? Horizontal distances.
 pub fn overlaps(position: Vec3, radius: f32, obstacles: &[(Vec3, f32)], rules: &PlacementRules) -> bool {
     obstacles.iter().any(|(c, r)| {

@@ -3,7 +3,7 @@
 ## Native-port spec index (2026-10-02)
 | Spec | Status |
 |---|---|
-| `rwaudio-prior-work.md` | done: prior art (nfsmw CC0, BurnoutDecomp b5-decomp/BP-Decomp, tw2004 CC0), licences |
+| `rwaudio-prior-work.md` | done: prior art (nfsmw CC0, BurnoutDecomp b5-decomp/BP-Decomp, tw2004 CC0), licenses |
 | `aems-evaluator-spec.md` | done: ABKC/MOIR layouts, runtime, 40 opcodes, timing, RNG, test plan; **PoC op 5 bug** |
 | `aems-voice-graph-spec.md` | done: SndPlayer1 … Send DSP, buses, output stage, validation |
 | `mixmap-spec.md` | done: MXB format (247 controllers), evaluation math, Ambience/Emitter outputs, ducking; decoder + reference evaluator match PR #4 on 73,800 cells |
@@ -23,7 +23,7 @@ Knowledge only, from others' hard-won work; never copy their code (it transcribe
 - sk8Audio (andrewnakas/skate3-audio, NO license → reference only), branch `phase0-measurements`:
   `docs/audio-banks.md` (canonical bank write-up), `execution-trace.md`, `rw-audio-core.md`, `rw_audio_structs.h`.
   Read from a local clone.
-- Our own measurements in the recompilation (summarised in doc 11).
+- Our own measurements in the recompilation (summarized in doc 11).
 PR #4 docs ≠ code in places (slots 19/20 claimed ported but missing; setters only in authored.rs); trust code.
 
 ## .abk (ABKC): big-endian, offsets from bank start

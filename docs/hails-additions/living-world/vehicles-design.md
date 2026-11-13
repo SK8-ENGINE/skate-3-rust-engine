@@ -11,7 +11,7 @@ Tags: **[code]** retail code read in the TU3 (title update 3) static recompilati
 user's disc data, **[trace]** measured in the recomp (the recomp is not retail; timing differs). Code wins.
 Credit: the TU3 static recompilation (skate3recomp / rexglue / Xenia) as the code reference; road and AIPATH layouts
 cross-checked where possible against DumbadsSkate3ModdingTools by Ethanw05; the andrewnakas `mx/vehicle` fork as
-prior work for the mod-facing shape (described, not copied: no licence).
+prior work for the mod-facing shape (described, not copied: no license).
 
 Moddability rule (project rule, 2026-10-04): every value below is a setup-data default a mod can override, every system
 has an engine-facing and a mod-facing entry point, and a mod's changes are undone on disable.
@@ -60,7 +60,7 @@ has an engine-facing and a mod-facing entry point, and a mod's changes are undon
 - Shaders: `vehicle_*`, `vehiclelight_*` (head / tail lights) and `vehicle_glass_*` (VS/PS, `0x820AC584..`); effect
   instances `vehicleEffectInstance` etc. Our retail renderer needs a car material path (chassis tint + glass).
 - `livingworld_models` vehicle records (`vehicle_taxi01`, `vehicle_sedan01` ...): recipe name, two **tint palettes**
-  (vec4 lists `12026E2EED18CC8D` = `chassis_colours`: 2-10 colours, `DF76D7D773857EDB` = `secondary_colours`: 1-10;
+  (vec4 lists `12026E2EED18CC8D` = `chassis_colours`: 2-10 colors, `DF76D7D773857EDB` = `secondary_colours`: 1-10;
   base records blue / red = the body atlas's paint mask), a vec3 `F983F2518B335286` (a per-class value, 1.9 x 1.7 x 4.0
   for all sedans and sports cars, not the mesh size; open), a float `FD7A66142F16B9CC` (= the wheel bone height,
   i.e. the wheel radius, on most cars [data, V0]), base record `vehicles`: `9FCFDBEA` / `73B6874C` = (65, 75)
@@ -78,7 +78,7 @@ has an engine-facing and a mod-facing entry point, and a mod's changes are undon
   | taxi01 | vehicle_spec_taxi01 | driver_taxi | c04_taxi01 |
   | suv01-02, pickup01-02 | vehicle_spec_truck01 | driver_normal | c05_truck01 |
   | patrol01 (Skate 2 only) | vehicle_spec_taxi01 | driver_normal | c04_taxi01 |
-- Drivers [data, V0]: modelled into each car's body mesh (a dark low-poly figure in the left front seat); no driver
+- Drivers [data, V0]: modeled into each car's body mesh (a dark low-poly figure in the left front seat); no driver
   model, part or texture exists. The user sees drivers in retail; they come with the car mesh (D4 answered).
 
 ### 1.3 Road network (`0x00EB0013`) [data, decoded in V0; layout in `vehicles-data.md`]
@@ -113,7 +113,7 @@ has an engine-facing and a mod-facing entry point, and a mod's changes are undon
   No traffic-light sounds exist (audio spec).
 
 ### 1.5 Driving [code + trace]
-Per-vehicle think `sub_82C3D918`: `sub_82E0C4A8`, manoeuvre decider `sub_82C3D830` -> `sub_82C41CD0`, `sub_82C42348`,
+Per-vehicle think `sub_82C3D918`: `sub_82E0C4A8`, maneuver decider `sub_82C3D830` -> `sub_82C41CD0`, `sub_82C42348`,
 `sub_82C40B70`, `sub_82C414A8`, horn decider `sub_82C40660`, `sub_82C40970`. Then the state graph (data, `Vehicle.xml`):
 FollowingLane <-> PassingIntersection / Impatience -> ChangingLane / PullingOver -> StayingParked -> PullingOut
 (handlers notes §3). Every driving state ends with **look-ahead `sub_82C412D8` -> speed planner `sub_82C3FA08` ->
@@ -133,7 +133,7 @@ integrator `sub_82C3FF38`**.
 - Acceleration is rate limited [trace, 47CAEDA0 at 84 s]: 0.2 m/s² per 0.33 s steps up to ~2.3 m/s² from a stop
   (driver / spec fields `328B9F46` 2-3, `5EFF8715` 2-2.5, `75822921` 2.5-3 are the candidates for max accel / brake /
   jerk, read by layout, open).
-- Manoeuvre decider `sub_82C41CD0` -> `+4396`: 1 lane change on a timer, 2 overtake a slow / stopped car, 3 pull over
+- Maneuver decider `sub_82C41CD0` -> `+4396`: 1 lane change on a timer, 2 overtake a slow / stopped car, 3 pull over
   (driver `559BA807` = 0.02, taxi 0.04 per decision); target lane `+4380` [code]. Recomp [trace]: cars **wait** behind a
   blocking skater (no lane change / overtake seen in 152302), queue and go in step.
 - Parked: StayingParked; pull out after the driver's `988BB0F6` (30 s, taxi 20 s) and a clear road, never while the
@@ -194,7 +194,7 @@ integrator `sub_82C3FF38`**.
 | census / population | shared core designed (docs 26/27, M1 of peds) | vehicle rules on it |
 | data export | `livingworld` group (milestone 1): 29 vault classes, census grids incl. the vehicle layer, `roads.json` / `roads.bin` (segments decoded, nodes / intersections raw), waypoints | vehicle classes (`livingworld_vehicle_characteristics`, `_drivers`), the 18 car recipes -> GLB, lane samples + connectors, signal groups |
 | kinematic bodies | `skate-dynamics` (Rapier island: kinematic proxies, spawn / remove), `physics::network::Proxies` (remote bodies in the skater's contact solve) | a car proxy (box / convex hull) keyed by vehicle |
-| skater skitch | `PhysicalStateId::Skitching`, selector rules, input-phase timers, wipeout skitch terms | a grab candidate provider for cars, the attach constraint, the graph behaviours if missing |
+| skater skitch | `PhysicalStateId::Skitching`, selector rules, input-phase timers, wipeout skitch terms | a grab candidate provider for cars, the attach constraint, the graph behaviors if missing |
 | audio | `world_audio::TrafficAudio` + `game_audio` traffic host (#32): engine RPM, horn 1-5, alarm, skids, Doppler, model -> record table, nearest-4 within 40 m; `VehicleImpact` / `VehicleParked` / `VehicleAlarmStarted` | a publisher |
 | mod surface | `sdk.world_audio.spawn('car1','traffic',...)` (audio-only cars), skate-dynamics Lua cars | `sdk.living_world.vehicles` |
 | rendering | retail world shaders, multiplayer skinned looks for characters | a static car mesh path with tint and glass |
@@ -223,15 +223,15 @@ integrator `sub_82C3FF38`**.
 - `SignalClock`: per junction phase sequence from `livingworld.trafficlights` (green 7 / 8, amber 1, all-red 0.5) with
   a deterministic offset; queries "may enter" for an approach; the peds use the same clock for walk signs.
 - `Driver`: the ported planner (`sub_82C3FA08`), integrator (`sub_82C3FF38`), horn decider (`sub_82C40660`),
-  manoeuvre decider (`sub_82C41CD0`), impatience and pull-over / park / pull-out timers, each a pure function of a
+  maneuver decider (`sub_82C41CD0`), impatience and pull-over / park / pull-out timers, each a pure function of a
   `VehicleBrain` struct (the retail fields by name: accel, speed, cap, gap, timers, flags) and the spec / driver
   records. The state graph runs on the shared `skate-core::graph` host with `Vehicle.xml` from the user's install
-  (as the peds do), with a Rust behaviour / condition registry (7 states, conditions `82C39CF0..82C3A850`).
+  (as the peds do), with a Rust behavior / condition registry (7 states, conditions `82C39CF0..82C3A850`).
 
 ### 3.3 Engine: `skate-game::living_world::vehicles`
 - Components: `Vehicle { slot, entity_record, model, spec, driver, seed }`, `VehicleBrain`, `LaneCursor`,
   `VehicleTint { chassis, secondary }`, `TrafficAudio` (existing), `VehicleProxy` (collider handle), `Skitchable`.
-- Systems (FixedUpdate before the skater physics, console-cadence normalised): census -> spawn / cull (pool, entities
+- Systems (FixedUpdate before the skater physics, console-cadence normalized): census -> spawn / cull (pool, entities
   hidden and reused), brain tick, cursor advance -> `Transform` (position on the lane at ride height, heading from
   the lane tangent, pitch from the samples), proxy update (kinematic, velocity set so contacts see the motion), audio
   publish (`TrafficAudio.speed` = `+3412`, `load` = `+3408`, `horn` from `+3420`, `skidding` from the brake rule),
@@ -250,7 +250,7 @@ integrator `sub_82C3FF38`**.
   vehicle pass, exactly as retail; the planner raises its cap while held (field from V6 RE) and handles release
   through normal planning.
 - Skater: the existing `Skitching` state; the attach constraint holds the board at the car's rear target with the
-  retail offset; speed comes from the car (the board is carried); steering / shimmy from the skitch behaviours; release
+  retail offset; speed comes from the car (the board is carried); steering / shimmy from the skitch behaviors; release
   on button up, wipeout, `IsOffGroundSkitching`, or the target disappearing (car culled / turning away beyond the
   limits); the 2 s post-skitch timer and stats (`Furthest_Skitch`, `Longest_Skitch`).
 
@@ -286,7 +286,7 @@ Same patterns as the peds / NPC skaters (`sdk.living_world`), plus vehicles:
 | ring 80-100, cull 110, 2 / 1 per tick, initial 6000 / 600 / 8-80, caps 30 / 25 / 10, weights, Free Play scale, online / zombie gates | code + data | unit tests on the exported tables; headless census run vs code bounds; recomp sanity (17-27 vehicles per session) |
 | lane speeds, lane counts, junction connectors | data | data-gated decode tests (76 segments, connector counts per junction; V0 `tests/roads_data.rs`) |
 | light phases | data + trace | unit test: 0.5 / 8 / 0.5 / 7 / 1 cycle; cars stop on red; peds cross on walk |
-| planner / integrator / horn / manoeuvres | code | unit tests per formula with the code constants; replay fixtures from VEHSTATE (164620, 161156): speed from accel within 0.1 m/s |
+| planner / integrator / horn / maneuvers | code | unit tests per formula with the code constants; replay fixtures from VEHSTATE (164620, 161156): speed from accel within 0.1 m/s |
 | stopping for the skater, queues | code + trace | headless: a scripted skater stands in a lane; cars stop behind it and queue (152302 numbers as a sanity range: stops 2-5 s, holds 14-20 s while blocked) |
 | skitch | code + trace | unit tests of the 0x80 / 0x40 latch; fixture windows from `skitch_fixture.py` (peak 14-17.6 m/s in 3-11 s); the user's session last |
 | audio | ported (#32) | existing tests + the bridge fed by the vehicle system |
@@ -318,9 +318,9 @@ Sizes: S ≤ 1 day, M 2-4 days, L 1-2 weeks of work.
 | V1 | Road graph + lane cursor + signal clock in `skate-core` (unit tests; RE: lane snapping in the vehicle factory, `livingworld.roadnetwork` fields, signal group mapping) | M | V0 |
 | V2 | Vehicle census on the shared population core (rules + gates + Free Play scale), pool, debug overlay | S | shared core (peds M1), V1 |
 | V3 | Cars on screen: renderer (static mesh, tint, glass), kinematic movement on lanes at lane speed, lights obeyed, `TrafficAudio` publishing (engine + Doppler audible) | M | V2 |
-| V4 | Driver: planner, integrator, look-ahead (cars, skater, NPCs, peds), queues, horn decider (+ `IsBeingHonkedAt` to peds), skids, manoeuvres (lane change / overtake / pull over), park / pull out, `VehicleParked` / `VehicleImpact` / alarm read-back; state graph on the shared graph host | L | V3, peds M4 graph host for the shared runtime |
+| V4 | Driver: planner, integrator, look-ahead (cars, skater, NPCs, peds), queues, horn decider (+ `IsBeingHonkedAt` to peds), skids, maneuvers (lane change / overtake / pull over), park / pull out, `VehicleParked` / `VehicleImpact` / alarm read-back; state graph on the shared graph host | L | V3, peds M4 graph host for the shared runtime |
 | V5 | Physics: car proxies in the skater's contact solve (roof landings, bails with the vehicle contact term, Hall of Meat scorer hook), cars stop when hit / blocked | M | V3, peds M5 proxies |
-| V6 | RE for skitching (static, no game): grab-candidate search for cars (range, side, speed, button), attach offset, held speed cap field, release rules, the skater-side behaviours the graph names; write findings to the notes | M | none (can run in parallel from now) |
+| V6 | RE for skitching (static, no game): grab-candidate search for cars (range, side, speed, button), attach offset, held speed cap field, release rules, the skater-side behaviors the graph names; write findings to the notes | M | none (can run in parallel from now) |
 | V7 | Skitching: `Skitchable` car target + held latch + raised cap; skater side on the existing `Skitching` state (attach, carry speed, steer / shimmy, release, 2 s timer, stats); events; tests with the fixtures | L | V4, V5, V6 |
 | V8 | Mod surface for vehicles (content overlay, runtime API, events, skitch tunables, cleanup), `check_mod`, docs, multiplayer default (none online, opt-in snapshots) | M | V4, shared M7 |
 ### 7b. Skitching milestones in detail (V6 research, V7 build)
@@ -330,7 +330,7 @@ Sizes: S ≤ 1 day, M 2-4 days, L 1-2 weeks of work.
 | attach offset | board carried by the car [trace: car and skater move together for up to 348 m] | offset of the hand / board to the car target, shimmy range (`IsSkitchShimmying`) | attach constraint; test: offset constant over a fixture window |
 | car while held | `+4403` 0xC0 latch (`sub_82C34648` sets 0x80, `sub_82C34CD0` latches 0x40) [code]; speed-up to 14-17.6 m/s in 3-11 s, accel ramp to ~4.9 m/s², still brakes for traffic [trace] | which cap field 0xC0 raises (`+3680` / `+3684` / spec), who calls slot 128 (the skater's skitch update) | latch unit test; replay test: speed curve within the fixture ranges (`skitch_164620.json`, `skitch_161156.json`) |
 | release | button up, wipeout, `IsOffGroundSkitching` [code, ported selector]; car brakes hard (≈6.2 m/s²) or keeps driving [trace] | release by distance / angle / speed, collision release, what makes a car brake after release | release reasons as events; test the 2 s post-skitch timer |
-| skater side | state 104, input-phase skitch timer, wipeout skitch terms [code, ported] | the skitch behaviours' steering and push (`B_*_SkitchPush_*` clips), speed handed back to the board on release | animation set, steering, speed carry-over; state-log identity when traffic is off |
+| skater side | state 104, input-phase skitch timer, wipeout skitch terms [code, ported] | the skitch behaviors' steering and push (`B_*_SkitchPush_*` clips), speed handed back to the board on release | animation set, steering, speed carry-over; state-log identity when traffic is off |
 | mod hooks | event and tunable shape in §4 | none | `skitch_grab` / `skitch_release` events, tunables as data, mod cars skitchable |
 | data | sessions 164620 (5) and 161156 (2) clean; 153038 raw deleted (summary only) | none | D1 session settles what the code leaves open |
 
@@ -350,7 +350,7 @@ Only what code, disc data and the existing sessions cannot answer. All are user-
 Each needs the hooks proven first in a background run of ours (project rule "verify hooks before sessions"); the new
 hooks they need are listed in the local vehicles todo.
 - **D1. Skitch session (needed for V7), ~5 min, DownTown streets (e.g. near Aletown / Hotel District).** Grab 6-8
-  cars: from a stop, at walking pace, at full pushing speed; from the left rear, centre and right rear corners; try to
+  cars: from a stop, at walking pace, at full pushing speed; from the left rear, center and right rear corners; try to
   grab a car that is too fast or too far (and say so out loud or note the time); hold one skitch through a junction
   and a turn; release by letting go, by bailing, and by riding until something forces you off; one skitch on a taxi.
   Needs the new SKITCH hooks (grab candidate, attach offset, release reason) plus VEHSTATE.

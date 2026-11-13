@@ -3,7 +3,7 @@
 use skate_data::skate_map::Vertex;
 use std::collections::HashMap;
 
-/// Positions closer than this (metres) count as the same vertex.
+/// Positions closer than this (meters) count as the same vertex.
 const WELD: f32 = 0.05;
 
 /// Area (m²) of the water body each material belongs to, indexed like

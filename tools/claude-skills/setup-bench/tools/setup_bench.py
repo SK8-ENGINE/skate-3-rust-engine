@@ -1,4 +1,4 @@
-"""Timed full setup into a scratch base, for setup speed work (skill optimisation; doc 08).
+"""Timed full setup into a scratch base, for setup speed work (skill optimization; doc 08).
 
 Usage (from a checkout root, so `tools` is that checkout's pipeline):
     py -3.13 <this> --checkout <repo checkout> --base <scratch base> --game-exe <skate3rust.exe> --source <default.xex> --label <name>

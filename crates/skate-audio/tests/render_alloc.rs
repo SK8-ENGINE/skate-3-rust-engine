@@ -1,5 +1,5 @@
-//! The audio thread's render must not allocate in steady state (optimisation pass 2026-10-03,
-//! doc 11 "Optimisation pass"): an allocation in the device callback can wait on the process heap
+//! The audio thread's render must not allocate in steady state (optimization pass 2026-10-03,
+//! doc 11 "Optimization pass"): an allocation in the device callback can wait on the process heap
 //! behind the game thread. A counting allocator wraps the system one; only this thread's
 //! allocations between the markers count. The scene: AEMS voices (mono and stereo, filters on,
 //! azimuths and cutoffs moving every evaluator tick) routed into the eEQChain buses and the

@@ -19,11 +19,11 @@ pub struct ObstacleParams {
     /// Re-cut once the object moved more than this x its smallest half extent from the cut
     /// [code `0x820C6D98` = 0.25].
     pub recut_fraction: f32,
-    /// Clearance added to the agent radius for detour corners, metres (ours).
+    /// Clearance added to the agent radius for detour corners, meters (ours).
     pub detour_margin: f32,
     /// Detour corners one path may get (ours, a cost cap).
     pub max_detours: usize,
-    /// A path end inside a cut moves to the nearest free point when that is at most this far (xz), metres: retail
+    /// A path end inside a cut moves to the nearest free point when that is at most this far (xz), meters: retail
     /// snaps a bot destination onto the cut mesh within a 0.5 m window (`82C46348` / `82C460E0`, radius
     /// `0x8209975C` = 0.5, research b302), so a plugin waypoint just in front of its own prop is reached.
     pub target_snap: f32,
@@ -125,7 +125,7 @@ impl Default for ObstacleParams {
 pub struct ObstacleInput {
     /// Stable id (props: their prop id; mod bodies: a separate range, see the game host).
     pub id: u64,
-    /// Box centre (world).
+    /// Box center (world).
     pub center: Vec3,
     /// Box axes (world, unit columns) and half extents along them.
     pub axes: [Vec3; 3],
@@ -229,12 +229,12 @@ impl Footprint {
     }
 }
 
-/// Per-object obstacle state (serialisable plain data).
+/// Per-object obstacle state (serializable plain data).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ObstacleState {
     /// The footprint cut into the walkable area (retail `+74` set), if any.
     pub cut: Option<Footprint>,
-    /// Box centre when it was cut (retail `+48`).
+    /// Box center when it was cut (retail `+48`).
     pub cut_at: Vec3,
     /// Footprint now (cut or not).
     pub now: Footprint,
@@ -689,7 +689,7 @@ impl NavObstacles {
         if avoider[0] * d[0] + avoider[1] * d[1] >= slow {
             return None;
         }
-        // Tangent on the side the step already leans to; dead centre takes retail's fixed side.
+        // Tangent on the side the step already leans to; dead center takes retail's fixed side.
         let mut t = [n[1], -n[0]];
         let along = d[0] * t[0] + d[1] * t[1];
         if along < 0.0 {
@@ -717,7 +717,7 @@ impl NavObstacles {
             if !f.applies(to[1], sh) || !f.contains(to, radius) {
                 return true;
             }
-            // Already inside: allow steps that move away from the centre.
+            // Already inside: allow steps that move away from the center.
             let d = |p: Vec3| (p[0] - f.center[0]).hypot(p[2] - f.center[1]);
             f.contains(from, radius) && d(to) > d(from)
         };

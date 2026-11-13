@@ -16,7 +16,7 @@
 //!   send = out1, B gain = out2, B env send = out3 (each / 32767). Class defaults (1.0 / 1.0)
 //!   until the first frame.
 //! - Pn21: parameter 0 posted from manager +124 / +160, which nothing we found writes (zeroed
-//!   allocation assumed): azimuth 0 on the speaker circle, i.e. the centre. UNCERTAIN.
+//!   allocation assumed): azimuth 0 on the speaker circle, i.e. the center. UNCERTAIN.
 //! - A return renders only in blocks where some voice sends into it (retail's trace shows return
 //!   A's modules processed only in bursts); its LFO records advance every block regardless.
 use crate::BLOCK;
@@ -57,7 +57,7 @@ pub struct FlangeReturn {
 
 impl Default for FlangeReturn {
     fn default() -> Self {
-        // `sub_824907D8` templates: period 1 s, amount 0.5, centre = depth (6 ms / 1.0).
+        // `sub_824907D8` templates: period 1 s, amount 0.5, center = depth (6 ms / 1.0).
         let template = |centre| Lfo { period: 1.0, phase: 0.0, amount: 0.5, centre, depth: centre };
         Self {
             delay: Delay::new(0.015, 1),

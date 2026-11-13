@@ -308,7 +308,7 @@ fn report_fixed(schedules: Res<Schedules>, mut state: Local<FixedReport>) {
             .filter_map(|s| s.systems().ok().map(|it| it.map(|(_, system)| system.name().to_string()).collect::<Vec<_>>()))
             .flatten()
             .collect();
-        // Not initialised yet: try again next frame.
+        // Not initialized yet: try again next frame.
         if !members.is_empty() {
             let names = t.names.lock().unwrap_or_else(|e| e.into_inner());
             for (i, n) in names.iter().enumerate() {

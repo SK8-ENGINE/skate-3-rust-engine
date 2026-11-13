@@ -36,7 +36,7 @@ fn retail_query_cylinder_from_three_points() {
 fn query_cylinder_matches_a_recomp_sample() {
     // The recomp's player at PCU Library (TRIGQRY 90428 ms, session trig_questions):
     // head and hips as logged, feet rebuilt on the logged axis; the builder's
-    // output centre and axis must come back.
+    // output center and axis must come back.
     let head = [308.6950, 75.6429, -439.0241];
     let hips = [308.6946, 74.9921, -438.9733];
     let feet = [308.6855, 74.0002, -438.9550];

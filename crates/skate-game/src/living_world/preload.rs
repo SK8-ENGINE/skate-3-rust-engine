@@ -78,7 +78,7 @@ pub(crate) fn preload_models(
     let key = Some((map.name.clone(), map.generation));
     let data_in = state.loaded_for == key && ped_data.loaded_for == key && traffic.loaded_for == key;
     let default_models = crate::custom_models::CustomModels::default();
-    // Not `CustomModels`: the customiser's systems mark it changed every frame; an NPC look it changes mid-map loads
+    // Not `CustomModels`: the customizer's systems mark it changed every frame; an NPC look it changes mid-map loads
     // lazily, as before.
     let looks_changed = ped_looks.is_changed() || car_overrides.is_changed() || npc_looks.is_changed();
     let models = models.as_deref().unwrap_or(&default_models);

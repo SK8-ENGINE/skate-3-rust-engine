@@ -93,7 +93,7 @@ B. **Physics (not recommended now):** nothing identified that differs from retai
   queries per run, mostly tier 3 for arms); the cooldown limits posts. `+212` = |COM v| in m/s is our port's reading of
   the state; the curve's x range (0–0.95) means "moving at all", UNCERTAIN whether retail's `+212` is in m/s; the
   measured ×5 at running / falling speeds and ~×1 at rest agree with that reading.
-- Optimisation / regression: e2e bail scenarios change (expected), everything else must stay byte-identical.
+- Optimization / regression: e2e bail scenarios change (expected), everything else must stay byte-identical.
 
 ## 5. Decision points for the user
 1. Accept that the ragdoll physics is not the cause (no physics change): yes / no.

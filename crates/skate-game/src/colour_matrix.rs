@@ -1,4 +1,4 @@
-//! Retail post FX colour matrix records from the stock collections (class `post_fx`; research b100): the base
+//! Retail post FX color matrix records from the stock collections (class `post_fx`; research b100): the base
 //! `colour_matrix` (identity) and `colour_matrix_zombiemode` (the zombie cheat's tint, selected by `827F4D28` /
 //! `827F5450` while the zombie query is true). The matrices are built by `skate_core::colour_matrix`.
 
@@ -71,7 +71,7 @@ pub(crate) fn update_grade(
     let zombie = settings.is_some_and(|s| s.zombie);
     let world = if zombie { records.zombie.as_ref().unwrap_or(&records.base) } else { &records.base };
     // During a replay the editor's look lanes replace their terms of the world record (b380 / b408: retail's override
-    // copy of the colour block, built into the same matrices).
+    // copy of the color block, built into the same matrices).
     let look = replay.as_ref().and_then(|r| r.look(world));
     let record = look.as_ref().map_or(world, |l| &l.record);
     let near = cameras
@@ -82,7 +82,7 @@ pub(crate) fn update_grade(
         })
         .unwrap_or(0.1);
     let mut next = ColourGrade::of(record, near);
-    // The replay's tint (b413, `827FE770`): one constant colour alpha-blended over the whole graded frame, under the
+    // The replay's tint (b413, `827FE770`): one constant color alpha-blended over the whole graded frame, under the
     // HUD and menus; drawn as the tone pass's last step so the exported video carries it too.
     if let Some(look) = look.as_ref() {
         next.rows[8] = Vec4::from_array(look.tint);
@@ -128,7 +128,7 @@ mod tests {
     use super::*;
 
     /// The grade the tone pass gets: the near / far weights are linear in view depth between the record's distances
-    /// (full near up to 50 m, full far from 100 m, summing to 1); the base record leaves every colour unchanged.
+    /// (full near up to 50 m, full far from 100 m, summing to 1); the base record leaves every color unchanged.
     #[test]
     fn the_grade_mixes_near_and_far_linearly_in_depth() {
         let g = ColourGrade::of(&ColourMatrixRecord::default(), 0.25);

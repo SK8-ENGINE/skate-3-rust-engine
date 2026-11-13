@@ -31,9 +31,9 @@
 //!   material's category (`sub_824D21D0`: outputs 2..11) / 32767, posted once at build; Sen0 #2
 //!   (class default 1.0) → the eEQChain bus `sub_82497BF8` picks from the material's
 //!   AudioSurfaceMap words 12..16 by tier and the other material's class (every shipped entry
-//!   holds 8 = SFX Master), into the bus's centre.
+//!   holds 8 = SFX Master), into the bus's center.
 //!
-//! Not modelled: the Hall of Meat override in `sub_824965D0` (global `+564`, materials 97..100 → kind 8) and the stamp's
+//! Not modeled: the Hall of Meat override in `sub_824965D0` (global `+564`, materials 97..100 → kind 8) and the stamp's
 //! global counter (`*(0x830CFD94)+16`, UNCERTAIN: we use the post order). The `+57` alternate window / band
 //! records are read by flagged posters only (the prop impacts, [`CollisionTuning::impact_band_flagged`]).
 use super::Outputs;

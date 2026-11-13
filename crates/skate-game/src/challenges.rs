@@ -50,7 +50,7 @@ pub(crate) struct Challenge {
     pub scoring: Volume,
     pub spot: Volume,
     pub start: Start,
-    /// The challenge locator (retail Location): centre of the sign-up and discovery spheres (research b842 / b843).
+    /// The challenge locator (retail Location): center of the sign-up and discovery spheres (research b842 / b843).
     pub location: Start,
     pub sign_up_radius: f32,
     pub discovery_radius: f32,
@@ -91,7 +91,7 @@ pub(crate) fn load(assets: &Path) -> Result<Vec<Challenge>, String> {
     Ok(file.challenges)
 }
 
-/// The local skater signed up for a challenge (retail 0x905C8249; serialisable: the authority starts the run).
+/// The local skater signed up for a challenge (retail 0x905C8249; serializable: the authority starts the run).
 #[derive(Message, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct ChallengeSignUp {
     pub body: String,
@@ -132,7 +132,7 @@ pub(crate) fn sign_up_state(c: &Challenge) -> i32 {
     if ots { 5 } else { 1 }
 }
 
-/// eChallengeTypes of create-a-spot: listed last, labelled by `CREATE_A_SPOT_LABEL` (research b851).
+/// eChallengeTypes of create-a-spot: listed last, labeled by `CREATE_A_SPOT_LABEL` (research b851).
 const CREATE_A_SPOT_TYPE: i32 = 35;
 const CREATE_A_SPOT_LABEL: &str = "#CreateASpot Needs A Name!";
 /// The overlay text and the pick popup's title with several challenges in range (82665DA0 / 826660F0, b851).
@@ -179,7 +179,7 @@ pub(crate) const DPO_TARGET_TITLE: &str = "ID_COMMON_TARGET";
 pub(crate) const DPO_PERSONAL_BEST_TITLE: &str = "ID_DPO_PERSONALBEST";
 pub(crate) const NEW_PERSONAL_BEST: &str = "ID_LEADERBOARD_NEW_PERSONAL_BEST";
 /// The central message style for `HUD2.eMessageColour.Green` (White 0, Red 1, Green 2, 8284DC78; the binding
-/// 82850618 passes the colour through as the style; research b847).
+/// 82850618 passes the color through as the style; research b847).
 const GREEN_STYLE: i32 = 2;
 
 pub(crate) fn objective_text(text: TargetText) -> &'static str {

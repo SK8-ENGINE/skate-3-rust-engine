@@ -23,7 +23,7 @@ fn catalog() -> PedCatalog {
     let mut c = PedCatalog::default();
     c.categories.insert("aletown".into(), s(&["jock02", "skater_female03", "bum02"]));
     c.categories.insert("empty".into(), vec![]);
-    let e = |m: &str, a: &str| PedEntity { model: Some(m.into()), anim_set: Some(a.into()) };
+    let e = |m: &str, a: &str| PedEntity { model: Some(m.into()), anim_set: Some(a.into()), ..Default::default() };
     c.entities.insert("jock02".into(), e("jock02", "jock"));
     c.entities.insert("skater_female03".into(), e("skater_female", "female"));
     c.entities.insert("bum02".into(), e("bum02", "bum"));

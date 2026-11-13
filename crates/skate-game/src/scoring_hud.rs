@@ -112,7 +112,7 @@ struct MiniMap {
 /// Below the central messages, above the trick display.
 const MINIMAP_Z: f32 = 29.0;
 /// The north needle retail draws over the minimap (82665848, `north_pointer.Texture` of icons/minimap, 16 x 128), its
-/// texture key here and its centre: the movie's needle clip `mNorth` (b568). The texture lives in the menu movie set.
+/// texture key here and its center: the movie's needle clip `mNorth` (b568). The texture lives in the menu movie set.
 const NEEDLE_TEXTURE: &str = "minimap:north_pointer";
 /// The minimap icon pack's textures the HUD loads (menu set `texture/<name>`), keyed `minimap:<name>`.
 /// The needle; every `mini_*` icon texture of the set loads too (race gates, called skaters, mod icons).
@@ -122,7 +122,7 @@ const NEEDLE_UNITS: [f32; 2] = [32.0, 200.0];
 
 /// The needle quad turned degrees clockwise on screen.
 fn needle_draw(degrees: f32) -> apt_scene::Draw {
-    // Map units turned, then the map matrix's scale and centre (skate_core::minimap::IconRules, traced).
+    // Map units turned, then the map matrix's scale and center (skate_core::minimap::IconRules, traced).
     let rules = skate_core::minimap::IconRules::default();
     let (s, c) = degrees.to_radians().sin_cos();
     let [hw, hh] = [NEEDLE_UNITS[0] / 2.0, NEEDLE_UNITS[1] / 2.0];
@@ -340,7 +340,7 @@ fn setup(
             );
             textures.insert(path, images.add(image));
         }
-        // Solid units (texture "": the colour alone, e.g. the leaderboard's row backers) sample plain white.
+        // Solid units (texture "": the color alone, e.g. the leaderboard's row backers) sample plain white.
         textures.insert(String::new(), images.add(Image::new(
             Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
             TextureDimension::D2,
@@ -965,7 +965,7 @@ fn apply_draws(
 }
 
 /// Draws APT geometry into the HUD's offscreen layer (31), one retained slot per draw. `z_base` stacks another
-/// movie set (the retail menus) above the HUD; `gamma` applies colour transforms in gamma space.
+/// movie set (the retail menus) above the HUD; `gamma` applies color transforms in gamma space.
 pub(crate) fn render_draws(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,

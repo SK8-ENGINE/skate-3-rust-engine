@@ -1,4 +1,4 @@
-//! Ped clothing colours: the ped shaders recolour mask texels with the model's tint pair; baked per pair here.
+//! Ped clothing colors: the ped shaders recolour mask texels with the model's tint pair; baked per pair here.
 //! Shader rule and data: docs/hails-additions/26f-living-world-peds.md#ped-colorize
 
 /// The mask test literal of both ped pixel shaders: `G^2 < 0.001225` [code, shader].

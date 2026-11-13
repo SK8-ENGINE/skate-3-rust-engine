@@ -192,6 +192,18 @@ fn rebuild(world: &mut World, t: &WorldTuning, domain: &str) {
                 None => world.insert_resource(s),
             }
         }
+        "vehicles" => {
+            let p = t.merged(domain, |p| if let Patch::Vehicles(p) = p { Some(p) } else { None });
+            if let Some(mut o) = world.get_resource_mut::<crate::living_world::vehicles::VehicleOverrides>() {
+                o.models = p.models.clone();
+                o.glbs = p.glbs.clone();
+                o.bases = p.entities.clone();
+                o.paint_gain = p.paint_gain;
+            }
+            if let Some(mut s) = world.get_resource_mut::<crate::living_world::PopulationState>() {
+                s.set_vehicle_patch(p.entities, p.spawn_tables);
+            }
+        }
         _ => {}
     }
 }
@@ -805,6 +817,11 @@ pub(crate) fn read(world: &World, domain: &str) -> Value {
         "video_screens" => world.get_resource::<VideoScreenSettings>().map_or(Value::Null, |s| json!({
             "enabled": s.enabled, "width": s.size.x, "height": s.size.y, "rate_hz": s.rate_hz, "max_distance": s.max_distance})),
         "ghost" => world.get_resource::<GhostTuning>().map_or(Value::Null, |s| json!({"enabled": s.0.enabled, "fade_in_seconds": s.0.fade_in_seconds, "hold_alpha": s.0.hold_alpha})),
+        "vehicles" => {
+            let tables = world.get_resource::<crate::living_world::PopulationState>().and_then(|s| s.vehicles.as_ref()).map(|c| json!(c.categories));
+            world.get_resource::<crate::living_world::vehicles::VehicleOverrides>().map_or(Value::Null, |o| json!({
+                "spawn_tables": tables, "entities": o.bases, "models": o.models, "glbs": o.glbs, "paint_gain": o.paint_gain.unwrap_or(1.0)}))
+        }
         _ => Value::Null,
     }
 }
@@ -841,6 +858,19 @@ mod tests {
         assert_eq!(w.resource::<VideoScreenSettings>().size, UVec2::new(1024, 288));
         clear_owner(&mut w, "dev.b");
         assert_eq!(*w.resource::<VideoScreenSettings>(), VideoScreenSettings::default(), "mod disable restores the defaults");
+    }
+
+    #[test]
+    fn vehicles_set_merge_and_reset_on_disable() {
+        let mut w = world();
+        w.init_resource::<crate::living_world::vehicles::VehicleOverrides>();
+        set(&mut w, "dev.a", "vehicles", Some(json!({"entities": {"my_cab": "taxi01"}, "glbs": {"vehicle_taxi01": "mods/a/cab.glb"}}))).unwrap();
+        set(&mut w, "dev.b", "vehicles", Some(json!({"glbs": {"vehicle_taxi01": "mods/b/cab.glb", "vehicle_sedan01": "mods/b/sedan.glb"}, "paint_gain": 2.0}))).unwrap();
+        let o = w.resource::<crate::living_world::vehicles::VehicleOverrides>().clone();
+        assert_eq!(o.glbs["vehicle_taxi01"], "mods/a/cab.glb", "first writer wins per key");
+        assert_eq!((o.glbs.len(), o.bases["my_cab"].as_str(), o.paint_gain), (2, "taxi01", Some(2.0)));
+        clear_all(&mut w);
+        assert_eq!(*w.resource::<crate::living_world::vehicles::VehicleOverrides>(), Default::default(), "mod disable restores retail");
     }
 
     #[test]

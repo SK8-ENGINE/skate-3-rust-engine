@@ -94,7 +94,7 @@ impl FrequencyShift {
         // Lanes {φ, φ + Δ, φ + 2Δ (fused), φ + 3Δ (fused)} advancing by 4Δ per group of four;
         // out = I · cos − Q · sin. `sin` / `cos` are pure functions of the lane's bits: a lane that
         // holds the same value as in the previous group (a 0 Hz shift: Δ = 0) reuses them
-        // (optimisation pass 2026-10-03, bit-identical; test `repeated_lanes_reuse_the_same_trig`).
+        // (optimization pass 2026-10-03, bit-identical; test `repeated_lanes_reuse_the_same_trig`).
         // The loop is `skate_audio_fma::fss_mix` (hardware FMA when available, same bits).
         skate_audio_fma::fss_mix(samples, i, q, phi, delta);
         let end = delta.mul_add(n as f32, phi);
@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(fss.phase(), end, "less than a turn: no wrap, sign kept");
     }
 
-    /// The process before the optimisation pass (test-only reference): plain kernels, `sin` /
+    /// The process before the optimization pass (test-only reference): plain kernels, `sin` /
     /// `cos` for every sample.
     fn process_reference(f: &mut FrequencyShift, samples: &mut [f32], rate: f32) {
         let n = samples.len();
@@ -264,7 +264,7 @@ mod tests {
         f.phase = (-turns).mul_add(TWO_PI, end);
     }
 
-    /// The optimised process (settled allpasses, repeated-lane trig) equals the reference bit for
+    /// The optimized process (settled allpasses, repeated-lane trig) equals the reference bit for
     /// bit over shifts of 0 Hz (repeated lanes), ±150 Hz and tiny / huge / NaN ones, on tone,
     /// silent, -0.0 and constant blocks, with the phase carried across blocks.
     #[test]

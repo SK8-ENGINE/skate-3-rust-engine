@@ -41,7 +41,7 @@ fn packages(folder: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// The dialogs when no path is given: files (one or many) or a folder; None = cancelled.
+/// The dialogs when no path is given: files (one or many) or a folder; None = canceled.
 fn pick() -> Option<Vec<PathBuf>> {
     let lines = |o: std::process::Output| -> Vec<String> {
         String::from_utf8_lossy(&o.stdout).lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect()

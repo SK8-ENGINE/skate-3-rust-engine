@@ -38,7 +38,7 @@ Change:
   `SKATE_LIVING_WORLD_DEBUG=1`.
 
 Simplifications until later milestones (documented, not retail): no navigation (M3): a ped idles, walks a few
-metres straight, stops and turns round (`TestPath`); the motion graph is not run (M4): the locomotion subset is
+meters straight, stops and turns round (`TestPath`); the motion graph is not run (M4): the locomotion subset is
 hand-wired from its data, the crossfade is linear over `blendTime`, the idle cycle swap is a uniform draw per
 wrap; LOD switches LOD0 / LOD1 at the model's 45 / 55 m pair (meaning unconfirmed, `sub_827C1188` not read),
 animation runs every tick for every ped; tints are kept but not drawn (the shader mask is not decoded); the group
@@ -89,15 +89,15 @@ until M3)". Open-questions additions: the 4 parked items below.
   state 1, `sub_82E2CB08`) the goal picks the next target.
 - **Navmesh** (`0x00EB0027`, all 678 objects) [data]: NavPower v23 graphs per tile: agent block 0.12 / 0.35 / 0.2 /
   1.6 (cell, radius, step, height; unverified), tile bounds, polygons (centroid, radius, flags; the area byte in
-  bits 8-15 of the second flags word) with 24-byte edge records (neighbour offset relative to the graph base,
-  vertex, edge flags). 63283 polygons, every one of the 148258 neighbour links checked. Areas: 0x11 pavement
+  bits 8-15 of the second flags word) with 24-byte edge records (neighbor offset relative to the graph base,
+  vertex, edge flags). 63283 polygons, every one of the 148258 neighbor links checked. Areas: 0x11 pavement
   (91-92 % of recomp ped positions), 0xA1 road carriageway (2054 of 2147 DownTown road piece starts; 3-4 % of ped
-  positions), 0xF1 never stood on [data + trace]. Tiles stop 0.14 m short of their borders; cross-tile neighbours
+  positions), 0xF1 never stood on [data + trace]. Tiles stop 0.14 m short of their borders; cross-tile neighbors
   are resolved at setup.
 
 **Change.**
 - Setup (`livingworld` group): `living_world_navmesh.py` writes `living_world/navmesh.bin` (polygons, areas,
-  neighbours incl. cross-tile links) and `navmesh.json` (counts, area histogram).
+  neighbors incl. cross-tile links) and `navmesh.json` (counts, area histogram).
 - `skate-core::living_world::peds`: `nav` (`NavMesh`: point location with the 0.5 m snap, reachability components,
   A* + funnel paths; `NavRules`), `wander` (the retail target choice, `PedNav` per ped, avoidance, step checks,
   `CrosswalkRule`), `crosswalk` (walk lights from the shared `SignalClock` for the mod rule).
@@ -124,7 +124,7 @@ other peds' positions (stepped in id order); no hash-map iteration, ties broken 
 **Tests.** skate-core 8 (fan order, location / reachability, paths, target choice, wander on walkable ground +
 determinism, crosswalk waits for walk, clock mapping, avoidance radius); skate-data 1 + 3 data-gated (DownTown
 counts and areas, road pieces on 0xA1, 15 peds x 90 s never off walkable ground and identical on rerun, crosswalk
-rule: every road entry at a signalled arm on walk green); skate-game 2 (navmesh wander in the app, export load);
+rule: every road entry at a signaled arm on walk green); skate-game 2 (navmesh wander in the app, export load);
 Python 4.
 
 Credits: NavPower v23 constants cross-checked against DumbadsSkate3ModdingTools by Ethanw05 (credits there to
@@ -186,7 +186,7 @@ wide bowed hips, twisted shoulders and arms.
 **Root cause.** The skin was `bone global x render_basis x inverse(GLB bind)`. `render_basis` (90 degrees about the
 bone's own x axis) belongs to the skater GLBs, whose converter (`character_glb.py`) bakes the matching
 `basis_transpose` into their bind matrices so the two cancel. The ped GLBs (`living_world_models.py`) keep the
-retail model's bind matrices unchanged, so nothing cancelled it: every ped bone turned 90 degrees about its own
+retail model's bind matrices unchanged, so nothing canceled it: every ped bone turned 90 degrees about its own
 axis. Spine bones have x up (the torso turned -90 degrees about the vertical), leg bones have x down (the legs
 turned +90 degrees), so torso and thighs were 180 degrees apart at the hips and linear blend skinning collapsed
 the waist. The clip data, the reference add and the mirror were not at fault.
@@ -304,7 +304,7 @@ the other ped_nav_data and living_world_data tests pass. skate-game `living_worl
 **Open.** Setup's stitch itself could record both sides (re-export); NavPower's path follow / steering and local
 avoidance are not decoded; 1-polygon islands are still valid spawn points if a census record lies on one.
 
-## Ped clothes drawn in their mask colours (looked like mixed outfits), 2026-10-05
+## Ped clothes drawn in their mask colors (looked like mixed outfits), 2026-10-05
 
 **Problem.** The user found some ped models still not right, though no longer squished; the three women at the
 start of their video were clearly not wearing the right clothes. The
@@ -333,7 +333,7 @@ masks, drawn raw:
 - Which tint feeds which constant [data]: the root `default` model record holds secondary `(1, 0, 0)` and chassis
   `(0, 0, 1)`; only secondary -> red, chassis -> blue makes that the identity. The CPU upload of the two constants
   was not traced (the parameter handles at `0x830B9C10` / `0x830B9BF4` are only referenced by their static
-  initialisers, which register them by name through `sub_82531428`); the table values are taken as they are.
+  initializers, which register them by name through `sub_82531428`); the table values are taken as they are.
 
 **Change.**
 - `skate-core::living_world::peds::colorize`: the shader rule (`colorize_texel`, `colorize_rgba8`,
@@ -354,7 +354,7 @@ Moddability: palettes are table data (content overlay of `secondary_colours` / `
 ped calls (mod milestone).
 
 **Evidence / verification.** Renders (`render_glb.py --ped-look MODEL:INDEX`, same rule) of the five models in the
-video, untinted vs three palette entries each: coherent outfits (grey / white / tan tops, dark jeans, a brown or
+video, untinted vs three palette entries each: coherent outfits (gray / white / tan tops, dark jeans, a brown or
 green coat over a checked skirt). Tests: skate-core `living_world::peds` 34 passed (colorize rule, mod palette
 override); skate-game `living_world` 45 passed (material selection); skate-data `ped_anim_data` 5 passed on the user's
 tables (root pair is the identity, every ped look takes its model's palettes); asset_pipeline living-world unittest 32
@@ -363,7 +363,7 @@ the exact material types.
 
 **Separate items, not this cause.** `female_business_3` has no `Hair` part (her ponytail is in the body mesh and
 renders with it offline); her flat, washed-out head in the video is not a missing part; since the retail ped material (2026-10-25) her whole mesh uses it, and the check on 2026-10-29 found nothing wrong (a local research note).
-`male_teenager_1`'s grey shoulder patch is the sleeve trim, a non-mask region of his atlas (the same in the GLB);
+`male_teenager_1`'s gray shoulder patch is the sleeve trim, a non-mask region of his atlas (the same in the GLB);
 his stiff arms-out walk is gone: a pose-dump render mid walk (2026-10-29) shows arms down and the same stride as `male_teenager_2`; his rig matches the other peds.
 
 ## Peds floating in the air all over the map (2026-10-06)
@@ -372,7 +372,7 @@ The user reported many floating peds in their last play session, not on any visi
 
 - **Cause:** the ped render height (fix 17) took the first hit of a line from one NavPower agent height (1.6 m) above the navmesh down to 1.6 m below. Any collision within 1.6 m overhead (awnings, ledges, signs, invisible collision) won, so the ped was drawn standing on it. Video 2026-10-06 10-00-44 at 49 s and 51 s.
 - **Change:** the upward search is the NavPower step height (agent block [2], 0.2 m [data]); NavPower keeps its polygons within one step of the walkable floor. Downward stays one agent height. Not retail yet: retail's own ped render placement is not decoded.
-- **Evidence:** data test `ped_render_ground_does_not_lift_onto_overhead_geometry` over all 36,443 DownTown polygon centres: drawn more than 0.3 m above the navmesh at 195 polygons before, 0 after.
+- **Evidence:** data test `ped_render_ground_does_not_lift_onto_overhead_geometry` over all 36,443 DownTown polygon centers: drawn more than 0.3 m above the navmesh at 195 polygons before, 0 after.
 - **Files:** `crates/skate-game/src/living_world/peds.rs` (`ground(up, down)`), `peds_tests.rs`.
 - **Logging (always on):** `PED_FLOATING` (warn, every 2 s per ped, once per ped per 10 s) when a ped is drawn more than 0.3 m above the floor under it or over no floor: ped, model, drawn position, navmesh height, floor height, gap, polygon and area code. The ped readout (count, nearest ped, player position) now runs every 2.5 s without debug mode. User: "im tired of you saying you can't see the floating pedestrains". A data check found 167 walkable DownTown polygons (areas 17 and 161) more than 1.6 m above the collision floor or over none; the log names them when a ped walks there.
 - **Peds spawned at the player's height (2026-10-06):** the logs showed nearly every floating ped had no navmesh polygon (32 of 34, then 44 of 44). The census ring point carries the observer's height (`census::ring_point`); where the navmesh has no floor within `locate_height` (4 m) of it, the ped kept that height and hung in the air or under the ground. With a navmesh, such a spawn is now released like an unresolved look and the census tries another point next pass. Not retail yet: retail's spawn validation is not decoded. Session after the fix (about 6.5 minutes): 0 `PED_FLOATING`, the ped count stayed at its cap (14 to 15).
@@ -408,7 +408,7 @@ still, now nearly all inside a prop plugin on their way to its waypoint: ped #56
 (-261.19, 539.74), 1.045 m from its waypoint, pressing into `prop_DT_NewspaperBoxReclaimedBlack_1004` at (-261.80,
 539.57) with `progressed=false`, until the plugin's 60 s `PluginTimeout` (graph data) ends the plugin. The waypoint
 (`native-props/DownTown.json`, hotpoint `EB4A16533EACEC04`) is at (-262.22, 539.56) facing the box: 0.42 m in front of
-the box centre, inside the box grown by the agent radius. The ped came from behind the box.
+the box center, inside the box grown by the agent radius. The ped came from behind the box.
 
 Retail [code, TU3; b177, b190 and a 2026-10-19 pass]:
 - No give-up on missing progress anywhere in the ped's NavPower stack. Bot update `82E974A8`: re-requests the path
@@ -474,7 +474,7 @@ not checked against its seat geometry).
   retail never gives a walking ped's target up. The bot's still timer (`82E97118`, 0.13 m / 0.5 s, re-requests the
   same destination `82E957F8`) runs in bot mode 4 only, not for walking peds (b336);
   an invalid path is re-requested every tick and only a failed request ends it (then the bot picks a new target).
-  The walking path step `82EA0808` has no neighbour handling at all (b336: every callee read), so our yield, sidestep
+  The walking path step `82EA0808` has no neighbor handling at all (b336: every callee read), so our yield, sidestep
   and push are ours; what keeps retail walking peds apart (acceleration writer, character-layer collision) is not read; the 2.0 s "detour home" of
   `82EA4408` belongs to the bot's mode-0 controller (no path: a standing ped pushed off its spot), not walking peds
   (research b335).
@@ -496,7 +496,7 @@ not checked against its seat geometry).
 **Problem.** Laptop session 2026-10-19 18:04, user: now and then one walks in place for a moment
 before stopping and changing course, and later, they were not always next to the prop. The log: `PED_BLOCKED` with
 small dropped hand props (a pop can, a purse, a water bottle, a phone, a coffee cup, 0.3 to 0.8 m away; 4 of 5 were the
-ped's own just-released prop) and one ped stuck about 29 s against a garbage can (0.64 m from its centre), each step
+ped's own just-released prop) and one ped stuck about 29 s against a garbage can (0.64 m from its center), each step
 going about 0.03 m toward it.
 
 **Retail (research b349) [code].** A ped's hand prop is an ordinary DMO (dynamic prop). While it is in the hand its obstacle-off word
@@ -507,7 +507,7 @@ cut edges; they are never inside a cut. Ours already matches the hand-prop rule 
 released one is listed by `obstacle_boxes`).
 
 **Root cause (ours).** A ped standing inside a footprint grown by its radius (a prop came to rest next to it) gets every
-step refused: `step_ok_ignoring` only allows steps away from the footprint centre, `resolve_step_ignoring` finds no
+step refused: `step_ok_ignoring` only allows steps away from the footprint center, `resolve_step_ignoring` finds no
 slide from inside, `detour` leaves the leg, so the path keeps aiming through the prop and the walk clip plays in place.
 
 **Change (ours, for retail's outcome).** The walker (`peds.rs`) checks whether the ped stands inside a footprint (not
@@ -560,7 +560,7 @@ parts vary with view angle and roughness, so normal-map detail showed on the sha
 `test_living_world.Models.test_skinned_two_lod_glb_from_a_recipe` (name and rows in the extras); the living world and
 replay suites (fade).
 
-**Open.** The hair program `defaulthair_defaultPS` and the second specular lobe (colour 0.005 for peds) are not
+**Open.** The hair program `defaulthair_defaultPS` and the second specular lobe (color 0.005 for peds) are not
 ported; the CSM (cascaded shadow map) / world-shadow combine of the program (`g_CSMSelfBias.w`) is partly decoded; the ped ground shadow
 layer (cause 3 of the todo) is separate.
 
@@ -657,7 +657,7 @@ Detail moved out of the code comments of `crates/skate-game/src/living_world/ped
 Pedestrians, body tier (doc 26, peds milestone M2): turns the population's pedestrian spawn / despawn records into visible, animated peds with footstep audio.
 
 - **Look** ([`Pedestrian`]): the entity inside the census category and its model from the spawn record's seed (`skate_core::living_world::peds::choice`, retail `sub_826B8B88` / `sub_826BB058`), the model's tint pair (`sub_827B4170`), painted onto the body's mask texels by [`present_ped_tints`] (retail's ped shader rule, `peds::colorize`). GLB `private/living_world/models/ <recipe>.glb` (both LODs, parts, textures), or a mod's GLB from [`PedLooks`].
-- **Animation** ([`PedBody`]): the ped animation player on the clips of `PedestrianSkeletonPres.abin`, stepped once per population world tick (1/60 s, `clock::RETAIL_TICK_HZ`) so a ped's state is a function of its spawn record and the population tick. Root motion moves the ped; it is snapped to the ground below (a line query, like the audio's ground material probe). The intent comes from navigation (M3, below); on a map without a navmesh a ped follows [`TestPath`] (idle, walk a few metres, stop, turn round).
+- **Animation** ([`PedBody`]): the ped animation player on the clips of `PedestrianSkeletonPres.abin`, stepped once per population world tick (1/60 s, `clock::RETAIL_TICK_HZ`) so a ped's state is a function of its spawn record and the population tick. Root motion moves the ped; it is snapped to the ground below (a line query, like the audio's ground material probe). The intent comes from navigation (M3, below); on a map without a navmesh a ped follows [`TestPath`] (idle, walk a few meters, stop, turn round).
 - **Navigation** (milestone M3): the district's NavPower navmesh (`private/living_world/ navmesh.bin`, [`PedData::nav`]) and retail's `NoRoadWander` goal (`skate_core::living_world::peds::wander`: probe fans 40 m / 10 m, A* + funnel corners, re-target on arrival), ped-to-ped avoidance and separation, every step kept on walkable polygons. Retail ambient peds never use crosswalks (the road branch of `Pedestrian.xml` is unreachable in TU3); [`PedNavSettings::crosswalk`] = `WalkSignal` is a mod option that waits for the walk light of the shared traffic signal clock.
 - **Dynamic obstacles** (fix 11, retail DynamicObject NavPower obstacles, see `skate_core::living_world::peds::obstacles`): [`PedObstacles`] holds every prop (the physics' prop bodies at their current pose, so a prop the player moved counts where it lies) and every mod body. At rest they are cut out of the walkable area (re-cut after moving more than a quarter of the smallest half extent, no cut while moving faster than 0.4 m/s or carried); targets inside a cut do not fit, paths bend round cuts, and a body is never stepped into ([`NavObstacles::resolve_step`]). Rules: [`LivingWorldSettings::ped_obstacles`] (`sdk.world.set_tuning("living_world", {ped_obstacles = {...}})`).
 - **Skinning**: the GLB's 39 joints bind to the 50-bone rig by name (all match, data test); bones the clips do not carry (fingers, face) follow their rig parent with the GLB's bind offset. The skin matrix is `bone global x inverse(GLB bind)` with NO extra bone-local basis: the ped GLBs keep the retail model's bind frames, which are the rig's reference frames (data test `ped_glb_bind_frames_are_the_rig_reference_frames`), so the reference pose skins to the bind mesh. The skater's `render_basis` (its GLBs bake a matching basis into the bind) twisted every ped bone 90 degrees about its own axis (torso -90, legs +90 at the hips): the pinched waist / warped peds of fix10. [`ped_bone_basis`] picks the basis per model from its bind frames, so a mod GLB written the skater way still works.
@@ -728,7 +728,7 @@ The DMO's plugin check (`82C56DB0`, b136 / b137): moved more than its type's max
   reproduces the trace's t and miss to the third decimal) must come within 0.75 s (`+0x44`) and 3 m (`+0x38`); a Jump
   when faster than 5 m/s (`+0x4C`) and closer than 1 m (`+0x3C`), else a Step (82E2E890). The direction is the angle
   of the escape vector (ped minus the closest point, flattened) from the ped's facing about up (8296EC98, read in the
-  generated code: acos of the normalised dot, 2 pi minus it when cross(facing, escape) points down; the call passes
+  generated code: acos of the normalized dot, 2 pi minus it when cross(facing, escape) points down; the call passes
   the facing from the owner's vt+0x14 as the first vector), with 30 degree (0.5236, `+0x40`) Forward and Back sectors:
   Left is the ped's own left. The escape point must pass a 0.1 m ground probe (82C46460). Values from the `AVOIDK` /
   `AVOIDTEST` lines of a recomp run (25 tests on 5 avoiders, all the same); two traced decisions (Step Right at miss
@@ -747,7 +747,7 @@ The DMO's plugin check (`82C56DB0`, b136 / b137): moved more than its type's max
 - **Moddability:** `ped_brain` tuning `skater_avoid_sense`, `skater_avoid_min_speed`, `skater_avoid_look_ahead`,
   `skater_avoid_radius`, `skater_avoid_jump_radius`, `skater_avoid_jump_speed`, `skater_avoid_sector`,
   `skater_avoid_period` (retail values as defaults, restored when the mod goes); the SkaterAvoidance nav modifier a
-  plugin or behaviour switches off (ChangeNavModifierSetting index 2) turns it off per ped.
+  plugin or behavior switches off (ChangeNavModifierSetting index 2) turns it off per ped.
 - **Multiplayer:** decided on the ped authority from positions, velocities and the ped's stable serial phase, no
   RNG; clients see the clip through the body sync.
 - **Tests:** `peds::avoid::tests` (the two traced decisions as fixtures, the gates, the sides, the seated table),
@@ -791,13 +791,13 @@ actors carry it is not found),
 the mover kind / `+0x3937` no-Jump gate, the global byte gate, when retail clears the two latches; whether the seated
 avoid also sends AvoidComplete's speech.
 
-### Plugin behaviour end
+### Plugin behavior end
 
-Leaving the Plugin state, or moving to another plugin graph, first ends the old graph's active behaviours: the Plugin behaviour's End (`8269F310` -> `82E0CFA0`, controller vtable +0x10 = EndAllBehaviours `82C13498`). So the sit body's End removes its packet (Sit2Stand plays) and OwnPluginObject / IgnoreStandingCollisions / LockToCurrentPosition clear as in retail (b300).
+Leaving the Plugin state, or moving to another plugin graph, first ends the old graph's active behaviors: the Plugin behavior's End (`8269F310` -> `82E0CFA0`, controller vtable +0x10 = EndAllBehaviours `82C13498`). So the sit body's End removes its packet (Sit2Stand plays) and OwnPluginObject / IgnoreStandingCollisions / LockToCurrentPosition clear as in retail (b300).
 
 ### Spawn conversation area
 
-SpawnConversationArea (`826A6CD8`): none within 50 m of another; 3 m ahead (no check there); the starter and its target join. The waypoint generator (`82E1D620`, b134) drops the centre with a +-3 m world ray (`82E166C0`; a miss = no waypoints) and keeps the waypoints only when all land on low-cost navmesh (no roads): an area without waypoints dissolves.
+SpawnConversationArea (`826A6CD8`): none within 50 m of another; 3 m ahead (no check there); the starter and its target join. The waypoint generator (`82E1D620`, b134) drops the center with a +-3 m world ray (`82E166C0`; a miss = no waypoints) and keeps the waypoints only when all land on low-cost navmesh (no roads): an area without waypoints dissolves.
 
 ### Intercept chasee
 
@@ -823,7 +823,7 @@ What retail does [code, TU3; addresses are evidence only]:
 - **Re-targeting** (`sub_82E2CB08`, mover vfunc 44): when the NavPower bot reports state 1 the goal picks a new target from the ped's position and NavPower is sent there.
 - Speed: `SuggestVelocity linear=3.0` in `Wander` [data]; the walk itself is root motion (walk clip 1.325 m/s, recomp walking median 1.30 [trace]).
 
-Ours (stated): NavPower's path following and local avoidance are not decoded. A ped follows the funnel corners of [`NavMesh::find_path`], steers toward the next corner at [`WanderParams::steer_rate`] (measured 255 deg/s) below the first turn edge and posts retail's turn buckets past it (`82E2A500`: 45 / 90 / 135 / 180, standing or walking, the clip turns the ped; the angle is to the next corner, retail's against NavPower's steering velocity `82E2ABF8` / `82E2AAA0`, b169), re-targets on arrival (the bot's state 1) and, when a path cannot be found, as after an event 1-3 (short fan next). Avoidance: a ped yields (stands) while a ped with a lower id is inside its personal space ahead of it, side-steps a ped with a higher id standing in its way, steers away from close peds, and never takes a step that brings it within twice the agent radius of another ped ([`separation_ok`]). The skater is not avoided by navigation (retail peds walk into a standing skater, PEDCOLL; the motion graph's `Avoid` reactions come with the behaviour milestones).
+Ours (stated): NavPower's path following and local avoidance are not decoded. A ped follows the funnel corners of [`NavMesh::find_path`], steers toward the next corner at [`WanderParams::steer_rate`] (measured 255 deg/s) below the first turn edge and posts retail's turn buckets past it (`82E2A500`: 45 / 90 / 135 / 180, standing or walking, the clip turns the ped; the angle is to the next corner, retail's against NavPower's steering velocity `82E2ABF8` / `82E2AAA0`, b169), re-targets on arrival (the bot's state 1) and, when a path cannot be found, as after an event 1-3 (short fan next). Avoidance: a ped yields (stands) while a ped with a lower id is inside its personal space ahead of it, side-steps a ped with a higher id standing in its way, steers away from close peds, and never takes a step that brings it within twice the agent radius of another ped ([`separation_ok`]). The skater is not avoided by navigation (retail peds walk into a standing skater, PEDCOLL; the motion graph's `Avoid` reactions come with the behavior milestones).
 
 ### Ped steer rate
 
@@ -835,7 +835,7 @@ A walking ped that stays within `stuck_distance` (0.13 m) for `stuck_seconds` (0
 
 ### Ped yield patience
 
-NOT RETAIL (ours): seconds a yielding ped waits before it re-paths to the same target. Keeping the target is retail's outcome; the 2.0 s is borrowed from the bot's mode-0 (no path) controller `82EA4408`, which walking path peds never run (b335). Retail's walking path step `82EA0808` has no neighbour handling at all (b336): our yield, sidestep and push are ours; what keeps retail walking peds apart is not read yet.
+NOT RETAIL (ours): seconds a yielding ped waits before it re-paths to the same target. Keeping the target is retail's outcome; the 2.0 s is borrowed from the bot's mode-0 (no path) controller `82EA4408`, which walking path peds never run (b335). Retail's walking path step `82EA0808` has no neighbor handling at all (b336): our yield, sidestep and push are ours; what keeps retail walking peds apart is not read yet.
 
 2026-10-29 (research b689, gates checked in the recomp asm): the candidate is
 the Pedestrian nav modifier's sensor `sub_82E2D3F8` (ped+2704, vtable `0x8232BA8C`, b337). Its classifier
@@ -845,7 +845,7 @@ slower one through `sub_82E2D7B8` to hold (`+0x74` bits 0xA0, `+0x20` zeroed) or
 bits 0xC0, a -10 degree turn scaled 3.0 at `+0x10`) [code]. So walking peds would never jump for each other. Not
 ported yet: what reads `+0x74` / `+0x10` / `+0x20` (how long a hold lasts, how far the steer bends) and whether peds
 report each other to this sensor at all need one recomp trace (hooks listed in b689). The gate itself is ported:
-with the modifier off the nav step gets no neighbours (`peds.rs`, `avoid_peds`).
+with the modifier off the nav step gets no neighbors (`peds.rs`, `avoid_peds`).
 
 ## Code reference: skate-core peds/obstacles.rs
 
@@ -873,19 +873,19 @@ A moving (uncut) object is solid for a ped's step ([`NavObstacles::step_ok`]). N
 
 Problem (DownTown session 2026-10-29): a fleeing ped met the player's standing skater head-on and stood pressed against it for 45 s. The face clamp of [`NavObstacles::resolve_step`] keeps only the part of the step along the face; head-on that part is zero, so the ped never moved.
 
-Retail [code, TU3, research b698, re-read 2026-10-30]: the path controller's steering (`82E9FD78`) adds, for every moving avoider the ped touches (`0 < dist < r_sum`), a push-out along `n = (p_ped - p_avoider) / dist` and, from `82E9D0C0`, a tangential slide `perp(n) * 0.7 * |push|` (`0x821161AC`). The slide applies when the ped heads into the body, `dot(dir, n) < -0.3` (`0x822F862C`), and the avoider's speed along `dir` is below 0.5 x the ped's max speed (`0x8209975C`). `dir` is the goal direction while the ped is slower than half its max speed, else its velocity direction (the 0.5 test only picks `dir`; b698 read it as a second trigger). The side is the one `dir` already leans to (sign of `cross(n, dir)`); dead centre takes a fixed side of `n`.
+Retail [code, TU3, research b698, re-read 2026-10-30]: the path controller's steering (`82E9FD78`) adds, for every moving avoider the ped touches (`0 < dist < r_sum`), a push-out along `n = (p_ped - p_avoider) / dist` and, from `82E9D0C0`, a tangential slide `perp(n) * 0.7 * |push|` (`0x821161AC`). The slide applies when the ped heads into the body, `dot(dir, n) < -0.3` (`0x822F862C`), and the avoider's speed along `dir` is below 0.5 x the ped's max speed (`0x8209975C`). `dir` is the goal direction while the ped is slower than half its max speed, else its velocity direction (the 0.5 test only picks `dir`; b698 read it as a second trigger). The side is the one `dir` already leans to (sign of `cross(n, dir)`); dead center takes a fixed side of `n`.
 
-Ours: in the step resolver, for a moving (uncut) body only, the step is replaced by a tangential step of `(|dot(d, t)| + 0.7 x |dot(d, n)|) x step length`, the push cancelling the inward part as in retail's sum; the result is still face-clamped and step-checked. Cut props keep the face clamp (retail routes round cuts on the mesh). Mod keys `ped_obstacles.contact_slide` (0.7, 0 = off) and `contact_slide_dot` (-0.3). Deterministic (no RNG; first blocker in id order).
+Ours: in the step resolver, for a moving (uncut) body only, the step is replaced by a tangential step of `(|dot(d, t)| + 0.7 x |dot(d, n)|) x step length`, the push canceling the inward part as in retail's sum; the result is still face-clamped and step-checked. Cut props keep the face clamp (retail routes round cuts on the mesh). Mod keys `ped_obstacles.contact_slide` (0.7, 0 = off) and `contact_slide_dot` (-0.3). Deterministic (no RNG; first blocker in id order).
 
 Speed tests (research b717 / b718, re-read the recomp's compare `skate3_recomp.100.cpp` 24926-24937 / 25077-25081 and the constant 0x8209975C = 0.5, 2026-10-30): `S` = the ped's path speed (`settings+0` x agent `+0x14C` x `+0x144`; 2.0 m/s for walking peds in the trace, 1.0 on some legs); `dir` = the unit direction to the steer target (`ctrl+0x30`) when the ped's speed (a true length) is at most `0.5 x S`, else its velocity direction; the slide needs `dot(dir, n) < -0.3` and the avoider's own velocity along `dir` below `0.5 x S` (strict). When that fails the ped is only pushed out (no slide, no stop in this function). The slide only runs while the ped follows a path (controller mode 2); a held ped (mode 3) gets the push and then brakes. Ours: [`NavObstacles::resolve_step_contact`] with [`Contact`] (the ped's velocity and next corner, `peds.rs`); without it the step direction stands in. Mod keys `ped_obstacles.contact_slow_fraction` (0.5) and `contact_max_speed` (2.0).
 
-Open: run / flee path speeds (not traced, so 2.0 for every ped); the mode 3 hold is not modelled. The dead-centre side assumes retail (x, y) maps to our (x, -z).
+Open: run / flee path speeds (not traced, so 2.0 for every ped); the mode 3 hold is not modeled. The dead-center side assumes retail (x, y) maps to our (x, -z).
 
 Tests: `obstacle_tests::a_ped_running_head_on_into_a_skater_slides_round_it`, `the_contact_slide_tests_the_avoiders_speed_and_a_slow_peds_steer_target`.
 
 ### Predictive side-step
 
-Retail [code, TU3, research b698 / b699; constants dumped from the image 2026-10-30]: before contact, the path controller (`82E9FD78`) adds a sideways acceleration for the moving avoider with the nearest predicted contact. Pick (`82E9CE90`): relative velocity `dv = v_av - v_ped`; a ray from the avoider along `dv` against `0.99` (`0x820ED5E8`) x the combined radius round the ped gives the contact time `t`; kept when `0 <= t < 3.0` s (`0x82063B08`), strictly lowest first (id order), never for bodies already overlapping. Force (`82E9CBD0`): `s x 3.0 x 1.3` along the left perpendicular of the ped's velocity, 1.3 being the NavPower global scale (`0x82099484`, written by `8292E230`); skater and prop avoiders weigh FLT_MAX (`82E99998`), so the weight factor is 1. Side `s`: head-on (velocity dot < -0.7, `0x822F8F80`) or a standing avoider -> away from the avoider's predicted position as seen from the ped's current one, dead centre left; crossing (dot <= 0.7) -> by the side of the avoider's velocity (the ped never has right of way over a skater or prop); same direction -> by comparing both predicted positions. Skipped while the ped brakes for its path end (`82E9FC20`).
+Retail [code, TU3, research b698 / b699; constants dumped from the image 2026-10-30]: before contact, the path controller (`82E9FD78`) adds a sideways acceleration for the moving avoider with the nearest predicted contact. Pick (`82E9CE90`): relative velocity `dv = v_av - v_ped`; a ray from the avoider along `dv` against `0.99` (`0x820ED5E8`) x the combined radius round the ped gives the contact time `t`; kept when `0 <= t < 3.0` s (`0x82063B08`), strictly lowest first (id order), never for bodies already overlapping. Force (`82E9CBD0`): `s x 3.0 x 1.3` along the left perpendicular of the ped's velocity, 1.3 being the NavPower global scale (`0x82099484`, written by `8292E230`); skater and prop avoiders weigh FLT_MAX (`82E99998`), so the weight factor is 1. Side `s`: head-on (velocity dot < -0.7, `0x822F8F80`) or a standing avoider -> away from the avoider's predicted position as seen from the ped's current one, dead center left; crossing (dot <= 0.7) -> by the side of the avoider's velocity (the ped never has right of way over a skater or prop); same direction -> by comparing both predicted positions. Skipped while the ped brakes for its path end (`82E9FC20`).
 
 Ours ([`NavObstacles::side_step`], used by `PedNav::step_avoiding`): the ped's velocity is its last step over `dt`; retail's (x, y) is our (x, -z), so retail's left perpendicular `(-u.y, u.x)` is our `(u.z, -u.x)` (the ped's left, facing +z). The acceleration builds a lateral velocity that adds to the path direction; the steering then turns toward that sum. Retail's path turn term pulls the lateral velocity back every tick (below). A ped with SkaterAvoidance off (chasers) ignores skaters here as in the contact step. Mod keys `ped_obstacles.avoid_horizon` (3.0, 0 = off), `avoid_ray_scale` (0.99), `avoid_accel` (3.0), `avoid_scale` (1.3), `avoid_head_on_dot` (-0.7), `avoid_crossing_dot` (0.7). Deterministic: no RNG, id order.
 
@@ -905,11 +905,11 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Ped navmesh
 
-The pedestrian navmesh (doc 26, peds milestone M3): retail's NavPower nav graphs as polygons with neighbours, point location, reachability and polygon paths.
+The pedestrian navmesh (doc 26, peds milestone M3): retail's NavPower nav graphs as polygons with neighbors, point location, reachability and polygon paths.
 
 Retail [code, TU3; addresses are evidence only]: every ped owns a NavPower bot (`ped+5940`) that its mover (`ped+2224`, vtable `0x8232C708`) drives: the mover hands the bot a destination (`sub_82C47378`) and reads its steering direction back (`sub_82C47198`). The wander goal probes destinations with a nearest-polygon search (`sub_82C46348`, radius 0.5 `0x8209975C`) and a reachability test (`sub_82C464F0` -> `sub_82926BA8`, a per-graph connectivity bitset), not with a straight ray. The polygons come from the `0x00EB0027` objects (`tools/asset_pipeline/living_world_navmesh.py` documents the layout) [data].
 
-What is ours (stated simplifications): NavPower's path search and path following are not decoded, so a path is an A* over polygon neighbours (portal midpoints, equal cost per metre unless [`NavRules::area_cost`] says otherwise) smoothed by the funnel algorithm; reachability is a connected-component label; polygons of [`NavRules::blocked_areas`] (default the 0xF1 area, where no recomp ped position ever lies [trace]) are not walkable.
+What is ours (stated simplifications): NavPower's path search and path following are not decoded, so a path is an A* over polygon neighbors (portal midpoints, equal cost per meter unless [`NavRules::area_cost`] says otherwise) smoothed by the funnel algorithm; reachability is a connected-component label; polygons of [`NavRules::blocked_areas`] (default the 0xF1 area, where no recomp ped position ever lies [trace]) are not walkable.
 
 Tile seams (fix 17): NavPower tiles stop about 0.12 m short of their shared border [data] and setup links the two sides, sometimes on one side only; [`NavMesh::move_along`] steps across the gap over linked polygons only (never onto an unconnected wall-top layer), and the links are used in both directions.
 
@@ -929,7 +929,7 @@ The nearest walkable polygon point to `p` (3D), any component, within `max_dist`
 
 ### Navmesh move along
 
-Move from `from` toward `to` over the surface: only polygons linked to `from.poly` (directly or through linked neighbours near the move) can take the step, so a step never jumps onto an unconnected layer (a wall top or planter island above the ped), and a step into the gap between two tile-stitched polygons is kept (the tiles stop short of their shared border, about 0.12 to 0.14 m each side [data]) instead of being snapped back to the edge it left. Against a boundary edge the step slides onto the edge (as [`Self::locate`]'s snap). Retail: the NavPower bot moves over linked polygons only (path follow not decoded; fix 17).
+Move from `from` toward `to` over the surface: only polygons linked to `from.poly` (directly or through linked neighbors near the move) can take the step, so a step never jumps onto an unconnected layer (a wall top or planter island above the ped), and a step into the gap between two tile-stitched polygons is kept (the tiles stop short of their shared border, about 0.12 to 0.14 m each side [data]) instead of being snapped back to the edge it left. Against a boundary edge the step slides onto the edge (as [`Self::locate`]'s snap). Retail: the NavPower bot moves over linked polygons only (path follow not decoded; fix 17).
 
 ### Unreachable targets move onto the mesh
 
@@ -937,7 +937,7 @@ Problem (2026-11-04, USER-ASKS 496): in Aletown ped #316 (tourist_male02, Scatte
 
 Retail [code, b645]: every bot destination goes through the NavPower path request `82E957F8`, which moves the destination onto the closest point of the nearest polygon reachable from the ped's start region (`82933E18` + `8292F9F0`, the same search as [Navmesh locate nearest](#navmesh-locate-nearest)). With no such polygon there is no path: the bot is done, and on the next tick the goal provider picks a new target (the short fan after a 1-3 reach event). Retail never walks straight at a point off the mesh.
 
-Change: `wander::request_path` does that for `PedNav::plan` and `repath`: a target that is off the mesh or unreachable becomes the nearest reachable point (and the nav target is that point); with none, the ped gets no corners and re-targets with the short fan. Range: `WanderParams::rewrite_range`, default FLT_MAX (the query range b277 read; the wander bot's own value from bot settings `+0x40` is not read), mod key `ped_nav.rewrite_range` (metres, finite, 0 or more). Test `an_unreachable_target_moves_onto_the_mesh_and_is_never_walked_at`.
+Change: `wander::request_path` does that for `PedNav::plan` and `repath`: a target that is off the mesh or unreachable becomes the nearest reachable point (and the nav target is that point); with none, the ped gets no corners and re-targets with the short fan. Range: `WanderParams::rewrite_range`, default FLT_MAX (the query range b277 read; the wander bot's own value from bot settings `+0x40` is not read), mod key `ped_nav.rewrite_range` (meters, finite, 0 or more). Test `an_unreachable_target_moves_onto_the_mesh_and_is_never_walked_at`.
 
 Scatter (also b645, the state #316 was in): retail's Scatter does not wander. Its Begin `826A8E48` sets the Flee intent (4) and brain `+0xCD0` bit 0, with which the flee direction `82E318F8` takes the local player as the threat (via `*(0x830CFD94)+0xC4` vfn 0x24, body not read: medium-high); its legs are the flee's 15 m legs with an arrival radius of 3.0 m (`0x82063B08`); Update `826A8FF8` re-legs near the goal; End `826A9188` clears the bit. Ours parsed "Scatter" to a pending op, so the ped kept NoRoad's wander target. Now `PedOp::Scatter` sets the Flee intent and `PedBrain::scatter_threat`; `think_peds` then flees the local player (`PLAYER_TARGET_BASE`) with `scatter_arrival_radius` (3.0, mod key `ped_brain.scatter_arrival_radius`), and `PED_FLEE` logs `scatter=true`. The two fields Scatter's Begin writes (`+0x8C = 5`, `+0xC0 = 0.2`) are not a gait: they sit in the ped's upper-body channel slot (`ped+0x1704`, slot at `+0x10`) and mean "stop the channel with a 0.2 s fade", the same as `StopChannel` (`8269FEB8`) [code, research b824 `.local/research/b824-scatter-gait.md`]; ours: `PedBrain::channel_stop`, applied with `channel_stop` (mod key `ped_brain.scatter_channel_fade`). The speed: Flee and Scatter Update (`826A35F8` / `826A8FF8`) hand the mover the run speed (`CD65`) every tick. Ours never set a speed for them, so a ped that wandered before (Wander's 2.0) walked its flee; now both set `speed_suggestion` to the record's run speed each update (none: the run fallback). Timer 46 ScatterTime (20 s) has no reader anywhere [code + data, research b825 `.local/research/b825-scatter-time-and-flags.md`]: a scatter ends only when ShouldScatter goes false (the 180 s alarm), so it is not ported. Begin's other writes: ped `+0x1730` bit 0x80 ends set as in Flee / Wander (no visible change), brain `+0xCD1 |= 0x40` is a one-shot nav agent resync (internal), and `(ped+0x1714)+0xE0` bit 0x80 cleared releases a position lock; ours now clears `position_locked` / `locked_at` in Scatter's Begin. Also from b825: retail's timer name lookup gives `UnspawnTime` 47 and an unknown name -1; ours gave every unknown name 47 (sharing UnspawnTime's slot) and now matches. Test `scatter_flees_the_local_player_until_it_ends`. Research note `.local/research/b645-ped-scatter-target-offmesh.md`.
 
@@ -957,7 +957,7 @@ What it ports (tags as in doc 26):
 - mirror: `pose_mirror::mirror` (`0x828CDAF8`, trajectory mode 1) with the rig's partner table, on the full pose (delta + reference); the root motion is reflected on x.
 - foot plants and body falls: clip attributes `LEFTTOEDOWN` / `RIGHTTOEDOWN` / `BODYFALLTYPE`, phase windows x length (`playback_clip` attribute status) [data].
 
-Simplifications until the behaviour runtime (M4) runs the real motion graph: the crossfade weight is linear over `blendTime` (retail's transition curve is not read); the cycle swap is a uniform draw at each wrap; the intent (idle / walk / turn) comes from [`TestPath`] or the caller, not from the AI graph.
+Simplifications until the behavior runtime (M4) runs the real motion graph: the crossfade weight is linear over `blendTime` (retail's transition curve is not read); the cycle swap is a uniform draw at each wrap; the intent (idle / walk / turn) comes from [`TestPath`] or the caller, not from the AI graph.
 
 ### Knockdown contact
 
@@ -1010,7 +1010,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Ped colorize
 
-Ped clothing colours: retail's ped pixel shaders recolour the mask texels of the diffuse atlas with the model's tint pair (doc 26, "Ped clothes drawn in mask colours").
+Ped clothing colors: retail's ped pixel shaders recolour the mask texels of the diffuse atlas with the model's tint pair (doc 26, "Ped clothes drawn in mask colors").
 
 Retail (TU3 `shaders_final.big`, `livingworld_stamp_defaultPS` for material type `pedestrian_high_stamp`, `defaultlivingworld_defaultPS` for `pedestrian_low`; both read the same way) [code, shader microcode]:
 - `lin = diffuse.rgb^2` (the shaders light in squared space and write `sqrt` at the end);
@@ -1054,7 +1054,7 @@ Detail moved out of the code comments of `crates/skate-data/src/ped_nav.rs`; eac
 
 Pedestrian navmesh data (doc 26, peds milestone M3): `private/living_world/navmesh.bin`, the retail NavPower nav graphs (`0x00EB0027`) that setup decodes and joins across tiles (`tools/asset_pipeline/living_world_navmesh.py` documents both formats), read into `skate_core::living_world::peds::NavMeshInput`.
 
-`navmesh.bin` (little-endian): `LWNAVMSH`, u32 version 1, u32 district count; per district: u8 name length + ASCII, f32 x4 agent parameters, u32 vertex count + f32 x3 each, u32 polygon count, per polygon: u32 first vertex, u16 vertex count, u8 area, u8 tile-stitched edge count, u32 flags, then i32 neighbour per edge (-1 none). A mod map writes the same file with [`write`] (or fills `NavMeshInput` directly).
+`navmesh.bin` (little-endian): `LWNAVMSH`, u32 version 1, u32 district count; per district: u8 name length + ASCII, f32 x4 agent parameters, u32 vertex count + f32 x3 each, u32 polygon count, per polygon: u32 first vertex, u16 vertex count, u8 area, u8 tile-stitched edge count, u32 flags, then i32 neighbor per edge (-1 none). A mod map writes the same file with [`write`] (or fills `NavMeshInput` directly).
 
 ## Code reference: living_world/peds/crosswalk.rs
 
@@ -1062,9 +1062,9 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/ped
 
 ### Crosswalk walk lights
 
-Walk lights for the mod crosswalk rule ([`super::wander::CrosswalkRule::WalkSignal`]): which signalled junction arm a ped is about to cross and the walk light the shared [`SignalClock`] shows for it.
+Walk lights for the mod crosswalk rule ([`super::wander::CrosswalkRule::WalkSignal`]): which signaled junction arm a ped is about to cross and the walk light the shared [`SignalClock`] shows for it.
 
-Retail never consults this for ambient peds (the road branch of the ped graph is unreachable, `wander.rs`). The mapping is ours: a crossing over the arm at node end `e` runs parallel to the traffic of the neighbouring ends, so it uses the walk light of end `(e + 1) % 4` (the walk list of a controller is green inside its car green, `signals.rs`). A mod can supply its own [`WalkSignals`] instead.
+Retail never consults this for ambient peds (the road branch of the ped graph is unreachable, `wander.rs`). The mapping is ours: a crossing over the arm at node end `e` runs parallel to the traffic of the neighboring ends, so it uses the walk light of end `(e + 1) % 4` (the walk list of a controller is green inside its car green, `signals.rs`). A mod can supply its own [`WalkSignals`] instead.
 
 ## Code reference: skate-game/src/living_world/peds_tests.rs
 

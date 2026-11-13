@@ -147,7 +147,7 @@ fn downtown_crosswalk_rule_crosses_only_on_walk() {
     let timings = skate_data::roads::signal_timings(&tables).expect("trafficlights record");
     let arms = signalled_arms(&net);
     let mut clock = SignalClock::new(timings);
-    // Peds on pavement next to signalled junction arms of this district.
+    // Peds on pavement next to signaled junction arms of this district.
     let near_arm = |c: [f32; 3]| arms.iter().any(|a| ((a.2[0] - c[0]).powi(2) + (a.2[2] - c[2]).powi(2)).sqrt() < 14.0 && (a.2[1] - c[1]).abs() < 3.0);
     let pick: Vec<usize> = (0..m.polys.len()).filter(|&k| m.polys[k].area == AREA_DEFAULT && near_arm(m.polys[k].centre)).collect();
     assert!(pick.len() >= 30, "pavement next to signalled arms: {}", pick.len());
@@ -200,12 +200,12 @@ fn downtown_tile_seams_are_crossed_without_layer_jumps() {
             if len < 0.5 {
                 continue;
             }
-            // Outward normal (away from the polygon's centre).
+            // Outward normal (away from the polygon's center).
             let mut nrm = [(b[2] - a[2]) / len, -(b[0] - a[0]) / len];
             if (mid[0] - p.centre[0]) * nrm[0] + (mid[2] - p.centre[2]) * nrm[1] < 0.0 {
                 nrm = [-nrm[0], -nrm[1]];
             }
-            // A seam: just past the edge is not inside the neighbour (a gap between tiles).
+            // A seam: just past the edge is not inside the neighbor (a gap between tiles).
             let probe = [mid[0] + nrm[0] * 0.05, mid[1], mid[2] + nrm[1] * 0.05];
             let inside_q = m.point_on(q, probe).is_some_and(|x| x.position[0] == probe[0] && x.position[2] == probe[2]);
             if inside_q {
@@ -241,7 +241,7 @@ fn downtown_tile_seams_are_crossed_without_layer_jumps() {
     assert!(seams > 1000, "tile seams found: {seams}");
     assert!(old_crossed * 2 < seams, "control: the old rule stalls at most seams");
     assert_eq!(jumps, 0, "no step leaves the connected surface");
-    // The rest are seams into slivers a few centimetres wide, walked straight on into their
+    // The rest are seams into slivers a few centimeters wide, walked straight on into their
     // boundary (a body slides there).
     assert!(crossed as f32 >= 0.93 * seams as f32, "seams crossed: {crossed} of {seams}");
 }

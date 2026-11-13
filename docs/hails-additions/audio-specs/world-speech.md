@@ -241,8 +241,8 @@ Harness: `tests/world_sources.rs` `a_bumped_ped_warns_with_a_line_of_its_voice`.
   × 1/344, 0.15) s refreshed every 4 frames (field 510BAFA32A76B340), +69 far flag, +72 the stream the speaker
   holds (−1 none), +76 speaking, +80 level 21 (ped) / 13 (skater), +84/+88 filters 22/23 (ped) / 14/15 (skater).
 - **PEAK filter = head shadow by azimuth.** raw out0 folded (> 32767 → 65536 − raw), then three 8-point curves of
-  record `B29C3B2C13D96482` `default` (holder `*(0x830CFDA4)+44`): centre `2C166907CF51DB88` (600 → 4000 at the
-  side → 600), gain `EA2C18D9CE5CBA3A` (0.4 → 0.1), Q `CF8679F540B82B2B` (3). Recomp 163809: 6 / 6 PEAK (centre,
+  record `B29C3B2C13D96482` `default` (holder `*(0x830CFDA4)+44`): center `2C166907CF51DB88` (600 → 4000 at the
+  side → 600), gain `EA2C18D9CE5CBA3A` (0.4 → 0.1), Q `CF8679F540B82B2B` (3). Recomp 163809: 6 / 6 PEAK (center,
   gain) pairs lie on the two curves at one azimuth (≤ 1 Hz); ours at the joined geometry 3 / 6 within 10 % (camera
   orientation estimated). Ported: `SpeechVoiceTuning`, export `world_tuning.speech_voice`, mixer stream graph.
 - **Two sends.** The stream voice graph (`sub_82C5C318`): Rsp0 → PI20 → Sen0 (Send A, pre-gain, env) → Gai0 →

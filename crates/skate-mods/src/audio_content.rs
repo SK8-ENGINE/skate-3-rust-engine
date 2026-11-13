@@ -373,7 +373,7 @@ pub struct MapAudioDef {
     pub regions: BTreeMap<String, Vec<BoxRegion>>,
 }
 
-/// An axis-aligned box on the ground plane: centre x, z and half sizes x, z; `key` = a zone /
+/// An axis-aligned box on the ground plane: center x, z and half sizes x, z; `key` = a zone /
 /// location set / reverb preset key (16 hex digits) or a zone / set name.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

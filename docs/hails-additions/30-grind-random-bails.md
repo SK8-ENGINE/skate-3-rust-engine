@@ -46,7 +46,7 @@ cargo test --locked -p skate-game --release --bin skate3rust -- --ignored --noca
 | 10, `0x63c`: flat straight rail, free end | boardslide | grinds the whole run (104 ticks), no bail |
 | 28, `0x694`: the flat rail after the corner, ends in a second 90 degree corner into spline 10 | boardslide | grinds 42 ticks, wipeout at that corner (tick 92) |
 | 26, `0x688`, uphill | boardslide | grinds the whole run (104 ticks), no bail |
-| stair edges (21 splines, 7 to 8 m each, `SKATE3_GRIND_LEAD=1.5`) | boardslide | 17 grind 85 to 93 ticks without a bail; spline 23 (`0x677`) bails after 49 ticks (not analysed); 4 never reach a grind (the drop misses the edge) |
+| stair edges (21 splines, 7 to 8 m each, `SKATE3_GRIND_LEAD=1.5`) | boardslide | 17 grind 85 to 93 ticks without a bail; spline 23 (`0x677`) bails after 49 ticks (not analyzed); 4 never reach a grind (the drop misses the edge) |
 
 So the bails are reproducible and not random: they happen where the rail bends (the handrail's bottom bend, a
 corner). A straight rail does not bail.
@@ -79,7 +79,7 @@ All three bails are wipeout request **2** from grind Post: the board's closing v
    - The vertex argument mapping (edges `+64/+96`, cosines, convex bits 0x20/0x80) and the recovery's edge and
      cosine choice were compared with the TU3 code: same as the port.
 4. Flat rail corner (spline 14), tick 104: the deck reaches the cross tube of spline 28 at the corner. The deck
-   rides with its centre at the spline height (the spline is the rail's top line; deck centre 74.92, spline
+   rides with its center at the spline height (the spline is the rail's top line; deck center 74.92, spline
    74.915), so the cross tube's upper facets meet the deck front: unbent contacts at 6 cm with normals
    (0.83, 0.39, -0.39), closing speed 6.30 m/s > 6.0: reason 2.
 5. One request of reason 2 with an upright animation is a run-out (`82DB9188` [code], `requests_runout`), so the
@@ -97,7 +97,7 @@ so retail must differ before the chain starts. Candidates, in the order to check
    the board) before the deck reaches the cross tube, the corner bail cannot happen in retail. Check the
    manager's primitive change at a link in the TU3 code (`82D89150` and its callers) and with a recomp trace of a
    boardslide around a corner.
-2. **Board ride height during a grind.** If retail holds the deck a few centimetres higher (for example the
+2. **Board ride height during a grind.** If retail holds the deck a few centimeters higher (for example the
    board target is offset from the spline by the truck or deck height), both bails disappear: the corner tube
    is passed over, and the post triangle leaves the predictive range (0.168 against a limit of 0.178, a 1 cm
    margin). Compare the deck height over the spline in a recomp trace of a boardslide.
@@ -134,7 +134,7 @@ So, statically, retail queries the rail mesh with all board parts while grinding
 ### Candidate 2 (ride height offset): ruled out as an offset
 
 The boardslide leaves are forces plus an angular-only hook drive (`82C05658` [code]); none holds a height. The
-deck rests on the tube: tube top 74.914 (the spline height), deck centre 74.92 = tube top + the deck's half
+deck rests on the tube: tube top 74.914 (the spline height), deck center 74.92 = tube top + the deck's half
 thickness (rounded box half extent 0.00075 + radius 0.00675). The ride height is a contact result, so a retail
 difference there would have to come from the contacts, not from an authored offset.
 
@@ -145,7 +145,7 @@ Corner, spline 14 (`0x656`), boardslide 8 m/s, default lead 1.5 m (grind 70 tick
 | Tick | Reports |
 |---|---|
 | up to 115 | deck only, normal (0, 1, 0) on the tube top (y 74.914) |
-| 116 | **left front wheel**, normal (0.91, -0.04, -0.42) at (262.891, 74.867, -430.370): the leading wheel meets the side of the cross tube (spline 28, `0x694`) below its top; the deck centre is still 0.17 m before the corner and the deck edge about 5 cm before the cross spline |
+| 116 | **left front wheel**, normal (0.91, -0.04, -0.42) at (262.891, 74.867, -430.370): the leading wheel meets the side of the cross tube (spline 28, `0x694`) below its top; the deck center is still 0.17 m before the corner and the deck edge about 5 cm before the cross spline |
 | 117 | BipedGround (run-out); deck now also against the cross tube's upper facets (0.6, 0.75, -0.27) |
 | 118 | WipeoutGround |
 
@@ -176,10 +176,10 @@ Two points that bound candidate 1 at the corner:
 
 - The boardslide deck contact (`82D889A8` [code] admission, port `boardslide_candidate` and the deck rectangle
   query before it) intersects the grind segments with a vertical rectangle along the deck's long axis through
-  its centre. In a boardslide the deck lies across the rail, so the cross spline of a 90 degree corner runs
+  its center. In a boardslide the deck lies across the rail, so the cross spline of a 90 degree corner runs
   parallel to that rectangle and is never found: the port cannot hand over at such a corner, and the same
   query in retail cannot either. A retail hand-over would have to come from another path.
-- The leading wheels hang about 5 cm below the deck (wheel centre 74.867 against the tube top 74.914), so at a
+- The leading wheels hang about 5 cm below the deck (wheel center 74.867 against the tube top 74.914), so at a
   90 degree corner of a rail at one height they cross the cross tube's line geometrically. Whether retail's
   board really slides through that corner, or also stops there, should be asked: the user's report names the
   PCU Library rails as bailing in this engine; that retail boardslides through this particular corner is not
@@ -222,7 +222,7 @@ corner, where are the wheels relative to the tube top, and does any wheel or dec
     (force acceleration); dt is the data constant at 0x820849C8 (1/60).
   - Angular step, same form, from body +48 and +160. Rotation pad = max(|ex - ey|, |ey - ez|, |ez - ex|) of the
     bounds extents, times min(|angular step|, 1).
-  - Box = (min - pad, max + pad) unioned with itself moved by the linear step, then scaled about its centre by
+  - Box = (min - pad, max + pad) unioned with itself moved by the linear step, then scaled about its center by
     the data constant at 0x821659FC (1.05).
   - There is no maximum-separation (0.5) or padding (0.05) term.
 - `8277BC58` BE94..BF38 then tests, for every (triangle, volume) pair, the min/max of the triangle's three
@@ -315,11 +315,11 @@ see below.)
 - **All four bounds methods ignore the flag and add only the radius / fatness at +80.** None reads the +112
   padding or any separation term. With a transform (r4) they first move the shape into it; the port's
   primitives are already in world space.
-  - Sphere: centre (+48) minus / plus radius (+80).
-  - Capsule: per world axis, extent = fma(|axis (+32)|, half length (+68), radius (+80)); bounds = centre
+  - Sphere: center (+48) minus / plus radius (+80).
+  - Capsule: per world axis, extent = fma(|axis (+32)|, half length (+68), radius (+80)); bounds = center
     (+48) minus / plus extent.
   - Box: per world axis, |axis 1 (+16)| * h (+72), then fma |axis 0 (+0)| * h (+68), then fma |axis 2 (+32)| *
-    h (+76), then + radius (+80) as a separate add; bounds = centre (+48) minus / plus that.
+    h (+76), then + radius (+80) as a separate add; bounds = center (+48) minus / plus that.
   - Triangle: min / max of the three vertices, then minus / plus fatness (+80) (third pass).
 - **Rotation pad length.** `82777E70` takes the angular step's length as: x = vmsum3fp128(step, step); y =
   vrsqrtefp128(x); two refinements y = fma(y * 0.5, fnma(x, y * y, 1), y); length = x * y, selected to 0 when
@@ -327,8 +327,8 @@ see below.)
   `board_motion_output::length`.
 - The rest of `82777E70` was re-checked against the port: the step terms (rate * dt fused with
   ((acceleration * factor) * dt) * dt, factor = min(max(dot(rate * dt, (acceleration * dt) * dt), 0), 1)), the
-  extent-difference maximum, the pad, the swept union and the 1.05 scale about the centre (centre = (max + min)
-  * 0.5, half = (max - centre) * 1.05) are in the same operation order.
+  extent-difference maximum, the pad, the swept union and the 1.05 scale about the center (center = (max + min)
+  * 0.5, half = (max - center) * 1.05) are in the same operation order.
 
 ### Change
 
@@ -435,7 +435,7 @@ pad, which reached the strip. Not measured in the recomp.
 - Handrail bottom: fixed by the box port; a recomp BRDREP trace would still confirm retail has no deck/post
   contact there.
 - Stair-edge spline 23 (`0x677`) no longer bails after the box port (82 grind ticks, no wipeout); its old bail
-  was not analysed.
+  was not analyzed.
 
 ## Moddability
 

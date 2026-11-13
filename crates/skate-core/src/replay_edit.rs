@@ -117,7 +117,7 @@ pub struct EditLimits {
     /// Markers per lane (retail refuses at 100: `82613500`).
     pub max_markers_per_lane: usize,
     /// A key within this fraction of the clip from the cursor is "at the cursor", and no key goes this close to
-    /// the clip's ends (retail 0.0089 of the normalised timeline, 0x822428EC / 0.9911 at 0x822F8F74, `825084C8`,
+    /// the clip's ends (retail 0.0089 of the normalized timeline, 0x822428EC / 0.9911 at 0x822F8F74, `825084C8`,
     /// research b382; the unit, the clip span, is inferred).
     pub marker_spacing: f32,
     /// The rounding of a lane's sample: floor, plus one when the fraction is at least this (retail 0.5, `8209975C`).
@@ -306,7 +306,7 @@ impl ScrubFilter {
     }
 }
 
-/// A clip's look at one frame: the colour matrix record to build ([`crate::colour_matrix::build`]) and the RGBA
+/// A clip's look at one frame: the color matrix record to build ([`crate::colour_matrix::build`]) and the RGBA
 /// screen tint overlay.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ReplayLook {

@@ -17,7 +17,7 @@ pub enum Kind {
     HighPass,
 }
 
-/// Normalised coefficients {a1, a2, b0, b1, b2} (defined next to the kernel in `skate-audio-fma`).
+/// Normalized coefficients {a1, a2, b0, b1, b2} (defined next to the kernel in `skate-audio-fma`).
 pub use skate_audio_fma::Coefficients;
 
 /// RBJ low/high-pass at Q = 1 from ω, every step in f32 (sin/cos in f64, rounded once).
@@ -140,7 +140,7 @@ pub fn periodic8(samples: &[f32]) -> bool {
 }
 
 /// [`kernel`], bit-identical, with a shortcut for a settled filter on an 8-periodic block
-/// ([`periodic8`]; optimisation pass 2026-10-03, doc 11 "Optimisation pass").
+/// ([`periodic8`]; optimization pass 2026-10-03, doc 11 "Optimization pass").
 ///
 /// The kernel is a pure function of the coefficients, the history and the input, and its sample
 /// arithmetic depends on the position only through `n % 8`. On an 8-periodic block it runs the
@@ -293,7 +293,7 @@ mod tests {
         x.iter().map(|v| v.to_bits()).collect()
     }
 
-    /// The optimisation pass's [`kernel_block`] (settled-filter and silent-tail shortcuts) against
+    /// The optimization pass's [`kernel_block`] (settled-filter and silent-tail shortcuts) against
     /// the plain kernel, bit for bit: every coefficient set, block lengths around the group of 8,
     /// silent / -0.0 / constant / 8-periodic / noisy blocks, from fresh, noisy, settled and
     /// non-finite histories, over long silences so that the filters settle (and the shortcut is

@@ -53,7 +53,7 @@ def font_mapping(collections: Path, cache: AssetCache) -> dict:
 
 
 # The scoring HUD (trick display) and the central message HUD (`hudcentral`: the chase "ZAP!" / "BAM!" lines and other
-# centre-screen messages, retail `826B4FC0` -> `82663F38`), each as runtime/<file> in the same format.
+# center-screen messages, retail `826B4FC0` -> `82663F38`), each as runtime/<file> in the same format.
 MOVIES = (("data/fe/source/screens/hud2/trickdisplay2", "trickdisplay.json"),
           ("data/fe/source/screens/hud2/hudcentral", "hudcentral.json"),
           # The HUD minimap's frame (template 53 MiniMap, research b568); the map picture is drawn by the engine.
@@ -114,7 +114,7 @@ def prepare_movie(output: Path, cache, mappings, collections: Path, name: str, f
             fonts[family] = asset
     # Retail's secondary font (825D6B68: "Futura Shadow" -> native "futuraheavy", from the whole native font table
     # 82809208) draws over the shadow pass even when this movie places no such font (hudtimer places only Futura
-    # Shadow: without the pair its text drew the shadow atlas alone in the text colour, ask 600).
+    # Shadow: without the pair its text drew the shadow atlas alone in the text color, ask 600).
     from prepare_menu_movies import FONT_PAIRS
     for family in sorted(fonts):
         partner = next((v for k, v in FONT_PAIRS.items() if k.lower() == family.lower()), None)

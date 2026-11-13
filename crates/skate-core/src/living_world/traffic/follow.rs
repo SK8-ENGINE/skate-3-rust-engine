@@ -50,7 +50,7 @@ pub struct FollowParams {
     pub min_gap: f32,
     /// The skater-behind rule (scan range, speeds, braking distances, release grace; b63).
     pub skater: super::skater_scan::SkaterFollowParams,
-    /// The manoeuvre decider's values (spec / driver records; b69 / b74) and the lane-change passage: the spec's
+    /// The maneuver decider's values (spec / driver records; b69 / b74) and the lane-change passage: the spec's
     /// passage factor (`Hash_328B9F4685A14018`, spec+40, `+3692`), the road network's curve values and the spot /
     /// gap-check constants.
     pub manoeuvre: super::manoeuvre::DeciderParams,
@@ -118,7 +118,7 @@ pub struct Car {
     pub speed: f32,
     /// m/s^2 (retail `+3408`): the commanded acceleration of the last step.
     pub accel: f32,
-    /// Length along the lane (m); the cursor is the car's centre.
+    /// Length along the lane (m); the cursor is the car's center.
     pub length: f32,
     pub params: FollowParams,
     /// The last junction answer for the chosen connector (retail junction state `+4392`).
@@ -154,7 +154,7 @@ pub struct Car {
     pub release_grace: f32,
     /// The skater scan of this tick (`sub_82C414A8`; set by the host before [`step`], like `obstacle`).
     pub skater: super::skater_scan::SkaterScan,
-    /// The manoeuvre decider (`+3632` timer, `+4396` pending) and the running lane change (`+4353`, passage block).
+    /// The maneuver decider (`+3632` timer, `+4396` pending) and the running lane change (`+4353`, passage block).
     pub decider: super::manoeuvre::DeciderState,
     pub passage: Option<super::passage::Passage>,
     /// Pulling over, parked, pulling out (b73); lane changes stay `Following` with a passage.
@@ -451,7 +451,7 @@ pub fn step(net: &RoadNetwork, signals: &SignalClock, cars: &mut [Car], dt: f32,
             }
             continue;
         }
-        // The manoeuvre decider (`sub_82C41CD0`), on a lane with no manoeuvre running.
+        // The maneuver decider (`sub_82C41CD0`), on a lane with no maneuver running.
         if let (Place::Lane { segment, lane }, None, Manoeuvre::Following) = (me.cursor.place, me.passage, manoeuvre) {
             let seg = &net.segments[segment];
             let load = |l: u8| cars.iter().filter(|c| c.on_place(Place::Lane { segment, lane: l })).map(|c| c.length).sum::<f32>();
@@ -526,7 +526,7 @@ pub fn step(net: &RoadNetwork, signals: &SignalClock, cars: &mut [Car], dt: f32,
         // The car ahead (82C38390 -> 82C41120): stop target at bumper gap, half of +3664 standoff: docs/hails-additions/26h-living-world-traffic.md#car-ahead
         let lead_standoff = me.lead_standoff();
         let range = me.speed + lead_standoff;
-        let mut limit: Option<f32> = None; // max distance the centre may reach along the current place
+        let mut limit: Option<f32> = None; // max distance the center may reach along the current place
         let mut lead_close = None;
         // `+3752`: the gap to the lead alone (the lane-change gate reads it, `82C39F78`; b696).
         let mut lead_gap = f32::INFINITY;

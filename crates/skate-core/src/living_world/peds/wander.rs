@@ -50,7 +50,7 @@ pub struct WanderParams {
     /// NOT RETAIL (ours, a safety net): still pinned after this many seconds, the ped gives up its target and plans
     /// away from it (the pre-2026-10-19 stuck watch). 0 = off.
     pub give_up_seconds: f32,
-    /// Personal space for yielding, metres ahead (ours: the navigation record's 2.0,
+    /// Personal space for yielding, meters ahead (ours: the navigation record's 2.0,
     /// `Hash_7C8E344CDEC7510B`, meaning unverified).
     pub yield_distance: f32,
     /// NOT RETAIL: seconds a yielding ped waits before re-pathing to the same target: docs/hails-additions/26f-living-world-peds.md#ped-yield-patience
@@ -99,7 +99,7 @@ pub enum CrosswalkRule {
 /// Where a ped is about to step onto a road and what the walk light there shows (the game
 /// answers from the road network and the shared signal clock).
 pub trait WalkSignals {
-    /// The walk light for a crossing that starts at `at` (`None` = no signalled crossing).
+    /// The walk light for a crossing that starts at `at` (`None` = no signaled crossing).
     fn walk_light(&self, at: Vec3) -> Option<Light>;
 }
 
@@ -678,7 +678,7 @@ pub fn separation_ok(from: Vec3, to: Vec3, me: u64, others: &[Neighbour], radius
     separation_blocker(from, to, me, others, radius).is_none()
 }
 
-/// The first neighbour (index into `others`) that refuses the step: the two bodies touch there.
+/// The first neighbor (index into `others`) that refuses the step: the two bodies touch there.
 pub fn separation_blocker(from: Vec3, to: Vec3, me: u64, others: &[Neighbour], radius: f32) -> Option<usize> {
     others.iter().position(|o| {
         if o.order == me || (o.position[1] - to[1]).abs() > 2.0 {
@@ -691,7 +691,7 @@ pub fn separation_blocker(from: Vec3, to: Vec3, me: u64, others: &[Neighbour], r
 
 /// The mod crosswalk rule as a step check: under [`CrosswalkRule::WalkSignal`] a step from off
 /// the road onto a road polygon is only taken while the walk light there is green (or there is
-/// no signalled crossing). Always true under the retail default (`Off`).
+/// no signaled crossing). Always true under the retail default (`Off`).
 pub fn crosswalk_ok(mesh: &NavMesh, rule: CrosswalkRule, signals: &dyn WalkSignals, from: Vec3, to: Vec3) -> bool {
     if rule == CrosswalkRule::Off {
         return true;

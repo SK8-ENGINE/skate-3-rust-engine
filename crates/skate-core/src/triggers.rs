@@ -8,7 +8,7 @@
 //!   point), **head** and **hips**. Measured in the recomp: head 1.61-1.65 m and
 //!   hips 0.97-1.00 m above the feet for a standing skater, feet on the ground
 //!   plane. Radius 0.34 m, axis `feet - hips` (pointing down), half-height
-//!   `0.5·|head - feet| + 0.05`, centred `half-height - 0.02` above the feet:
+//!   `0.5·|head - feet| + 0.05`, centered `half-height - 0.02` above the feet:
 //!   the cylinder runs from 2 cm below the feet to 8 cm above the head.
 //! - Candidates come from an AABB tree of the volumes' bounds, then each one is
 //!   tested against the volume's real shape (`82DD8498` → `82AD3CD8`, RW
@@ -80,7 +80,7 @@ impl OrientedBox {
 }
 
 /// A solid cylinder: `axis` is a unit vector, the caps lie `half_height` from
-/// the centre along it.
+/// the center along it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cylinder {
     pub center: Point,
@@ -105,7 +105,7 @@ impl QueryShape {
 
     /// The retail entity's points: `feet` anchors the cylinder (one end lies
     /// `foot_pad` past it), the axis runs `feet - hips` (straight down when
-    /// they coincide; retail would normalise a zero vector) and the length
+    /// they coincide; retail would normalize a zero vector) and the length
     /// follows `|head - feet|`, so the cylinder reaches past the head.
     pub fn cylinder(&self, feet: Point, head: Point, hips: Point) -> Option<Cylinder> {
         let [f, h, c] = [feet, head, hips].map(|p| p.map(f64::from));

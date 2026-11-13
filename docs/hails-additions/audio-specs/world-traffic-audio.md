@@ -150,7 +150,7 @@ over; the user ran into it on foot).
   `824D0DEC < 824D6F40`, the horn object's process). There is no impact or crunch sound for a parked car.
 
 **Evidence (recomp session, 2026-10-04 16:11).**
-- The taxi (VEHAUD obj `40C686E0`, key `11C6A3A54D90F447` = `c04_taxi01`) pulled over (manoeuvre 3) and stopped at
+- The taxi (VEHAUD obj `40C686E0`, key `11C6A3A54D90F447` = `c04_taxi01`) pulled over (maneuver 3) and stopped at
   (103.8, 34.0, 200.3) by 249.8 s. Its planner stops logging once parked (parked cars don't run the speed
   planner), so `+3716` itself is not in the trace.
 - The player rolled up to its rear bumper at 0.2–0.3 m/s (no alarm), stepped off at 255.90 s (material 143, the

@@ -1,9 +1,9 @@
-# Skate 3 environment (reverb) bus: behavioural spec for the native port
+# Skate 3 environment (reverb) bus: behavioral spec for the native port
 
 Written 2026-10-02 (headless reverse engineering of TU3 (title update 3) + clean recomp traces). Companion to `aems-voice-graph-spec.md`
 (§3 Send A, §4.8 Send, §6 buses), `mixmap-spec.md` §6.3 (emitter send word out8), `ems-emitters-re.md` (reverb
-zones, region layers). Behaviour, formulas and constants in our own words. The recomp's generated code, PR #4 / the
-PoC and b5-decomp were read for behaviour only. Addresses are TU3 3.0.3.0. Tags as in the voice-graph spec:
+zones, region layers). Behavior, formulas and constants in our own words. The recomp's generated code, PR #4 / the
+PoC and b5-decomp were read for behavior only. Addresses are TU3 3.0.3.0. Tags as in the voice-graph spec:
 **[R]** our reading of the recomp asm, **[IMG]** image constant, **[TR]** confirmed in a clean recomp trace
 (`dsp_20261002_185826`, `all_20261002_163809`), **[I]** inference, **UNCERTAIN** = do not treat as settled.
 
@@ -148,7 +148,7 @@ the vault preset, §6). Parameter ids are the module's attribute index.
 | +204 / +208 | tap 2 pan-LFO depth / rate | +92 / +88 (same fields as tap 1) |
 
 Preset fields never read by this path: +48 (int index = the NN of reverbNN), +96, +100, +104 (270.0), +136, +140,
-+144 (90.0): the authored pan constants are ignored in favour of the code constants (same values).
++144 (90.0): the authored pan constants are ignored in favor of the code constants (same values).
 
 A lighter per-frame re-post `sub_8248D770` (called through `sub_824DE400`) sends only: the side weight, f_eq,
 filt L/R pans (+ rotated, §6.3) and gains, tap 1/2 delays and the fixed tap pans 270/90.
@@ -178,26 +178,26 @@ filt L/R pans (+ rotated, §6.3) and gains, tap 1/2 delays and the fixed tap pan
 ## 5. The LFO task: `sub_82490B60` [R][TR]
 
 Registered by `sub_824907D8` (`sub_82481BE0`, task list 0, name "LFO Task"); called **once per mixer block with
-dt = 256/48000 s** [TR: the EnvSub PI20 frequency moves 0.777 Hz per block near the sweep centre for reverb02
+dt = 256/48000 s** [TR: the EnvSub PI20 frequency moves 0.777 Hz per block near the sweep center for reverb02
 (1161 Hz, depth 0.2, rate 0.1 Hz) = 232 Hz × 2π × 0.1 × 5.333 ms]. It walks **14 records** of 32 bytes at
 manager+396 (+32 each):
 
 | +0 | +4 | +8 | +12 | +16 | +20 | +24 | +28 |
 |---|---|---|---|---|---|---|---|
-| period s | phase s | amount | centre | depth | last output | module | parameter id |
+| period s | phase s | amount | center | depth | last output | module | parameter id |
 
 Per block: `phase = fmod(phase + dt, period)` (truncating), `out = centre + depth × amount × sin(2π · phase / period)`
 (2π = 6.2831855 [IMG 0x820B411C]); posted to the module parameter every block, even when unchanged.
 
 | rec | module (param) | set by preset (§3) | default (`sub_824907D8`) |
 |---|---|---|---|
-| 1 / 6 | EnvSub A / B PI20 (p0 f_eq) | period 1/rate_eq, amount depth_eq, centre = depth = f_eq, phase 0 | period 1, amount 0.5, centre = depth = 1.0 |
-| 2 / 7 | tap 1 Del0 A / B (p0 delay) | period 1/rate_d1, amount depth_d1, centre = depth = d1 | centre = depth = 0.3 |
-| 3 / 8 | tap 2 Del0 (p0) | period 1/rate_d2, amount depth_d2, centre = depth = d2 | 0.3 |
-| 4 / 9 | tap 1 Pn21 (p0 azimuth) | period 1/rate_pan, amount depth_pan, centre 270, depth 90, phase 0 | 0.3 / 0.3 (pre-preset) |
-| 5 / 10 | tap 2 Pn21 (p0) | period 1/rate_pan, **phase = period/2** (opposite sweep), amount depth_pan, centre 90, depth 90 | 0.3 / 0.3 |
-| 11, 13 | FlangeSub A / B Del0 (p0) | flange preset (§7) | centre = depth = 0.006 s |
-| 12, 14 | FlangeSub A / B PI20 (p0) | flange preset | centre = depth = 1.0 |
+| 1 / 6 | EnvSub A / B PI20 (p0 f_eq) | period 1/rate_eq, amount depth_eq, center = depth = f_eq, phase 0 | period 1, amount 0.5, center = depth = 1.0 |
+| 2 / 7 | tap 1 Del0 A / B (p0 delay) | period 1/rate_d1, amount depth_d1, center = depth = d1 | center = depth = 0.3 |
+| 3 / 8 | tap 2 Del0 (p0) | period 1/rate_d2, amount depth_d2, center = depth = d2 | 0.3 |
+| 4 / 9 | tap 1 Pn21 (p0 azimuth) | period 1/rate_pan, amount depth_pan, center 270, depth 90, phase 0 | 0.3 / 0.3 (pre-preset) |
+| 5 / 10 | tap 2 Pn21 (p0) | period 1/rate_pan, **phase = period/2** (opposite sweep), amount depth_pan, center 90, depth 90 | 0.3 / 0.3 |
+| 11, 13 | FlangeSub A / B Del0 (p0) | flange preset (§7) | center = depth = 0.006 s |
+| 12, 14 | FlangeSub A / B PI20 (p0) | flange preset | center = depth = 1.0 |
 
 So, effectively:
 - f_eq(t) = f_eq · (1 + depth_eq · sin(2π·rate_eq·t));
@@ -246,13 +246,13 @@ length +208).
 - **Timed (region change)**: timer += frame dt; x = min(timer / 1.0, 1); new side weight = x, old side = 1 − x
   (linear), re-posted every frame through `sub_8248D770`. At x = 1 the new side becomes current. [TR: EnvSendSub
   levels step ≈ 0.0167 per 16.7 ms frame, 0.0055 → 0.28 in 268 ms.]
-- **Zone (mode 1)**: w = the zone emitter's normalised distance d (node +12, 0 at the inner core, 1 at the edge,
+- **Zone (mode 1)**: w = the zone emitter's normalized distance d (node +12, 0 at the inner core, 1 at the edge,
   `ems-emitters-re.md` "Inner core s0"); zone side weight = 1 − w, other side weight = w (linear in d, not the
   emitter's level curve). While blending, the reverb outputs' pans are rotated toward the zone (`sub_824DEEF0`):
-  with θ = horizontal angle from the camera forward to the zone centre (degrees, 0..360; camera from
+  with θ = horizontal angle from the camera forward to the zone center (degrees, 0..360; camera from
   `*(0x83083C38)+0x2F078` +48 pos / +64 forward; exact angle function `sub_82453298` UNCERTAIN), the zone side's
   filt L azimuth = 270 + w·(θ' − 270) and filt R = 90 − w·(90 − θ''), wrapped into 0..360 (θ', θ'' = θ unwrapped
-  towards each side). At the zone centre (w = 0) the reverb is the normal left/right pair; toward the edge both
+  towards each side). At the zone center (w = 0) the reverb is the normal left/right pair; toward the edge both
   outputs collapse onto the zone's direction. The other side keeps 270/90. When d is exactly 0 the zone side becomes
   current (weights 1/0, pans 270/90); when the zone is no longer found, `sub_824DEDD8` snaps the weights to one
   side (1/0) and clears the zone nodes.
@@ -340,7 +340,7 @@ model script `rm_model.py`)
 
 **DSP UNCERTAIN**: comb tap alignment (sᵢ[n−D] vs [n−D−1]); the module timer period (list init arg 74), i.e. how
 many blocks until a new preset is audible; whether resizes/resets clear line contents; Del0 first-enable output
-before D samples are buffered; bit-exact f32 order of the vectorised comb/allpass kernels.
+before D samples are buffered; bit-exact f32 order of the vectorized comb/allpass kernels.
 
 ---------------------------------------------------------------------------------------------------------
 ## 9. Master path and output [R][TR]

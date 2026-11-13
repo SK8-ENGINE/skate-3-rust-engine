@@ -248,7 +248,7 @@ fn ped_glb_bind_frames_are_the_rig_reference_frames() {
     let mut locals = rig.reference.clone();
     locals[0] = skate_core::living_world::peds::anim::IDENTITY;
     let globals = skate_core::living_world::peds::PedEvaluator::globals(rig, &locals);
-    // Rotation angle between the reference global (rows = bone axes, normalised) and the GLB bind (transposed IBM).
+    // Rotation angle between the reference global (rows = bone axes, normalized) and the GLB bind (transposed IBM).
     let angle = |native: &[[f32; 4]; 4], ibm: &[f32; 16], basis: [[f32; 3]; 3]| {
         // bind(r, c) = ibm[r * 4 + c]; reference(r, c) = sum_k native[k][r] * basis[k][c] (G x basis).
         let reference = |r: usize, c: usize| (0..3).map(|k| native[k][r] * basis[k][c]).sum::<f32>();

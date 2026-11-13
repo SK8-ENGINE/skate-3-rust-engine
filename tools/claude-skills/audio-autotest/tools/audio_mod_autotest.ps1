@@ -11,7 +11,7 @@
 #             the game after `AUTOTEST done`.
 # Pass "off": DownTown, the dev mod present but disabled: asserts retail (map audio ["retail"], the
 #             retail crossfade, no overlay, no mod log lines, the install's project count).
-# Default: muted (--mute), window minimised, 5 s steps, no gaps. -Audible: unmuted, a normal window,
+# Default: muted (--mute), window minimized, 5 s steps, no gaps. -Audible: unmuted, a normal window,
 # 15 s steps with a 3 s quiet gap before each (the HUD counts down: "Next in 3 s: ..." then
 # "3/16 <step>  9 s left" and what to listen for). -StepSeconds / -GapSeconds override either; the
 # hard timeout follows from them. Silent read-back steps (F5 global, seed, Csis, hot swap) always run

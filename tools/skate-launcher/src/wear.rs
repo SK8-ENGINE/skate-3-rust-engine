@@ -24,7 +24,7 @@ const TAG_CHARS: [usize; 2] = [12, 4];
 const TAG_TILT: [f32; 2] = [5.0, 8.0];
 const STICKER_COUNT: i32 = stickers::FIRST + stickers::COUNT;
 const STICKER_REACH: f32 = 70.0;
-/// Colour / text variations per sticker design; the install's saved wear seed picks one, so it stays the same.
+/// Color / text variations per sticker design; the install's saved wear seed picks one, so it stays the same.
 const VARIANTS: usize = 4;
 /// Sticker wear patterns (peel side, scuffs, chips, rubbed print), rolled per install, independent of the design and
 /// variation, and not user-pickable.
@@ -867,7 +867,7 @@ fn place_sticker(px: &mut Pixmap, s: &Spec, stickers: Option<&Path>) {
     let ts = device().pre_translate(cx, cy).pre_rotate(s[4]).pre_scale(scale, scale);
     let list = game_stickers(stickers);
     if let Some(img) = (!list.is_empty()).then(|| png_pixmap(&list[s[5] as usize % list.len()])).flatten() {
-        // Scaled so its longer side is 160 units, centred, the surface's ridges creased into it.
+        // Scaled so its longer side is 160 units, centered, the surface's ridges creased into it.
         let k = 160.0 / img.width().max(img.height()) as f32;
         let (w, h) = (img.width() as f32 * k, img.height() as f32 * k);
         let at = ts.pre_translate(-w / 2.0, -h / 2.0).pre_scale(k, k);
@@ -992,7 +992,7 @@ fn die_cut(parts: &[tiny_skia::Path]) -> Vec<(f32, f32)> {
     edge.iter().step_by(2 * K as usize).map(|(x, y)| (*x as f32 / K as f32 - 120.0, *y as f32 / K as f32 - 120.0)).collect()
 }
 
-/// `FitText`: the text as large as fits the rect, centred (GDI DrawString, no wrap).
+/// `FitText`: the text as large as fits the rect, centered (GDI DrawString, no wrap).
 #[allow(clippy::too_many_arguments)]
 fn fit_text(px: &mut Pixmap, ts: Transform, clip: Option<&Mask>, s: &str, face: Option<&Face>, c: Color, r: (f32, f32, f32, f32)) {
     let Some(face) = face else { return };

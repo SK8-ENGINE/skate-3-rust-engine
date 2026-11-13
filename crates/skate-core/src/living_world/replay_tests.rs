@@ -1294,7 +1294,7 @@ fn a_client_follows_a_simulated_cursor_through_a_chain_a_restart_and_a_hold() {
     }
     assert!(chained && restarted && records.len() == 2 && records[1].respawn, "{records:?}");
     assert!(host.line == id(2) && host.node == 9 && !host.finished && !client.finished, "both hold at the dead end");
-    // Without the hold flag a mirrored cursor finishes there (the old behaviour).
+    // Without the hold flag a mirrored cursor finishes there (the old behavior).
     let mut free = LineCursor::spawn(&ls, id(1), 0);
     drive(&mut free, target, &mut Decider::Mirror(&records, &[]), &mut Vec::new());
     assert!(free.finished);

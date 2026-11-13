@@ -1,5 +1,5 @@
 //! The skitch motion graph nodes (b58, b60, b61; `anim_skitching/default` 8289D550).
-//! Behaviours, conditions and gaps: docs/hails-additions/26h-living-world-traffic.md#skitch-graph-nodes
+//! Behaviors, conditions and gaps: docs/hails-additions/26h-living-world-traffic.md#skitch-graph-nodes
 use skate_core::point_graph::PointGraph;
 use skate_data::collections::Collections;
 

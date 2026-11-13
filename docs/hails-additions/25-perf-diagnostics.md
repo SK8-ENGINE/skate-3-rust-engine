@@ -65,7 +65,7 @@ the lows and the hitch count are what describe stutter; a mean cannot.
   wall_unix_s  frame  frame_ms  fixed_steps  fixed_ms  main_ms  hitch  median_ms
   ```
   `wall_unix_s` (UTC) lines rows up with `logs\game-*.stderr.log` and the audio state log; `hitch` is `HITCH` or
-  empty. Reading tool (fork-local): `tools/claude-skills/optimisation/tools/frame_log_summary.py`.
+  empty. Reading tool (fork-local): `tools/claude-skills/optimization/tools/frame_log_summary.py`.
 - `graphics_menu.rs`: row 28 "Frame-time counter On/Off" in GRAPHICS (after the audio controls), saved as
   `frame_stats` in `settings/graphics.json`, **off by default** (old files load as off).
 - Moddability: `sdk.snapshot.frame` (read-only): `frame, ms, fixed_steps, main_ms, fixed_ms, hitch, window_s,
@@ -113,7 +113,7 @@ the last rendered block), plus how many hitch frames the rate limit skipped.
   thread lock. Test `systems_write_only_their_own_state`, and the existing
   `game_is_identical_with_diagnostics_on_or_off`.
 
-Measurements so far (headless, 2026-10-08, optimised test build):
+Measurements so far (headless, 2026-10-08, optimized test build):
 
 - `flip_hitch_timing` (new, data-gated, `tests/flip_hitch_timing.rs`): scripted ollies, kickflips,
   heelflips and late flips through the real `frame::advance`, on normal airs and on large airs (upward
@@ -161,7 +161,7 @@ resize hit earlier), so every HUD glyph and shape was re-extracted, its vertex b
 material bind group rebuilt in the render world every frame. The number of draws grows with the trick text
 on screen, so the churn is highest exactly while a trick name and score are shown in the air.
 
-Evidence (headless, optimised test build, the real scoring runtime and the real HUD movie;
+Evidence (headless, optimized test build, the real scoring runtime and the real HUD movie;
 `scoring_hud::draw_tests::hud_writer_is_identical_and_skips_unchanged_assets`, 2400 frames: ten 2.5 s airs
 with three flips each, multiplier 3 from the second air, a bail; two runs, same numbers):
 
@@ -182,11 +182,11 @@ shows as `wait` outside the schedules, not as `hud_render`.
 
 Change (`crates/skate-game/src/scoring_hud.rs`): `apply_draws` writes a slot's mesh only when its
 positions, UVs or normals differ bit for bit (`to_bits`, so -0.0 / +0.0 and NaN payloads count as
-changes) from what the mesh already holds, its material only when the colour transform bits or the atlas
+changes) from what the mesh already holds, its material only when the color transform bits or the atlas
 handle differ, and its `Visibility` only when it differs from the value it last inserted (`Slot::visibility`,
 `None` until the first insert so a new slot keeps the spawn default `Inherited` for its first frame, as
 before). New slots are spawned exactly as before. Slot order, z, render layer and the panic-free
-behaviour on a missing texture are unchanged. The main-thread p99 is about 4 us higher (the comparison
+behavior on a missing texture are unchanged. The main-thread p99 is about 4 us higher (the comparison
 runs before a rebuild on frames where a slot changes); traded for removing ~40 render-world re-uploads per
 frame on average.
 
@@ -194,7 +194,7 @@ Verification:
 - Identity: the old writer is kept verbatim as a test-only reference; the test drives both with the same
   draws every frame and asserts, after every frame, that every slot is identical: entity, `Visibility`,
   `Transform` z bits, `RenderLayers`, mesh and material handle bindings, topology, indices, asset usage,
-  every attribute's bytes, colour transform bits and atlas texture. Passes on all 2400 frames, twice.
+  every attribute's bytes, color transform bits and atlas texture. Passes on all 2400 frames, twice.
 - `skate-game` suite: 561 passed, 1 failed in the binary (`setup::tests::pipelines_accept_valid_group_outputs_when_fingerprint_changes`,
   the known pre-existing failure), the existing `hud_target_changes_only_on_resize_and_refreshes_composite` passes.
 - Retail parity: the HUD look cannot change; the render world receives the same asset contents, only
@@ -302,7 +302,7 @@ Rejected, with numbers:
 `map_writer.py` (maps + environment) and `install.convert_map` (maps) changed. Pairs in
 `tools/asset_pipeline/pipeline-equivalence.json` for exactly these two groups, from `main`'s fingerprints to this
 branch's: environment `e062aa4b…` → `39097274…`, maps `2d52e21d…` → `81867db8…`; `changed_groups(main, branch)` is
-empty, so an existing installation rebuilds nothing. core, hud, character: unchanged. Customiser fingerprint and
+empty, so an existing installation rebuilds nothing. core, hud, character: unchanged. Customizer fingerprint and
 stage versions: unchanged (checked against `git archive main tools`). `setup_budget.py` is in no fingerprint;
 `install.py` gained no top-level import. When this PR and #28 / #29 (which also change the maps fingerprint) are
 combined, the pairs have to be recomputed for the combined tree (as for F + G).
@@ -324,7 +324,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   panics or errors; `frame_log_summary.py` reads it; every row has `main_ms <= frame_ms`.
 - Full fresh setup into a scratch base (a local script, since replaced by `tools/dev-bench/setup_bench.py`, `default.xex`, 3 map workers), `main` vs
   branch, run back to back: total **445.6 → 434.6 s**; map stage 183.1 → 179.8 s (DownTown is the long pole and its
-  `prepare` stream decode, cut by #29, dominates); customiser 228 → 234 s (unchanged code; runs after the maps on
+  `prepare` stream decode, cut by #29, dominates); customizer 228 → 234 s (unchanged code; runs after the maps on
   `main`). Both: 0 warnings. Single runs on a shared machine: the per-district A/B above is the reliable number.
   The full-setup gain is small on `main` because `prepare` dominates; with #29 the post-prepare phases are a larger
   share of each map.
@@ -356,7 +356,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
 ## Refresh Game Files: unchanged groups are linked, not copied or re-hashed (2026-10-23, USER-ASKS 285)
 
 - **Problem:** a refresh that rebuilds one group (2026-10-23: hud, for the minimap) took about 8 minutes on the desktop
-  HDD. The installation is 18.7 GB in 80,929 files (customisation 11.7 GB, audio 4.9 GB, maps 1.4 GB).
+  HDD. The installation is 18.7 GB in 80,929 files (customization 11.7 GB, audio 4.9 GB, maps 1.4 GB).
 - **Root cause** (`tools/asset_pipeline/install.py` `_install`, `group_receipts.damaged`):
   1. `damaged()` re-read and SHA-256'd every file of every group not being rebuilt, on every refresh (~7 GB);
   2. the new installation was then built by copying the previous one with `shutil.copy2`; only unchanged maps and
@@ -379,8 +379,8 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
     hashes the rest, adding the time to older entries. Accepted trade-off: a same-size change that keeps the
     modification time is not noticed. The Rust readers of `outputs` use only `size` (`asset_check.rs`, `setup.rs`).
   - B lives in `group_receipts.py`, not `setup_state.py`: `customiser_setup.fingerprint()` hashes `setup_state.py`,
-    and a first version there made the customiser build a whole new character generation (+8,294 files).
-- **Fingerprints:** all 7 group fingerprints and the customiser fingerprint are equal to the tools before the change,
+    and a first version there made the customizer build a whole new character generation (+8,294 files).
+- **Fingerprints:** all 7 group fingerprints and the customizer fingerprint are equal to the tools before the change,
   so no installation rebuilds anything because of it.
 - **Equivalence:** base2 (old tools) and new2 (A + B) from the same bench state: 97,517 files each, all identical
   except the 5 hud outputs, which differ between two old-tools runs as well (the hud export embeds per-run values
@@ -390,7 +390,7 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
   (175 s for audio) to seconds, and the copy no longer moves the audio's 4.9 GB.
 - **Tests:** `tools/test_setup_shared_links.py` (in-place write caught, replaced / removed files pass, `_write` leaves
   the old copy alone, receipt times: recorded, newer time hashed and caught, same size + time trusted, old entries
-  hashed and stamped); setup recovery / customiser / versions tests 26 OK. On the real bench installation
+  hashed and stamped); setup recovery / customizer / versions tests 26 OK. On the real bench installation
   (`tools/dev-bench/rehash_check.py`): untouched passes without hashing (9.5 s), one byte changed in a 29 MB audio
   file is caught, the original bytes with a new time pass, the file is restored.
 - **Launcher (C):** a working-tree version's build stamp now hashes only the exe's inputs (crates, vendor, Cargo.*,
@@ -500,9 +500,9 @@ combined, the pairs have to be recomputed for the combined tree (as for F + G).
 - **Open:** a switch run to measure the render frames per slice (`tools/dev-bench/frame-time-run.ps1`,
   `SKATE_MAP_SWITCH`); the largest single texture array bounds a slice.
 
-## Optimisation pass: the 2026-10-24 evening work (USER-ASKS 327)
+## Optimization pass: the 2026-10-24 evening work (USER-ASKS 327)
 
-Skill `optimisation-pass` over the loading screen leftovers (doc 31: `sdk.loading` lines and holds, the autosave
+Skill `optimization-pass` over the loading screen leftovers (doc 31: `sdk.loading` lines and holds, the autosave
 corner wheel, FE fade at 60 ticks a second), seated peds reacting to a skater (doc 26f "Seated peds avoid an
 approaching skater") and the camera slow-motion subject gate (doc 21 "Camera slow motion").
 
@@ -511,7 +511,7 @@ approaching skater") and the camera slow-motion subject gate (doc 21 "Camera slo
   `(tick + serial) % every`), loops over the few observers and probes the navmesh only for a qualifying approach; the
   clip vectors are built only when an avoid starts. The slow-motion gate does less work than before (no Update
   without the subject). No file I/O, parsing or uploads were added.
-- **Desktop runs** (28 threads; `tools/claude-skills/optimisation-pass/tools/frame-time-run.ps1`, muted, University
+- **Desktop runs** (28 threads; `tools/claude-skills/optimization-pass/tools/frame-time-run.ps1`, muted, University
   with a switch to DownTown at 25 s, 70 s, before = 956bb2da, after = 8bd84c24, alternating):
 
   | run | median ms | p90 ms | p99 ms | max ms |
@@ -666,7 +666,7 @@ Root cause of the 33.6 ms: not the queries. The settings file every launcher ver
 The queries still cost something, so they are sampled now. Bevy's readback is asynchronous (`map_async`, collected on a later frame), so the queries never stall the CPU; their cost is GPU work and resolve copies on every pass.
 
 Change (`crates/skate-game/src/performance.rs`):
-- `SKATE_PERF_GPU_EVERY=<frames>`: how often the GPU queries run. Default 30 in trace-all, 1 (every frame, the old behaviour) for the one-shot `SKATE_PERF_REPORT` benchmark; 0 turns the GPU queries off while every other trace stays on. A launcher version or user can set it like any other switch (`versions.json` `env`). The value is logged at startup (`SKATE_PERF_GPU sample_every=`) and written into the report (`gpu_sample_every_frames`).
+- `SKATE_PERF_GPU_EVERY=<frames>`: how often the GPU queries run. Default 30 in trace-all, 1 (every frame, the old behavior) for the one-shot `SKATE_PERF_REPORT` benchmark; 0 turns the GPU queries off while every other trace stays on. A launcher version or user can set it like any other switch (`versions.json` `env`). The value is logged at startup (`SKATE_PERF_GPU sample_every=`) and written into the report (`gpu_sample_every_frames`).
 - Bevy's render system only records GPU queries while its diagnostics recorder resource is in the render world (it removes it, runs the graph, puts it back). A render world system right before `RenderSystems::Render` moves the recorder aside on frames that are not sampled and back on sampled ones. The recorder type is crate-private in bevy_render, so it is named through the public `RenderContext::new` signature; no vendoring.
 - Bevy smooths render diagnostics over about 0.1 s, so with every frame sampled the report already held roughly the newest frames; with one frame in 30 it holds the newest sampled frame. Readbacks in flight are collected on the next sampled frame, so values arrive up to one interval late.
 - Nothing else changes: frame log, audio state log, perf windows, render phase split and log lines are written by the same code as before.
@@ -727,34 +727,34 @@ happen once on the laptop; not reproduced yet.
 ## Steam launcher: the game comes to the front, the console gets out of the way (2026-10-17)
 
 Problem (laptop, user): the launcher prompt window often stays over the game, and neither the game nor the
-prompt window can be clicked to move them. The launcher console is maximised and in the foreground (`Focus()` /
+prompt window can be clicked to move them. The launcher console is maximized and in the foreground (`Focus()` /
 `Focus-Console`, `ShowWindow` 3) right before the launch; the game starts as a child of that console
 (`Run-Bat` -> `cmd /c PLAY.bat`, no window of its own), so Windows' foreground lock could open it behind the console.
-A maximised window cannot be dragged, and a click into the console with QuickEdit on starts a text selection that
+A maximized window cannot be dragged, and a click into the console with QuickEdit on starts a text selection that
 freezes its screen until Esc.
 
 Change (`tools/steam-launcher`): `launcher.ps1` `Run-Bat` starts the bat without waiting, then `Hand-Over-To-Game`
 waits (up to 180 s) for a `skate3rust` / `skate3` window, gives it the foreground while the console still holds it and
-minimises the console without activating it (`ShowWindow` 7); the result screen restores the console as before.
-`SkateLauncher.cs` turns QuickEdit off for its console (`SetConsoleMode` without `0x40`). The menu stays maximised.
+minimizes the console without activating it (`ShowWindow` 7); the result screen restores the console as before.
+`SkateLauncher.cs` turns QuickEdit off for its console (`SetConsoleMode` without `0x40`). The menu stays maximized.
 
 Verification: `csc` builds `SkateLauncher.exe`, `launcher.ps1` parses (PowerShell 5.1). Laptop session 2026-10-17
-13:34: the game came to the front, but the launcher stayed minimised after it.
+13:34: the game came to the front, but the launcher stayed minimized after it.
 
 Follow-up (same day): on Windows 11 with the default terminal "Let Windows decide", Steam's launch opens the
-launcher in Windows Terminal. Its pseudo console window (`GetConsoleWindow()`) takes a minimise but not the restore /
-maximise / foreground the result screen needs, and the console font call has no effect there. `SkateLauncher.cs`
+launcher in Windows Terminal. Its pseudo console window (`GetConsoleWindow()`) takes a minimize but not the restore /
+maximize / foreground the result screen needs, and the console font call has no effect there. `SkateLauncher.cs`
 `InClassicConsole`: inside Terminal (`WT_SESSION` set) it starts itself again under `conhost.exe` (a classic console
-window, marker argument `--conhost`), minimises the Terminal window and waits, returning the child's exit code, so
+window, marker argument `--conhost`), minimizes the Terminal window and waits, returning the child's exit code, so
 Steam still tracks the session. Desktop test inside Terminal (`wt -w new SkateLauncher.exe notes`): the classic
-"Skate launcher" window maximised, the Terminal window minimised, both closed with the launcher, no processes left.
+"Skate launcher" window maximized, the Terminal window minimized, both closed with the launcher, no processes left.
 Not checked on the laptop yet: the result screen coming back after a game.
 
 ## Steam launcher: a real window, Refresh Game Files, first-time setup (2026-10-18)
 
 Problem (laptop notes 2026-10-18, user): the Steam launcher needs to become a real launcher, since the
 terminal window still does not work properly, and it needs a Refresh Game Files option, so the game need not be
-launched to run it. Asked the same morning: entries greyed out until their config is set up; a hails-additions
+launched to run it. Asked the same morning: entries grayed out until their config is set up; a hails-additions
 version on the fork and one for upstream main, always there and rebuilt when newer; a first-time setup that installs
 the dependencies; a size cap for the build folders that clears old build caches before a build; and Tools options to
 clear all builds, one build or one build cache.
@@ -783,7 +783,7 @@ Change, launcher (`tools/steam-launcher`):
   only while the window is active and no job runs (XInput reports the pad to every process). Jobs run `launcher.ps1`
   hidden, with the output shown live; `AllowSetForegroundWindow` before the start, the window hides once a game window
   exists and comes back with the result.
-- `launcher.ps1 entries` lists every entry with a group, on/off and why it is off; the window draws off entries grey
+- `launcher.ps1 entries` lists every entry with a group, on/off and why it is off; the window draws off entries gray
   with the reason (recomp without `recomp.exe`, RPCS3 without `rpcs3`, send without `after_session`, the recomp share
   tools without `tools\second-pc` set up, traces a version's source doesn't have, Refresh Game Files on a version built
   before `--update-game-files`).
@@ -811,7 +811,7 @@ Verification (main PC, 2026-10-18): `cargo test -p skate-game --bin skate3rust -
 failed refresh is reported). `skate3rust.exe --update-game-files --assets <this PC's assets>`: `ASSET_CHECK done in
 821 ms: 0 problem(s)`, `GAME_FILES current`, exit 0, no window; a missing folder: exit 2. `launcher.ps1 entries /
 versions / status / sizes`, `setup.ps1` (all found here). The window: main menu, version picker (the built-ins
-listed), greyed Recomp / RPCS3 rows with the reason, a one-click `tool-setup` run that showed "everything is
+listed), grayed Recomp / RPCS3 rows with the reason, a one-click `tool-setup` run that showed "everything is
 installed" and closed after its countdown. Size cap on a scratch checkout with three 3 MB build folders and a cap of
 8.5 MB: the oldest folder went, the one to build and the newer one stayed. `launcher.ps1 tool-refresh` end to end
 (build of this checkout into its K: target, then the check): "Refresh game files: current: nothing to refresh". The
@@ -957,7 +957,7 @@ Change: `load_ped_data` parses it once and hands the parsed tree to every reader
 `PedData::load_with`, `PluginData::load_with`, `HandPropData::load_with`). A reader given none reads the file itself, so
 a missing or broken file reports the same errors as before. The byte-taking readers stay for the tests.
 
-Proof of identical behaviour: the same parsed `serde_json::Value` goes through the same reader code; the loaders'
+Proof of identical behavior: the same parsed `serde_json::Value` goes through the same reader code; the loaders'
 summary lines after the switch (`PED_GRAPH`, `PED_MOOD tables`, `PED_PLUGINS`, `LIVING_WORLD peds:`) are the same as in
 the session log of 2026-10-16 23:46, except `PED_HAND_PROPS ... with models` (0 -> 22), which comes from
 `hand_props.json` of the refreshed install (this change does not touch that read). skate-game ped tests 71 pass
@@ -1035,7 +1035,7 @@ per frame; both car material systems leave the top list; 0 error lines in both r
 Open (found with the same readout, not fixed): steady-state stalls of 25-90 ms, about one every 1-2 s, also in a
 foreground desktop play session (144 in 4 minutes, mean 31 ms). Their lengths cluster near 33-36 ms and 66-69 ms. In
 every second with a stall the same systems on different threads stretch together by the same amount
-(`propagate_parent_transforms` and the specialisation checks on the main thread, `render_system` on the render
+(`propagate_parent_transforms` and the specialization checks on the main thread, `render_system` on the render
 thread), so the whole process waits on something shared rather than one system being slow. Ruled out: the frame rate
 (a 144 fps cap keeps them), the NPC physics opt-in (fewer with it off, not gone) and log writing (already on its own
 thread). A Chrome trace hides them because it slows every frame; a Windows Performance Recorder trace of one stall is
@@ -1059,7 +1059,7 @@ Change (plan b228, checked and extended):
 - Startup takes a `living_world` hold on the loading screen and releases it once both are loaded. At a switch the
   load runs in the commit frame, three Publishing frames before the unpause.
 - The first tick stays the same: the late load ran the crosswalk upkeep on the old data and then replaced it, so a
-  map's first tick had no signalled arms; an early load skips that upkeep once (`PedData::skip_arms_once`).
+  map's first tick had no signaled arms; an early load skips that upkeep once (`PedData::skip_arms_once`).
 - Settings read only at load (the seed, `enabled`, `pedestrians.enabled`) that change before play starts make the
   first tick load again with the current ones (`recheck_early_load`), as the late load would have.
 - Added 2026-10-18: the traffic data (`vehicles::load_traffic_data`, about 22 ms; it parses `tables.json` and
@@ -1158,7 +1158,7 @@ Change (`living_world/preload.rs`):
 - `preload_models` (Update, which runs behind the loading screen while game time is paused) loads the set once the
   map's data is in and holds the handles for the map; the spawners' own `server.load` of the same `#Scene0` path then
   gets the loaded asset. A startup hold `living_world_models` waits until every model is loaded or failed (cap 30 s).
-  It rebuilds on a map switch or a mod look change (not on `CustomModels`, which the customiser marks changed every
+  It rebuilds on a map switch or a mod look change (not on `CustomModels`, which the customizer marks changed every
   frame; an NPC look it changes mid-map loads lazily as before), and reloads only when the path set differs.
 - What is shown changes in one way only: peds and cars no longer wait a few frames for their model after they spawn.
 
@@ -1223,7 +1223,7 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268):
 - Verification: test `the_fixed_step_system_is_found_by_name` pins the step system's name; trace-all tests pass
   (`SKATE_FIXED_TIMING` in its switch list). Used in the fixed step executor runs (2026-10-24, "Fixed step executor").
 - Open: nested spans (physics phases, per-mod callbacks) are not split (v2). The run tool
-  (`tools/claude-skills/optimisation-pass/tools/frame-time-run.ps1`) keeps the whole stderr log, FIXED_TIMING lines included.
+  (`tools/claude-skills/optimization-pass/tools/frame-time-run.ps1`) keeps the whole stderr log, FIXED_TIMING lines included.
 
 ## Launcher in a window; the launcher and the game come to the front; a steady splash (2026-10-19)
 
@@ -1242,7 +1242,7 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268):
   - The splash was created before the renderer makes the process DPI aware, so it was a DPI-unaware window that
     Windows could rescale during the start; its paint also laid out to the client size it found.
 - **Change:**
-  - Launcher: a normal resizable window at 70 % of the work area (16:10, centred, at least 800 x 540; the layout
+  - Launcher: a normal resizable window at 70 % of the work area (16:10, centered, at least 800 x 540; the layout
     already scales with the window). `Native.Front` joins the foreground thread's input for the call, then
     `BringWindowToTop` + `SetForegroundWindow`; used at start, after a job, and for the game.
   - Launcher: while a game runs it brings forward every new visible main window of the game for 5 minutes (the
@@ -1252,7 +1252,7 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268):
     the window by the system DPI, draws the 560 x 240 layout into a fixed bitmap and scales it to the window
     (HALFTONE), so a later DPI or display change cannot re-lay it out.
 - **Verification:** the launcher compiles with csc 4.0 (C# 5); skate-game builds and its suite passes. Not
-  play-tested yet: the foreground behaviour needs Steam and Windows Terminal (test it there, never only in a plain
+  play-tested yet: the foreground behavior needs Steam and Windows Terminal (test it there, never only in a plain
   console).
 - **Open:** whether the splash resize the user saw came from DPI or from the game's resolution settings is not
   proven; the next session with the splash says.
@@ -1363,7 +1363,7 @@ Change (`crates/skate-game/src/system_timing.rs`, research b214 / b268):
   `dynamics_step_only_with_something_a_mod_owns`; the trace-all test's report window is 1 ms now (a 20 ms window could
   close after its ~20 ms run: flaky).
 - **Open:** a measured after-profile; further exact candidates in research b327
-  (the `solve_queries` timer also covers the prop step and mod maps, so split it before optimising "queries").
+  (the `solve_queries` timer also covers the prop step and mod maps, so split it before optimizing "queries").
 
 ## Code reference: frame_timing/hitch.rs
 
@@ -1452,3 +1452,17 @@ Per-system wall time of the game audio's frame systems, summed per frame and rea
   previous frames). Expected = the median of the previous `HITCH_HISTORY` frames without their physics loop, plus the
   frame's fixed steps x the median cost of one step (`expected_ms`). A frame that runs the ~6 ms fixed step every other
   frame at ~180 fps is a normal frame, not a hitch (2026-10-19 laptop log: 9,912 of 9,918 flagged frames were that).
+
+## Logging off the game threads (2026-11-12)
+
+**Problem.** Major hitching on the desktop (0.3 to 4.6 s frames, worst on tricks); the laptop much less.
+
+**Root cause.** Every log line was written to stderr synchronously from the thread that logged it, and the desktop test's log file sat on a hard drive. Stack snapshots (cdb) caught the main thread in `NtWriteFile` inside the tracing writer three times out of three; after the tracing lines moved to the queued writer, a Chrome trace showed `crash_context::sample` (in `Last`, on every state change, so on every trick) waiting 0.2 to 1.9 s on the stderr lock for its `eprintln!` report lines. About 300 `eprintln!` sites write to stderr directly.
+
+**Change.** `profiling.rs`: (1) the bounded log writer thread is always on (it was trace-all only); (2) `stderr_pump` (Windows): the process's stderr is an 8 MB pipe that its own thread forwards to the real stderr, so any stderr write in the process is a memory copy; a write waits only when 8 MB are already queued. Both drain on exit and on a panic (`drain_log_queue`). The Chrome trace writer is unchanged.
+
+**Files.** `crates/skate-game/src/profiling.rs`, `crates/skate-game/Cargo.toml` (windows crate features Win32_Security, Win32_Storage_FileSystem, Win32_System_Console, Win32_System_IO, Win32_System_Pipes).
+
+**Verification.** Desktop contest runs street_dwtn_01: before, 98 hitches in 2 min with 27 over 500 ms; after both changes, 13 hitches in 5 min, 11 under 50 ms; in play the hitching was gone apart from small blips.
+
+**Linux / macOS (2026-11-12, all-OS rule).** The same pump: fd 2 becomes a pipe's write end (`dup2`), a thread forwards the read end to the original stderr (`dup` of fd 2), `FIONREAD` for the drain; Linux asks for an 8 MB pipe (`F_SETPIPE_SZ`, else 1 MB, else the kernel default), macOS keeps its fixed pipe size. `libc` (=0.2.189, the version already in the lockfile) as a Unix-only dependency. Checked: the module compiles for `aarch64-apple-darwin` (a scratch crate with the module and `libc`; the whole game does not cross-compile here, its C build scripts need the macOS toolchain); not run on Linux or macOS yet (the laptop / a Linux machine).

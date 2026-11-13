@@ -58,15 +58,15 @@ after the stock loads (config, gameplay config, manifest, graphs):
   `setup-report.json` and the setup message; `install.py` and `tools/setup.py`
   call the wrapper. `optional_content.py` itself is deliberately untouched: it is
   part of the hud/environment/maps fingerprints **and** of every
-  character-customiser stage version (`customiser_cache.SHARED`), so editing it
-  would make every existing installation rebuild the customiser (~4 min), which
+  character-customizer stage version (`customiser_cache.SHARED`), so editing it
+  would make every existing installation rebuild the customizer (~4 min), which
   has no equivalence mechanism. (A first version edited it; the fingerprint
   check that caught this compares against the committed tree, not a local
   install.)
 - `pipeline-equivalence.json`: removing validation from `convert_map` changes the
   `maps` fingerprint without changing any output, so an old→new pair is added
   (combined with PR G's stream change, see doc 8). Verified: an installation
-  built from the committed code rebuilds no group, and the customiser
+  built from the committed code rebuilds no group, and the customizer
   fingerprint and all five stage versions are unchanged.
 
 ## Verification
@@ -75,7 +75,7 @@ after the stock loads (config, gameplay config, manifest, graphs):
   triangle counts equal the post-volume-fix baseline.
 - Negative cases (bad spawns written into copies of real maps):
   MegaPark's old void spawn → "no collision within 10 m below the spawn" +
-  "wheels never found support"; Industrial's old harbour-bed spawn → "no visible
+  "wheels never found support"; Industrial's old harbor-bed spawn → "no visible
   surface … (invisible collision)".
 - Known limit: a spawn on a solid, visible roof (Industrial Skate Park's old
   roof spawn) is not flagged: rooftops are legitimate skate spots; only

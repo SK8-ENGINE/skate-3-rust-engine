@@ -42,9 +42,9 @@ impl CensusRange {
         }
     }
 
-    /// Circle and centre for an observer: speed = |velocity| x 3.6 [code `0x822F8628`]; the centre
+    /// Circle and center for an observer: speed = |velocity| x 3.6 [code `0x822F8628`]; the center
     /// moves `forward_offset` along the 3-D velocity direction (`normalize3(velocity)`,
-    /// `sub_826B7530`) [code], so on a slope the centre also moves up or down the hill.
+    /// `sub_826B7530`) [code], so on a slope the center also moves up or down the hill.
     pub fn around(&self, observer: &Observer) -> (CensusCircle, Vec3) {
         let v = observer.velocity;
         let speed = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
@@ -124,8 +124,8 @@ impl CensusMap {
 }
 
 /// Random point in the ring like `sub_82E17508` [code]: a direction from two uniform draws in
-/// [-0.5, 0.5) (x, z; y = 0) normalised, a radius uniform in [inner, outer] (linear, not by
-/// area), at the centre's height.
+/// [-0.5, 0.5) (x, z; y = 0) normalized, a radius uniform in [inner, outer] (linear, not by
+/// area), at the center's height.
 pub fn ring_point(rng: &mut Rng, centre: Vec3, inner: f32, outer: f32) -> Vec3 {
     let x = rng.unit() - 0.5;
     let z = rng.unit() - 0.5;
@@ -186,7 +186,7 @@ pub fn pass_budget(cfg: &CensusKindConfig, circle: &CensusCircle, initial: bool)
 pub struct VehicleEntity {
     /// `livingworld_models` record.
     pub model: String,
-    /// Colours in the model's chassis / secondary palettes (`palette_ids` in `vehicles.json`).
+    /// Colors in the model's chassis / secondary palettes (`palette_ids` in `vehicles.json`).
     pub chassis_colours: u32,
     pub secondary_colours: u32,
     /// Length (m): z of the model's size vector (`size_hint`) [data].
@@ -202,6 +202,29 @@ pub struct VehicleCatalog {
     /// Category name -> entity names in retail list order.
     pub categories: BTreeMap<String, Vec<String>>,
     pub entities: BTreeMap<String, VehicleEntity>,
+}
+
+impl VehicleCatalog {
+    /// This catalog with a mod's cars: `entities` adds new entities as copies of existing ones (new name -> base),
+    /// `tables` replaces categories' entity lists. Names the catalog does not know are dropped (returned).
+    pub fn patched(&self, entities: &BTreeMap<String, String>, tables: &BTreeMap<String, Vec<String>>) -> (Self, Vec<String>) {
+        let mut out = self.clone();
+        let mut unknown = Vec::new();
+        for (name, base) in entities {
+            match self.entities.get(base) {
+                Some(e) => {
+                    out.entities.insert(name.clone(), e.clone());
+                }
+                None => unknown.push(base.clone()),
+            }
+        }
+        for (category, list) in tables {
+            let (known, missing): (Vec<String>, Vec<String>) = list.iter().cloned().partition(|n| out.entities.contains_key(n));
+            unknown.extend(missing);
+            out.categories.insert(category.clone(), known);
+        }
+        (out, unknown)
+    }
 }
 
 /// The entity pick inside a category (`sub_826B8B88` via `sub_826BB058`) [code]:

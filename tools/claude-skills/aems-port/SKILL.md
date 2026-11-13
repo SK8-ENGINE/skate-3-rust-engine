@@ -12,20 +12,20 @@ the game host `crates/skate-game/src/game_audio/` (`native.rs`, `player_audio.rs
 voice graph, MixMap, grain player, buses, world audio. Helper scripts: `tools/` next to this file.
 
 ## Rules
-- **Your own code.** Upstream PR #4 / #1 and skate3recomp have no licence: read them to understand behaviour, then
+- **Your own code.** Upstream PR #4 / #1 and skate3recomp have no license: read them to understand behavior, then
   write the code from specs. Constants, offsets and opcode numbers are facts and may be used. CC0 sources (for
-  example dbalatoni13/nfsmw, mitsevox/tw2004) may be used. Repos without a licence (for example the Burnout decomp)
+  example dbalatoni13/nfsmw, mitsevox/tw2004) may be used. Repos without a license (for example the Burnout decomp)
   are reference only.
-- **Credit** every project whose findings you use (name, author, link, licence, what it gave) in the docs and PR.
+- **Credit** every project whose findings you use (name, author, link, license, what it gave) in the docs and PR.
 - **Retail parity, proven:** measure, don't guess. Every module is checked against golden data before it replaces a
   measured table. Never tune by ear; every change needs a measured difference and a mechanism. No A/B env switches
-  for behaviour changes: prove the change with the e2e bench, then people listen in game.
-- **Optimise only with proof** of identical output (skill `optimisation`).
+  for behavior changes: prove the change with the e2e bench, then people listen in game.
+- **Optimize only with proof** of identical output (skill `optimization`).
 - **Modular and moddable from the first line:** each subsystem behind a clear boundary; every sound resolved through
   a content layer (retail identity -> mod override -> retail); retail values come from setup data as defaults, not
   hard-coded constants; a Lua SDK surface (posting, globals, MixMap, event hooks, mod emitters; skill `make-mod`);
   cleanup on mod disable. Ask "can a mod reach this?" in every design and review.
-- **Multiplayer-ready:** stable identities, serialisable events, deterministic ticks with seeded RNGs.
+- **Multiplayer-ready:** stable identities, serializable events, deterministic ticks with seeded RNGs.
 - **Headless only for agents:** cargo build/test, Python, file reads. In-game listening is done by people.
 - No game code or data in the repo: banks, WAVs and image dumps come from each user's own install at setup time.
 
@@ -34,7 +34,7 @@ voice graph, MixMap, grain player, buses, world audio. Helper scripts: `tools/` 
    gitignored folder such as `.local/audio-re/aems-banks`; check S10A slot order = WAV order).
 2. Change the crate; `cargo test -p skate-audio --release` (unit tests + data-gated disc tests such as the bank census
    and DSP oracle, which skip without local data).
-3. **Oracles:** a local build of upstream PR #4 (its own licence terms: reference only, never committed) provides an
+3. **Oracles:** a local build of upstream PR #4 (its own license terms: reference only, never committed) provides an
    evaluator golden (per-op trace + RNG state log), DSP vectors and an end-to-end player render. Known PR #4
    evaluator gaps to fix locally in the oracle first: op 5 (CallFunction) sample counters never advance, ops 19/20
    (n-ary min/max) and 38 (ControlClass) missing. Compare our `aems_replay` / `mixmap_golden` example outputs with
@@ -178,7 +178,7 @@ Details of the console-cadence ports:
 - Recomp traces (skills `recomp-scripted-runs`, `recomp-audio-trace`); filter per-player lines to the local rider
   (`local72`).
 - Capture levels are in the recomp host's downmix space: compare relative levels.
-- Tolerance: bit-exact where the spec says the behaviour is replay-verified; otherwise within 0.1 dB per block for
+- Tolerance: bit-exact where the spec says the behavior is replay-verified; otherwise within 0.1 dB per block for
   whole-voice renders.
 - Before trusting a "late" voice in a recomp session, list its audio-thread stalls.
   Stalls of about 1 s are common, and the voices queued during one start together.

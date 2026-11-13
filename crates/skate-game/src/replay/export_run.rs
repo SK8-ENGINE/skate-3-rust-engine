@@ -157,7 +157,7 @@ pub(crate) fn drive(
     native: Option<Res<crate::game_audio::native::Native>>,
     mut popups: ResMut<crate::popup_host::PopupMods>,
 ) {
-    // The file was chosen (or the dialog cancelled): start rendering the clip.
+    // The file was chosen (or the dialog canceled): start rendering the clip.
     let answer = export.choosing.as_ref().map(|rx| rx.lock().map_or(Err(mpsc::TryRecvError::Disconnected), |rx| rx.try_recv()));
     if let Some(answer) = answer {
         match answer {

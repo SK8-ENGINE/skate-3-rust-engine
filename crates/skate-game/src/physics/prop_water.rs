@@ -57,7 +57,7 @@ pub(crate) fn density_for_template(template: &str) -> f32 {
 }
 
 /// Height of the bobbing surface over the flat water at `x, z` and time `t` (s): two crossing swells, so props a few
-/// metres apart do not move together.
+/// meters apart do not move together.
 pub(crate) fn bob(water: &PropWater, x: f32, z: f32, t: f32) -> f32 {
     if water.bob_height <= 0.0 || water.bob_period <= 0.0 {
         return 0.0;
@@ -73,14 +73,14 @@ pub(crate) const SURFACE_DEPTH: f32 = 50.0;
 /// Downward speed (m/s) below which a prop entering water makes no splash.
 pub(crate) const SPLASH_SPEED: f32 = 1.5;
 
-/// One eighth of the box: its centre (world) and how much of it is under water (0..1).
+/// One eighth of the box: its center (world) and how much of it is under water (0..1).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Sample {
     pub point: Vector3,
     pub submerged: f32,
 }
 
-/// The octant centres of a box (centre, basis columns, half extents) and their submerged shares under `surface`
+/// The octant centers of a box (center, basis columns, half extents) and their submerged shares under `surface`
 /// (a height per point, `None` = no water there). `height` is the box's world vertical half extent: each octant
 /// spans that much vertically.
 pub(crate) fn samples(center: Vector3, columns: [[f32; 3]; 3], half: Vector3, height: f32, surface: impl Fn(Vector3) -> Option<f32>) -> [Sample; 8] {
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn denser_than_water_sinks_lighter_floats_at_its_density_share() {
         assert!(settle(2400.) < -10., "concrete sinks");
-        // Archimedes: a floating cube sinks to (density / water) of its height; the centre sits 0.5 - share above 0.
+        // Archimedes: a floating cube sinks to (density / water) of its height; the center sits 0.5 - share above 0.
         for (density, share) in [(500f32, 0.5f32), (250., 0.25), (800., 0.8)] {
             let y = settle(density);
             assert!((y - (0.5 - share)).abs() < 0.05, "{density} kg/m3 floats at {y:.3}, expected {:.3}", 0.5 - share);

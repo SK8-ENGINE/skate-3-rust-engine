@@ -102,7 +102,7 @@ pub(crate) struct Inputs<'a> {
 
 /// Off board = on foot (500 biped ground / air, 502 pushing off board); wipeout = 300 (b864 §2.2 / §2.3 in our
 /// state ids).
-fn off_board(state: u32) -> bool {
+pub(crate) fn off_board(state: u32) -> bool {
     matches!(state, 500 | 501 | 502)
 }
 
@@ -226,6 +226,7 @@ impl TutorialRun {
                 grind_rail: input.grind_rail,
                 time_to_grind: input.time_to_grind,
                 board_adjust: input.board_adjust,
+                competitor_distances: [None; 4],
             };
             o.tricks_this_frame = input.tricks.to_vec();
             o.tricks_began = input.began.to_vec();
@@ -409,7 +410,7 @@ mod tests {
             objectives: vec![ObjectiveData { key: "tut_test_0".into(), activation: 0, triggers: gate, points_valid: None,
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.IsInVolume",
                     "args": [{"lit": "1"}, {"lit": "DIST_SkateSchool|tut_test_gate_01"}]}}]}),
-                failures: Vec::new(), failure_first: false, hints: Vec::new() }],
+                failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new() }],
         }
     }
 

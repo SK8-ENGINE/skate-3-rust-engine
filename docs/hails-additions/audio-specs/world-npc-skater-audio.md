@@ -34,7 +34,7 @@ Every player SFX object of instance 1 runs; the audio-state bridge `sub_824B0DA8
 the skater entry at the record's index (+68), so the components see the NPC's physics. Local tests
 (`[record+72]`) select the non-local branches:
 
-| component | non-local behaviour | ported here |
+| component | non-local behavior | ported here |
 |---|---|---|
 | PlayerPhysics inputs (`sub_824B19C8`) | in9 = 32767; in12 = `sub_824B23C8` (below); in13 = \|state+96 − `[G+0x2F078]`+32\| (the NPC's COM velocity against the local player's), capped at 35, slewed ±100/s (state +784), × 32767 / 35; vault class `0xC1831BDB6CB1B1EA`: `204DCC9296DC9400` = 35, `0395642CA6FC543A` = 100 | `Physics::write_against` |
 | 3DObjPos 1.1 / 1.2 (g) | the NPC's COM / board; distances against the local skater and the camera | `ObjPos` at `obj_pos(g)` / `obj_pos2(g)` |

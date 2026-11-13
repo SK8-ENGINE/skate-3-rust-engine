@@ -144,6 +144,11 @@ pub(crate) struct Runtime {
     pub close_tricks: bool,
 }
 impl Runtime {
+    /// What spectators read (`82E245F0` slot B, b157): the current sequence's points (HUD units) and a bail this tick.
+    pub(crate) fn spectator_feed(&self) -> (i32, bool) {
+        (if self.sequence_active { self.sequence_score as i32 } else { 0 }, self.close_tricks)
+    }
+
     /// Half turns of spin so far in this air (score state +0x3018; `GetCurrentDegreesOfSpin` / 180).
     pub(crate) fn half_turns(&self) -> u32 {
         self.spin_turns.unsigned_abs()

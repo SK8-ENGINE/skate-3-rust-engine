@@ -24,7 +24,7 @@ override; every system has an engine-facing and a mod-facing entry point; mod di
   (`LargeCrowdGenerator`), world-script ped commands (later, with challenges),
   traffic driving (separate work; peds only need the traffic-light phase clock and a "being honked at" input).
 - Never ship game data: the converter reads the user's disc into `assets/private` (like every other group); the
-  engine re-implements behaviours in our own code. The retail state-graph XML is read from the user's install at
+  engine re-implements behaviors in our own code. The retail state-graph XML is read from the user's install at
   runtime (as the skater graphs already are), never committed.
 
 ## 2. Data pipeline (setup group `livingworld`) [shared]
@@ -89,20 +89,20 @@ Crate split as today: pure rules in `skate-core` (`living_world/`: no ECS, no I/
 - Plugins anchor at waypoint groups (sit, ATM, vending, fountain, newspaper box, trash bin, look-at, conversation,
   spectator).
 
-### 3.4 Behaviour runtime [shared runtime, ped nodes own]
+### 3.4 Behavior runtime [shared runtime, ped nodes own]
 - Reuse `skate-core::graph` (activation, Priority policy, intents, expressions) and `skate-data`'s stategraph decoder
   to run `Pedestrian.xml` (AI) and `MotionGraph_Pedestrian.xml` (motion) from the user's install, with includes and
   template parameters (`knockdown.xml`, `avoid.xml`, `branchsyncturn.xml` …).
-- Re-implement the behaviours and conditions the graphs name (160 / 127 registered (code); the ped graphs use a subset:
+- Re-implement the behaviors and conditions the graphs name (160 / 127 registered (code); the ped graphs use a subset:
   MonitorEnvironment, SuggestVelocity, SendSpeechEvent, Wander, NoRoadWander, CheckForRoadTarget, UseCrossWalk,
   WanderOnRoad, RunFromHonker, Scatter, ZombieFollow, PedestrianColliding, GiveUpBeingPrimaryChaser, the chase /
-  takedown / tazer set, plugin behaviours, PlayRemappedAnimation, MajorIntentComplete, StopChannel …) as a Rust
+  takedown / tazer set, plugin behaviors, PlayRemappedAnimation, MajorIntentComplete, StopChannel …) as a Rust
   registry `name -> factory`. Handler addresses for each come from the registry tables; port each
   from its code, one at a time, with a unit test per rule.
 - Mood → wants, perception (near sphere, cone 120°, line of sight), timers and the escalation rules from
   `npc-livingworld-re` §4-5d (male: warn then angry chase; female: warn + taze or flee; bystanders: nearby collision /
   slam / trick reactions; greetings and conversations).
-- **Mod surface**: a mod can register its own behaviour / condition names (Lua callbacks), replace a graph file
+- **Mod surface**: a mod can register its own behavior / condition names (Lua callbacks), replace a graph file
   (content overlay), or override per-entity records; unknown names fail at load with a clear error.
 
 ### 3.5 Animation and LOD
@@ -157,13 +157,13 @@ Crate split as today: pure rules in `skate-core` (`living_world/`: no ECS, no I/
 | Item | Source of truth | Check |
 |---|---|---|
 | Census caps, weights, ranges, speed lerp | data + code | unit tests on the exported tables; headless run: alive count, first / last sighting distances vs code values (recomp sanity: 13-15 alive, 50-62 m / 62-72 m) |
-| Spawn rate | code (2 attempts / 1 spawn per console frame, normalised to 30 fps) | headless count over time |
+| Spawn rate | code (2 attempts / 1 spawn per console frame, normalized to 30 fps) | headless count over time |
 | Looks / variety | data (models, categories) | visual check by the user in game |
-| Walking speed, wander, crosswalks | data (graphs, SuggestVelocity), code (behaviours) | headless: speed median ~1.3 m/s; crosswalk waits with the light phases |
+| Walking speed, wander, crosswalks | data (graphs, SuggestVelocity), code (behaviors) | headless: speed median ~1.3 m/s; crosswalk waits with the light phases |
 | Collision reaction | code (`sub_82E38FB8`, thresholds 3 / 6) | unit tests; scripted recomp sanity (PEDCOLL) |
 | Moods / escalation / chases / tazer | code + data (`npc-livingworld-re` §4-5d) | unit tests per rule; existing recordings as sanity |
 | Speech, footsteps, body falls, tazer audio | ported (`world-ped-audio.md`) | existing audio tests once peds publish |
-Per-frame retail processes run at the 360's ~30 fps cadence normalised to any engine frame rate (memory "console
+Per-frame retail processes run at the 360's ~30 fps cadence normalized to any engine frame rate (memory "console
 cadence").
 
 ## 6. Test plan
@@ -186,7 +186,7 @@ cadence").
 | M1 | Living-world core: `LivingWorldData`, `CensusMap`, `PopulationManager`, pools, seeded RNG, debug overlay, mod content overlay + runtime spawn / despawn / events skeleton | M | M0 | yes (one manager, per-class budgets) |
 | M2 | Ped body: model spawn with variation, ped animation player (clips, blend, mirror, remap, root motion), walk / idle / start / stop, `PedAudio` publisher (footsteps from clip events), LOD tiers | L | M1 | LOD policy and clip decoder: yes |
 | M3 | Navigation: sidewalk wander on roads, crosswalks + signal clock, NavPower decode (or baked fallback navmesh), avoidance | L | M1 | avoidance of skaters: yes |
-| M4 | Behaviour runtime: ped AI + motion graphs on `skate-core::graph`, behaviour / condition registry, MonitorEnvironment, perception, timers, mood → wants | L | M2, M3 | graph host: yes (if NPC skaters use it) |
+| M4 | Behavior runtime: ped AI + motion graphs on `skate-core::graph`, behavior / condition registry, MonitorEnvironment, perception, timers, mood → wants | L | M2, M3 | graph host: yes (if NPC skaters use it) |
 | M5 | Skater interaction: capsule proxies in the skater solve, collision kind / direction, stumbles and knock-downs, warn / chase / takedown (skater knocked down) / tazer / flee, bystander reactions, speech events | L | M4 | events and mod API: yes |
 | M6 | Plugins and props: sit, conversation, phone, ATM, vending, fountain, newspaper, trash bin, spectate, look-at; hand props and throws; RunFromHonker input | M | M4 | spectate of skaters: yes |
 | M7 | Multiplayer (retail default: no ambient peds / traffic online; opt-in host-simulated snapshots + events), mod API completion (`sdk.living_world`, `check_mod`), docs (`docs/hails-additions/NN-living-world.md`), PR checklist | M | M5 | yes |

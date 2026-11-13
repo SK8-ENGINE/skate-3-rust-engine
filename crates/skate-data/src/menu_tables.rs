@@ -198,7 +198,7 @@ pub struct MenuTables {
     #[serde(default)]
     pub speakers: Vec<String>,
     /// The soundtrack's track names in IPOD enum order (track k = entry k - 1; table 0x8302E048 after
-    /// `IPOD_INVALID`, research b1015): the localised `IPOD_<NAME>_ARTIST` / `_TITLE` / `_ALBUM` keys.
+    /// `IPOD_INVALID`, research b1015): the localized `IPOD_<NAME>_ARTIST` / `_TITLE` / `_ALBUM` keys.
     #[serde(default)]
     pub ipod_tracks: Vec<String>,
     /// The playlist song id of each soundtrack track, same order (the IPOD id table after the names, 0x8302E108;

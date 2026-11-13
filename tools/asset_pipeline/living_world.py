@@ -133,7 +133,7 @@ FIELD_NAMES = {
         'Hash_FE83E2E0A19A9AFE': 'honk_obstacle_time',       # obstacle ahead this long -> horn kind 2 (sub_82C40660) [code]
         'Hash_BC1A827C21919C3B': 'honk_blocked_time',        # blocked this long -> horn kind 4 / 5 (sub_82C40660) [code]
         'Hash_40540E1A0A5D447A': 'honk_approach_speed_kmh',  # approaching an obstacle faster -> horn kind 1 (sub_82C34190) [code]
-        'Hash_559BA807F95FF93E': 'pull_over_chance',         # per manoeuvre decision (sub_82C41CD0) [code]
+        'Hash_559BA807F95FF93E': 'pull_over_chance',         # per maneuver decision (sub_82C41CD0) [code]
         'Hash_988BB0F6F043EB3D': 'parked_time',              # s parked before pulling out (sub_82C3A3A8) [code]
     },
     'livingworld_entities_chase': {

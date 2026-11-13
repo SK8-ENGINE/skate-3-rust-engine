@@ -1,8 +1,8 @@
-# 8. Setup performance: duplicate stream copies and customiser overlap (PR G)
+# 8. Setup performance: duplicate stream copies and customizer overlap (PR G)
 
 Measured on a full setup (Windows 11, i7-14700KF, 28 threads, 3 map workers):
 466 s total before this change: stock data 20 s, maps 183 s (DownTown alone
-182 s), character customiser 226 s (run only after all maps), publish 24 s;
+182 s), character customizer 226 s (run only after all maps), publish 24 s;
 with total CPU use around 10%.
 
 ## 1. Skip decoding identical copies of streamed assets
@@ -33,7 +33,7 @@ copy whose stored bytes have the same digest is not decoded and not returned.
 A copy whose stored bytes differ is decoded and returned as before, so the
 existing conflict check (`conflicting SFIL copies`) still sees it. Record
 lookup, in-file duplicate detection and stride validation still run for every
-copy. Without `known_copies` (all other callers) behaviour is unchanged.
+copy. Without `known_copies` (all other callers) behavior is unchanged.
 
 Why identical: identical stored bytes (same section table, sizes and
 compressed payload) decode to identical data, and the loader already kept the
@@ -58,11 +58,11 @@ copies.
   are still rejected. (The fixture uses the uncompressed storage path; the
   compressed path is covered by the full-district comparison above.)
 
-## 2. Run the character customiser beside the map stage
+## 2. Run the character customizer beside the map stage
 
 ### Problem
 
-`customiser_setup.install` passes the customiser to `install._install` as
+`customiser_setup.install` passes the customizer to `install._install` as
 `finalize`, which ran after the whole map stage. It reads only stock data
 (core group), default-skater textures (character group) and the disc, all
 prepared before maps, and writes only `assets/private/customisation`. It
@@ -73,7 +73,7 @@ launched no processes then (it has since gained worker processes and, from the t
 
 `tools/asset_pipeline/install.py`: when the map stage runs and memory allows
 (`overlap_customiser`: available memory ≥ 2 GiB desktop reserve + 3 GiB per
-map worker + one more 3 GiB slot), the customiser starts on a background thread
+map worker + one more 3 GiB slot), the customizer starts on a background thread
 (`Background`) just before the map jobs and is joined where it used to run;
 its exception is re-raised there, so failures behave as before. Otherwise it
 runs at the end exactly as before. `map_workers` and the new gate share
@@ -89,7 +89,7 @@ runs at the end exactly as before. `map_workers` and the new gate share
 
 ### Problem
 
-After section 2 the customiser was the critical path. Its two big stages were
+After section 2 the customizer was the critical path. Its two big stages were
 single-threaded loops: the clothing library (126.5 s alone) decodes ~2,900
 textures one at a time, and the pro roster (89.6 s) prepares 41 characters
 one at a time. In a dev checkout both also used the pure-Python RefPack
@@ -150,30 +150,30 @@ decoder, because only `Build-Release.ps1` built `target/native/refpack.dll`.
   - `_publish` is atomic and keeps an existing file;
   - rename contention is tolerated and retried;
   - `requested_textures` follows the skip rules.
-- Refresh setup (customiser only, rebuilt once):
+- Refresh setup (customizer only, rebuilt once):
   - library 126.5 → **51.2 s**, roster 89.6 → **15.9 s**;
-  - customiser stage total 73 s, with no worker failures;
+  - customizer stage total 73 s, with no worker failures;
   - `check_customiser.py`: IDENTICAL, all 8,288 receipted files;
   - `check_maps.py` and `check_spawns.py`: all OK, unchanged.
 
 ### Cost
 
-The customiser fingerprint covers `customis*.py` and `native_roster.py`, so an
-existing install rebuilds its customiser once after this change (about 75 s on
+The customizer fingerprint covers `customis*.py` and `native_roster.py`, so an
+existing install rebuilds its customizer once after this change (about 75 s on
 this machine). The outputs are identical, so nothing the user can see changes.
-There is no equivalence mechanism for the customiser fingerprint, and the
+There is no equivalence mechanism for the customizer fingerprint, and the
 rebuild is cheap, so none was added.
 
 ## Export speed pass (2026-10-24, USER-ASKS 305)
 
-The user asked for an optimisation pass over the asset extraction scripts: faster, without
+The user asked for an optimization pass over the asset extraction scripts: faster, without
 introducing any new issues into the export process.
 
 **Measured first.** A full fresh setup of the disc (no DLC) into a scratch base on K:, with the native RefPack DLL and
 the dev game exe the launcher's refresh uses, every progress line timestamped (`tools/dev-bench/setup_bench.py`: also
 a sha256 manifest of every installed file). Baseline 228.3 s. The stages before the maps ran one after another: the
 HUD and menu movies 31 s, audio 59 s (of it the bank decode loop 36 s, the ambience beds 10.5 s, the region read
-11 s), the living world 28 s; then maps beside the customiser 61 s, park layouts 17 s, the final validation 18 s.
+11 s), the living world 28 s; then maps beside the customizer 61 s, park layouts 17 s, the final validation 18 s.
 Inside the menu movie export (cProfile): DXT decoding in pure Python 13 s, a pure-Python RefPack 9 s (the vendored UI
 tools' copy, not the setup's native one), PNG zlib 5 s.
 
@@ -185,26 +185,26 @@ tools' copy, not the setup's native one), PNG zlib 5 s.
 - Menu movies: the vendored RefPack uses the setup's native decoder when it is built (`vendor/skate3_ui/refpack.py`,
   as `owned_game/refpack.py` already did); the DXT decoder works on all blocks at once in NumPy with the same integer
   arithmetic (`xenos._decode_dxt`; the old one is `_decode_dxt_reference`, test `test_menu_texture_decode`: 480 random
-  cases over the three formats, odd sizes, three-colour and six-step-alpha blocks, byte-identical).
+  cases over the three formats, odd sizes, three-color and six-step-alpha blocks, byte-identical).
 - The HUD / menu movie stage (its own process; reads only the disc and the stock collections, writes only its folders)
   runs beside character, environment, audio and the living world, joined before validation (`install.py` `hud_job`).
   In-process stages stay one at a time (the audio overlapping the living world is what crashed in NumPy).
 - `install.spawn` holds a lock: the frozen build's `SetDllDirectoryW` switch around a child start is process-wide.
 
-**Result:** 228.3 s to 189.5 s (-17%); everything before the maps 131 s to 75 s. The maps and the customiser
+**Result:** 228.3 s to 189.5 s (-17%); everything before the maps 131 s to 75 s. The maps and the customizer
 (beside them) are now the critical path.
 
 **Identity:** the new export writes the same 18,868 files. Every file that differs from the baseline also differs
 between two runs of the unchanged pipeline (a second baseline): 40 files that are not reproducible run to run
-(map `.skate` files, park layouts and props, the customiser set id in paths, a few HUD / menu manifests that hash
+(map `.skate` files, park layouts and props, the customizer set id in paths, a few HUD / menu manifests that hash
 their temporary sources). The other 18,828 are byte-identical, including all audio and every menu movie texture.
 
 **Second pass (2026-10-24, USER-ASKS 308 / 309):**
 - **One core budget** (the user asked for 75% of the cores, leaving headroom for the user): `setup_budget.cores()` = 75% of
   the CPUs the process may run on (`os.process_cpu_count`), `SKATE_SETUP_CORES` overrides. Every pool derives from it:
-  map jobs up to 3 (half the budget, memory permitting), the customiser's worker processes a quarter (1..8), the
+  map jobs up to 3 (half the budget, memory permitting), the customizer's worker processes a quarter (1..8), the
   threads inside a map job what is left over 3 jobs, audio decodes a quarter (they run beside the maps), archive
-  extraction and receipt hashing up to 8 / 16. On the 28-CPU desktop: budget 21, customiser 5, 5 threads per map job.
+  extraction and receipt hashing up to 8 / 16. On the 28-CPU desktop: budget 21, customizer 5, 5 threads per map job.
 - **The map jobs start right after the core stage** (with the movable-object catalog and the map starts): they read
   only the disc, the starts and the catalog and write only their own files, so they run beside the HUD, environment,
   audio and living world; each map is validated once the validator runs, as before. A failure in a later stage cancels
@@ -215,22 +215,22 @@ their temporary sources). The other 18,828 are byte-identical, including all aud
 - **Archive extraction** (`BigArchive.extract_entries`) checks every entry first, in order, then reads, decompresses
   (native RefPack) and writes on threads; **receipt hashing** (`group_receipts.record`, 19 GB) runs on threads
   (20.7 s of the old run's end).
-- **Result:** 189.5 s to 135.3 s (from the first baseline: 228.3 s, -41%). The maps now finish at 72 s; the customiser
+- **Result:** 189.5 s to 135.3 s (from the first baseline: 228.3 s, -41%). The maps now finish at 72 s; the customizer
   (library 57 s, roster 20 s; it starts once the validator runs, at 50 s) is the critical path, ending at 131 s.
 - **Identity:** the same 18,868 files; the differing ones are the run-to-run set (maps, park layouts, props, the
-  customiser set id, HUD / menu manifests) plus the customiser's `*-complete.json` records, whose `version` is the
-  customiser's pipeline fingerprint (it covers `customisation_workers.py`, changed here) and `timings.json`.
+  customizer set id, HUD / menu manifests) plus the customizer's `*-complete.json` records, whose `version` is the
+  customizer's pipeline fingerprint (it covers `customisation_workers.py`, changed here) and `timings.json`.
 
 **Third pass (2026-10-24, USER-ASKS 312):**
-- **The customiser starts right after the character stage**, as its own process (`stage_job.py customiser`, the same
+- **The customizer starts right after the character stage**, as its own process (`stage_job.py customiser`, the same
   `customiser_setup.prepare`), so its NumPy work never shares a process with the in-process environment and audio
   stages. It needs one more memory slot than beside the maps alone (`overlap_customiser(workers+1)`); without it the
-  customiser starts beside the maps or after them, as before. A failure in a later stage waits for the customiser
+  customizer starts beside the maps or after them, as before. A failure in a later stage waits for the customizer
   process before the stage is cleaned up. `customiser_setup.py` itself is unchanged (every `customis*.py` is in the
-  customiser's fingerprint, so editing it would make every install redo the customiser): `install.py` recognises its
+  customizer's fingerprint, so editing it would make every install redo the customizer): `install.py` recognizes its
   finalize by module.
 - **Result:** 125.2 s / 125.4 s (two runs of the unchanged pipeline, today's machine state) to 94.3 s (-25%). The
-  customiser now runs 6.5 to about 88 s (library 51.4 s, roster 19.6 s, as before) and ends before the final validation;
+  customizer now runs 6.5 to about 88 s (library 51.4 s, roster 19.6 s, as before) and ends before the final validation;
   the stages before the maps take 4 s longer beside it (46.3 to 50.7 s).
 - **Identity:** the same 18,868 files; the 41 files that differ from the first baseline are exactly the 41 that differ
   between the two baselines.
@@ -240,29 +240,29 @@ their temporary sources). The other 18,828 are byte-identical, including all aud
   indicators and park layouts read only the disc, the collections and the packs (whose map BIGs `dlc.load` copied
   whole before the map jobs started; `extract_bigs` keeps a file whose size matches) and write only their own files.
   They run on a thread while the main thread waits on the map jobs and the validator (no NumPy there), joined before
-  the map catalog takes their names and before the kept DLC maps are carried over. Only when the customiser runs as
-  its own process: park layouts use NumPy, so beside the in-process customiser fallback they stay after the maps.
+  the map catalog takes their names and before the kept DLC maps are carried over. Only when the customizer runs as
+  its own process: park layouts use NumPy, so beside the in-process customizer fallback they stay after the maps.
 - **Result:** two runs of the unchanged pipeline 102.6 s / 107.4 s, the change 97.9 s / 96.1 s (about -8 s, -7.6%).
   The post-map exports now run 64 to 80 s, inside the map phase; the maps end later beside them (77 to 84 s) and the
-  customiser's roster (it ends at 92 to 93 s) is the critical path again.
+  customizer's roster (it ends at 92 to 93 s) is the critical path again.
 - **Identity:** the same 18,868 files; the 41 files that differ from the first baseline are exactly the 41 that differ
   between the two baselines. No DLC on the bench machine, so the pack paths were checked by reading only.
 
-**Open:** the run-to-run differences are pre-existing (not caused here); made reproducible 2026-10-29 (below). The customiser is the critical path (library 53 to 58 s, roster 20 to 24 s with 5
-worker processes beside the maps); when the in-process customiser fallback runs (low memory) it shares the process with
+**Open:** the run-to-run differences are pre-existing (not caused here); made reproducible 2026-10-29 (below). The customizer is the critical path (library 53 to 58 s, roster 20 to 24 s with 5
+worker processes beside the maps); when the in-process customizer fallback runs (low memory) it shares the process with
 the post-map exports' NumPy as before this pass. `customisation_workers.customiser_workers`'s docstring still says
-"a quarter" (the budget is in `setup_budget.py`); it is fixed with the next change that touches the customiser, since
-editing any `customis*.py` changes the customiser's fingerprint.
+"a quarter" (the budget is in `setup_budget.py`); it is fixed with the next change that touches the customizer, since
+editing any `customis*.py` changes the customizer's fingerprint.
 
-**Customiser worker count (2026-10-24, USER-ASKS 315, not landed):** the library stage is a texture warm-up on worker
+**Customizer worker count (2026-10-24, USER-ASKS 315, not landed):** the library stage is a texture warm-up on worker
 processes, then one serial loop converting the 480 models; the roster splits over the workers. With
 `SKATE_SETUP_CUSTOMISER_WORKERS` on the unchanged pipeline (28-CPU desktop, default 5): 5 workers 84.7 / 86.3 s, 8
 workers 77.6 s, 10 workers 79.4 s. A default of 40% of the budget (8 here) then measured 86.9 / 81.1 s against 83.7 /
 89.3 s for the unchanged pipeline: within the noise, so it was not landed (output identical in both runs: the 41
-differing files are the run-to-run set). The laptop result is below ("Customiser worker share on two machines"); the library's serial model loop went to
-the workers next (it changes the customiser fingerprint, so every install redoes the customiser once).
+differing files are the run-to-run set). The laptop result is below ("Customizer worker share on two machines"); the library's serial model loop went to
+the workers next (it changes the customizer fingerprint, so every install redoes the customizer once).
 
-**Customiser library over the workers (2026-10-24, USER-ASKS 322):**
+**Customizer library over the workers (2026-10-24, USER-ASKS 322):**
 - **Where the time went** (timing probes in a bench copy only): the GLB conversion of the 480 models was about 12 s
   serial, but the bigger serial part after the texture warm-up was the material loop's derived textures (normal maps,
   roughness maps, diffuses with the alpha mask multiplied in): 10.8 s. The texture decode on the workers (2,921
@@ -275,38 +275,38 @@ the workers next (it changes the customiser fingerprint, so every install redoes
   (and records the error as before), and deletes any derived file its loop did not ask for, so a failure in a worker
   never changes the output. Workers publish through a temporary file and a rename. With one worker (low memory) nothing
   changes.
-- **Result** (28-CPU desktop, 5 customiser workers): library 50.8 / 49.4 / 53.1 s -> 36.5 / 37.4 s (-27%); the roster
+- **Result** (28-CPU desktop, 5 customizer workers): library 50.8 / 49.4 / 53.1 s -> 36.5 / 37.4 s (-27%); the roster
   now ends at 66 to 68 s instead of 77 to 82 s; whole setup 80.9 / 86.1 s (111.3 s cold first run) -> 73.4 / 76.8 s.
 - **Identity:** the same 18,868 files in all five runs; against each baseline the only differing files are the 41 of
   the run-to-run set. Tests: `test_customisation_workers.py` (the warm-up split, the derived-texture plan).
-- **Cost:** the customiser fingerprint changes, so every existing install redoes the customiser once on its next
+- **Cost:** the customizer fingerprint changes, so every existing install redoes the customizer once on its next
   refresh.
 - **Open:** the worker count stays a share of the machine (`setup_budget.customiser_workers`, a quarter of the core
   budget, 1..8; memory scale-with-machine); see the worker share below. The docstring "a quarter" in
   `customisation_workers.py` matches `setup_budget.py` (the note above about it was stale).
 
-**Customiser worker share on two machines (2026-10-24, USER-ASKS 316, 324):**
-- **Laptop** (Ryzen 9 8945HS, 8 cores / 16 threads, 31 GB, NVMe; budget 12, 3 map workers, customiser default 3;
+**Customizer worker share on two machines (2026-10-24, USER-ASKS 316, 324):**
+- **Laptop** (Ryzen 9 8945HS, 8 cores / 16 threads, 31 GB, NVMe; budget 12, 3 map workers, customizer default 3;
   pipeline 5b16a77b, before ddf2231a; laptop run setup-bench-20261024-1325): 30f19a4e -> 5b16a77b
-  178.4 / 180.5 s -> 136.2 / 136.9 s (-24%). Customiser workers 3: 136.2, 136.9, 134.8, 136.3 s; 6: 117.4, 124.7 s
-  (-11%): the maps end at about 103 s and the customiser (roster ends about 131 s) runs on alone with 3 workers
+  178.4 / 180.5 s -> 136.2 / 136.9 s (-24%). Customizer workers 3: 136.2, 136.9, 134.8, 136.3 s; 6: 117.4, 124.7 s
+  (-11%): the maps end at about 103 s and the customizer (roster ends about 131 s) runs on alone with 3 workers
   while 9 cores of the budget are idle. Same 18,868 files; only the 41 run-to-run files differ.
-- **Desktop** (28 threads, budget 21, customiser default 5; pipeline ddf2231a): 5 workers 77.3 / 76.8 s (library
-  36.96 / 36.91 s, customiser ends 68.7 / 68.2 s, maps 72.5 / 71.9 s); 8 workers 78.9 / 79.3 s (library 29.81 /
-  29.77 s, customiser ends 54.8 / 55.4 s, maps 74.0 / 74.1 s). The customiser and the maps already end together at
-  5, so more customiser workers only take threads from the map jobs (`job_threads` is the budget left after the
-  customiser, over 3 jobs). Same files (0 outside the 41-file set).
+- **Desktop** (28 threads, budget 21, customizer default 5; pipeline ddf2231a): 5 workers 77.3 / 76.8 s (library
+  36.96 / 36.91 s, customizer ends 68.7 / 68.2 s, maps 72.5 / 71.9 s); 8 workers 78.9 / 79.3 s (library 29.81 /
+  29.77 s, customizer ends 54.8 / 55.4 s, maps 74.0 / 74.1 s). The customizer and the maps already end together at
+  5, so more customizer workers only take threads from the map jobs (`job_threads` is the budget left after the
+  customizer, over 3 jobs). Same files (0 outside the 41-file set).
 - **Conclusion:** no fixed share fits both (a quarter is right here, half is right on the laptop). What fits both is
-  giving the customiser the cores the maps release once they finish (below).
+  giving the customizer the cores the maps release once they finish (below).
 
-**Machine-aware budget: CPU load at start, customiser takes the maps' cores (2026-10-24, USER-ASKS 324, 325):**
+**Machine-aware budget: CPU load at start, customizer takes the maps' cores (2026-10-24, USER-ASKS 324, 325):**
 - **CPU load** (`setup_budget.measure_load`, called from `install._install`, the path both entry points take):
   setup samples the machine's CPU time for 0.5 s (Windows `GetSystemTimes`, no new package) and fixes the budget for
   the whole setup: 75% of the CPUs minus the ones other programs keep busy, never under a quarter
   (`load_budget`; e.g. 28 CPUs idle: 21, 25% busy: 14). Child processes inherit it as
   `SKATE_SETUP_MEASURED_CORES`; `SKATE_SETUP_CORES` still overrides. The setup log names it: "CPU budget: 20 of 28
   logical CPUs (other programs used 5%)".
-- **Shared customiser pool** (`customisation_workers.run_shared`): the library warm-up (models in batches of 8,
+- **Shared customizer pool** (`customisation_workers.run_shared`): the library warm-up (models in batches of 8,
   textures in 32), the derived textures (32) and the roster (one character per batch) are lists of batches that
   worker processes claim one by one (a file created exclusively per batch), so a worker started later joins the same
   work. It starts `customiser_workers()` (a quarter of the budget); once the map jobs end (`install.py` creates the
@@ -317,9 +317,9 @@ the workers next (it changes the customiser fingerprint, so every install redoes
   batch: models took 25.8 s of worker time instead of 12.3 s).
 - **Desktop** (where the maps already end last, so no gain is expected): 78.1 / 77.2 s before, 78.2 s after (library
   37.0 / 37.1 s before, 37.2 s after). Same 18,868 files; outside the run-to-run set only `sets/<id>/roster-complete.json`
-  differs (it records the customiser fingerprint, which this change alters). No asset group fingerprint changed
-  (`versions.fingerprints` before and after); the customiser's did (one customiser redo per install).
-- **Laptop:** the gain should show there (maps end about 103 s, the customiser ran on alone with 3 workers to about
+  differs (it records the customizer fingerprint, which this change alters). No asset group fingerprint changed
+  (`versions.fingerprints` before and after); the customizer's did (one customizer redo per install).
+- **Laptop:** the gain should show there (maps end about 103 s, the customizer ran on alone with 3 workers to about
   131 s); measured with second-pc-testing.md "Machine-aware budget test".
 - `setup_bench.py` (`.local/perf-bench`, published copy `tools/claude-skills/setup-bench/tools`) now reruns itself in
   a setup venv (`.local/venv-setup` of the checkout or a parent, or `.local/versions/hails-additions`) when the
@@ -332,7 +332,7 @@ the workers next (it changes the customiser fingerprint, so every install redoes
 - **Laptop** (Ryzen 9 8945HS, 8C/16T; second-pc-testing.md "Machine-aware budget test"): 964fb5bc 150.0 / 156.3 s,
   current 145.2 / 141.9 s (-6%); "CPU budget: 11 of 16 (8%)" and "12 of 16 (1%)"; roster 51 s -> 26 / 42 s once it
   takes the maps' cores. Same 18,868 files; before1 vs after1 41 differences, before1 vs before2 40, the extra one
-  `sets/<id>/roster-complete.json` (the customiser fingerprint).
+  `sets/<id>/roster-complete.json` (the customizer fingerprint).
 - The laptop's 964fb5bc (153 s) looked slower than its morning 5b16a77b (137 s), as if the library on the workers
   (ddf2231a) slowed its maps. Not so: the steps before the maps, which run none of that code, took 7.7 to 8.2 s in
   the afternoon against 5.8 s in the morning, so the laptop itself ran about 35% slower. A same-session test of all
@@ -344,7 +344,7 @@ the workers next (it changes the customiser fingerprint, so every install redoes
 |---|---|---|---|---|
 | 5b16a77b | 99.5 / 98.6 | 70.4 / 69.6 | 58.6 / 58.2 | 28.5 / 27.8 |
 | 964fb5bc (library on the workers) | 89.1 / 89.9 | 71.3 / 71.5 | 47.1 / 47.4 | 29.0 / 29.4 |
-| daf26d34 (load budget, customiser grows) | 83.2 / 82.9 | 72.2 / 72.0 | 47.1 / 47.0 | 23.3 / 22.9 |
+| daf26d34 (load budget, customizer grows) | 83.2 / 82.9 | 72.2 / 72.0 | 47.1 / 47.0 | 23.3 / 22.9 |
 
   -16% in all on a laptop-sized budget; the maps end about 2 s later than on 5b16a77b.
 - **Fix:** Python's `os.process_cpu_count()` ignores the CPU affinity on Windows (it said 28 in the pinned process),
@@ -361,7 +361,7 @@ the workers next (it changes the customiser fingerprint, so every install redoes
 
   Same order as the desktop. The machine was not steady: the maps started at 14 to 28 s (9.4 to 10.5 s in the
   morning), and the laptop's ASUS screensaver (rendering on its second screen while it sat idle) used about as much
-  CPU as VS Code. a6ef8401 measured that load ("CPU budget: 11 of 16 (11%)", "10 of 16 (16%)"), so its customiser
+  CPU as VS Code. a6ef8401 measured that load ("CPU budget: 11 of 16 (11%)", "10 of 16 (16%)"), so its customizer
   ran 2 workers instead of 3 beside the maps (library 95 s) and then grew once they ended (roster 23 / 29 s instead
   of 50 s): it gave way to the other program and still finished first. 18,868 files; no worker failures.
 
@@ -370,8 +370,8 @@ the workers next (it changes the customiser fingerprint, so every install redoes
 The stream change touches a file in the shared parser set, changing the
 `character`, `environment` and `maps` fingerprints without changing outputs
 (proven above); old→new pairs are in `pipeline-equivalence.json`. For this
-change the customiser fingerprint and stage versions are unchanged, and an installation built
-from the committed code rebuilds nothing (later passes did change the customiser fingerprint).
+change the customizer fingerprint and stage versions are unchanged, and an installation built
+from the committed code rebuilds nothing (later passes did change the customizer fingerprint).
 
 ## Full setup result
 
@@ -381,18 +381,18 @@ Full fresh setup, same machine and source, before → after:
 |---|---|---|
 | Stock data, HUD, skater, environment | 0–20 s | 0–19 s |
 | Map stage (10 maps, 3 workers, validated) | 21–204 s (183 s) | 19–138 s (**119 s**) |
-| Character customiser | 216–442 s (226 s, after maps) | 19–311 s (292 s, beside maps) |
+| Character customizer | 216–442 s (226 s, after maps) | 19–311 s (292 s, beside maps) |
 | Publish | 442–466 s | 311–331 s |
 
 **Total: 466 s → 331 s (−29%), 0 warnings.**
 
-- Identical outputs: all 8,288 receipted customiser files match a snapshot of
+- Identical outputs: all 8,288 receipted customizer files match a snapshot of
   the previous (sequential) installation, with only the random set id
   differing in 3 JSON paths; all maps pass validation with unchanged
   collision counts and no warnings; all baked spawns unchanged.
-- Contention: overlapped, the customiser's library stage took 193.9 s instead
+- Contention: overlapped, the customizer's library stage took 193.9 s instead
   of 126.5 s alone (three map workers compete for disk and memory bandwidth,
-  boost clocks drop, and the customiser thread shares the GIL with the setup
+  boost clocks drop, and the customizer thread shares the GIL with the setup
   main thread). It is now the critical path; the roster (89.6 s) and library
   were single-threaded loops then (both run on worker processes now: "Export speed pass" above).
 
@@ -450,6 +450,23 @@ Startup splash (Windows): a small window of its own, up from the first moment of
 
 Steps are reported from any thread with [`stage`] (a step: "Loading physics") and [`detail`] (the item being read: "sound bank grind_concrete"). Not retail: retail boots into its own movies; this only covers our engine's start. `SKATE_NO_SPLASH=1` turns it off (scripted runs that want no extra window).
 
+### Asset refresh on the splash (2026-11-12, PR 68 ask 611)
+
+**Problem.** Refresh Game Files restarts the game with `--refresh-assets`; the splash came up and sat on "Reading the settings and the map (N s)" for the whole refresh while setup's own window showed the progress beside it (design b172, `.local/research/b172-splash-asset-refresh.md`).
+
+**Decisions (user, 2026-10-17).** The splash only (setup's window appears only when setup needs the player or fails); a Cancel button that stops setup and starts on the current game files; after a refresh the game starts as before; no launcher entry for now.
+
+**Change.**
+- Setup (`tools/setup.py`): `--progress-file <path>` writes JSON lines (`tools/asset_pipeline/setup_progress.py`, version 1: `start` with the groups, `step`, `item` with done / total, `needs_window`, `error` with the log, `done`; readers ignore unknown kinds), `--no-window` runs a refresh with a reusable source without the tk window; without a reusable source it writes `needs_window` and opens the window as before. The map loop reports its count (`report.progress`) when the reporter has it; plain lambdas get the text as before. The edit sits in `_install_stages`, which the pipeline fingerprints do not hash, so no group rebuilds for it.
+- Game (`crates/skate-game/src/setup.rs` `run_setup`, both the release and the development refresh): spawns setup with the progress file (and `--no-window` when the splash is up), follows it every 100 ms onto the splash (`refresh_mode`: title "UPDATING GAME FILES", the groups under it; steps and items as the step line; a thin progress bar while the count is known; `fail` in the warning color), and logs every line as `SETUP: ...`. Cancel kills setup's process tree (`taskkill /T`), leaves the `--assets` link on the current installation (setup publishes a new installation only at the end) and starts the game; the stale groups stay marked, so the overlay still offers the refresh. A failed setup leaves its message up for 5 s before the error path.
+- Splash input: the window still drags anywhere except over the Cancel button (client area there, `WM_NCHITTEST`).
+
+**Verification.** Python `test_setup_progress` (format, plain-lambda fallback, the windowless path's start / done and error with `setup-error.log`); Rust `setup_progress_lines_become_splash_changes`, `the_progress_file_is_read_line_by_line_without_half_lines`; the ignored `splash::tests::refresh_mode_preview` puts the refresh splash up for 8 s (screenshot checked: title, groups line, bar, step line, error text, Cancel button). Not run yet: a real Refresh Game Files (it rewrites the installation; needs the user's go).
+
+**Setup windows in the project's look (ask 611).** The setup window (`tools/setup.py`) and the updater (`tools/updater.py`) use one tkinter theme, `tools/ui_theme.py`: the splash's palette (near-black background, the gray caps title, bright body text, the maple ply gold for the action button and the progress bar, amber for warnings), Segoe UI, the `clam` ttk base so the colors apply on Windows. Titles read like the splash ("UPDATING GAME FILES", "SET UP SKATE 3 RUST ENGINE", "UPDATES"); the updater's two em dashes in its title and lead went. The updater imports the theme from beside itself first (a script run and PyInstaller's analysis of `tools/updater.py`, whose package has no `--paths` root) and falls back to `tools.ui_theme`. Checked: screenshot of the first-install window; Python tests `test_update*` (22), `test_setup*` (24), `test_versions` (9) pass.
+
+**Open.** Partial staging cleanup after a cancelled refresh (`remove_stale_installations` on the next run, b172 unverified); a packaged `support/skate3setup.exe` older than this change does not know the two flags (it fails at argument parsing), so a development copy with a stale packaged helper needs it rebuilt.
+
 ## Code reference: startup_loading.rs
 
 Detail moved out of the code comments of `crates/skate-game/src/startup_loading.rs`; each comment there links its section here.
@@ -466,14 +483,14 @@ The slowest hold is the native audio runtime's first start (~40 s on an HDD with
 
 **Problem.** The setup / update window showed a long paragraph (asset version list, reuse notes, where to keep the game data) and its button even when nothing had to be picked; the user asked for a less cluttered, better-looking screen.
 
-**Change** (`tools/setup.py`, `tools/asset_pipeline/install.py`; ours, setup is not a retail screen). Title "Updating game files" / "Set up Skate 3 Rust Engine", one lead line (what is converted, or what to pick), one grey note, one status line over a thin progress bar; the file button shows only when a file must be picked, and again after an error; window 700 x 320. The conversion itself is unchanged.
+**Change** (`tools/setup.py`, `tools/asset_pipeline/install.py`; ours, setup is not a retail screen). Title "Updating game files" / "Set up Skate 3 Rust Engine", one lead line (what is converted, or what to pick), one gray note, one status line over a thin progress bar; the file button shows only when a file must be picked, and again after an error; window 700 x 320. The conversion itself is unchanged.
 
 **Verification.** Both layouts (update and first setup) rendered and checked; setup tests unchanged. Not seen by the user in a real refresh yet.
 
 ## Reproducible setup output (2026-10-29)
 
 **Problem.** Two setups of the same pipeline differed in 41 files (map `.skate` files, park layouts, native props, the
-Industrial proxy backdrop, HUD / menu manifests, the session marker, the customisation set), so a bench could only
+Industrial proxy backdrop, HUD / menu manifests, the session marker, the customization set), so a bench could only
 compare a change against a second run's noise.
 
 **Cause.** Absolute paths written into the output: the `.skate` files' `WMET` manifest kept the setup's random temp
@@ -487,7 +504,7 @@ file names; `tools/vendor/skate3_ui/scene_graph.py`: a font definition keeps its
 `tools/extract_session_marker.py`: the source manifest is hashed without the temp folder.
 
 **Verification.** Setup bench, two runs of the unchanged pipeline: 41 differing files; two runs of the fixed one: 8,
-all by design (the customisation set's fresh id in its 7 files, and `maps.json` timings); the file lists are equal.
+all by design (the customization set's fresh id in its 7 files, and `maps.json` timings); the file lists are equal.
 `test_map_writer` and the HUD / menu tests pass. A Refresh Game Files rewrites the maps once (the map writer's
 fingerprint changed).
 
@@ -534,34 +551,34 @@ the audio fingerprint, so existing installs do not redo their audio. `group_rece
 
 **Change.** `asset_pipeline/xiso.py` reads named files straight out of the Xbox 360 image (XDVDFS: the volume
 descriptor 32 sectors into the game partition, binary-tree directories). On a refresh from an ISO, `tools/setup.py`
-calls `asset_pipeline/iso_refresh.py`: it takes only the five files the checks read (`default.xex` and the customiser's
+calls `asset_pipeline/iso_refresh.py`: it takes only the five files the checks read (`default.xex` and the customizer's
 source archives, 637 MB instead of the whole disc's 6.1 GB) into a folder marked `.partial-source`. When
-`install._install_stages` then finds a group to rebuild, or the customiser set is not current for this code and disc,
+`install._install_stages` then finds a group to rebuild, or the customizer set is not current for this code and disc,
 it raises `NeedsFullSource` before writing anything and the refresh runs again with the whole disc, as before. The
-customiser's `prepare()` never runs on a partial source (its optional-content handling could drop the set pointer on a
+customizer's `prepare()` never runs on a partial source (its optional-content handling could drop the set pointer on a
 missing file); when the set is current the partial path does what its success path does. Neither file is in a
 fingerprint; the install.py guard is a local import, so no group fingerprint moves.
 
-**Verification.** The five files read this way are byte-identical to extract-xiso's (the customiser source fingerprint
+**Verification.** The five files read this way are byte-identical to extract-xiso's (the customizer source fingerprint
 and the `default.xex` hash both match the ISO install's records). No-change refresh from the ISO: 14.7 s -> 11.6 s
 warm (the extraction step is 0.8 s instead of 3 s warm and about 33 s cold). Fallbacks, each repaired to the baseline
-hashes: a deleted main-cast take (the guard asks for the whole disc for audio after 4 s), an incomplete customiser set
+hashes: a deleted main-cast take (the guard asks for the whole disc for audio after 4 s), an incomplete customizer set
 (the finish step asks for it). `test_xiso.py`: both partition layouts, letter case, missing paths, a folder asked for
 as a file, a file that is not a disc image.
 
-### Customiser check cost
+### Customizer check cost
 
-**Change.** The customiser stage receipts (`*-complete.json`) record each file's time, and `customiser_cache.stage_valid`
+**Change.** The customizer stage receipts (`*-complete.json`) record each file's time, and `customiser_cache.stage_valid`
 uses `group_receipts.valid_group_receipt` (a file is hashed only when its size or time moved), so a refresh no longer
 hashes the whole 1.9 GB set. Also fixed: a reused stage rewrote its JSON files in text mode, which turned their line
 ends into CRLF on Windows; they are copied as bytes now (only the set path prefix replaced). `customiser_cache.py` is
-part of the customiser fingerprint, so every install redoes its customiser once (27 to 34 s on the desktop, the
-unchanged stages reused); there is no equivalence mechanism for the customiser.
+part of the customizer fingerprint, so every install redoes its customizer once (27 to 34 s on the desktop, the
+unchanged stages reused); there is no equivalence mechanism for the customizer.
 
 **Verification.** No-change refresh 11.6 s -> 9.2 s. The rebuilt set matches the baseline set file by file except the
 known set-id noise, the three other stage receipts (they now hold file times, so they differ between runs like
 `installation.json`) and two JSON files whose CRLF came from the reuse before the fix (equal to the baseline with line
-ends normalised; the fixed reuse copies them byte for byte). A one-byte change to a set texture (same size) was found
+ends normalized; the fixed reuse copies them byte for byte). A one-byte change to a set texture (same size) was found
 and only its stage (the library) was rebuilt, back to the original hash. A full build also leaves the roster stage's
 scratch folder `roster-work/` in the set; a reused stage does not recreate it (nothing reads it).
 
@@ -579,15 +596,15 @@ witness folder first: all 30 witness files byte-identical afterwards, the publis
 Gain: on the desktop's K: drive with a warm cache the copy was only 0.2 s (links 0.005 s); the saving is on hard disks
 (859 MB read and written) and the disk space of a second copy while both installations exist.
 `test_setup_shared_links.MapWriters`: writing a linked `.irradiance` leaves the previous file and passes the shared
-check. Unit tests run: 120 (setup, customiser, maps, versions, living world).
+check. Unit tests run: 120 (setup, customizer, maps, versions, living world).
 
 **Final audit.** A fresh full setup from the ISO with every change of this pass against the pristine baseline: the same
 40727 paths; the only differing files are the known noise set, `session-marker/hud.json` (ISO-run noise, above) and the
-three customiser stage receipts that now hold file times (`catalog-complete.json`, `menu-complete.json`,
+three customizer stage receipts that now hold file times (`catalog-complete.json`, `menu-complete.json`,
 `roster-complete.json`).
 
 **Open.** Measured on the desktop only (laptop numbers to come); the cold-cache ISO extraction is not measured
-separately. Pre-existing, seen during this pass: old customisation sets are never removed (each about 1.9 GB, partly
+separately. Pre-existing, seen during this pass: old customization sets are never removed (each about 1.9 GB, partly
 hard-linked); the maps receipt records only `.skate`, so a damaged `.irradiance` or `.triggers` is not detected; the
 session-marker `hud.json` hashes absolute archive paths (differs between ISO runs).
 
@@ -672,13 +689,13 @@ The native audio runtime's first start (`native::begin_early`, called from `main
 
 - Sound banks and speech look the cache up from the clip's bytes in memory (`cached`, `DecodeCache.key_bytes`, the same key as the files): a hit links the cached WAV straight to its place in the install, without writing the `.snr` / `.sns` inputs, reading them back and renaming.
 
-**Verification.** `tools/asset_pipeline/test_decode_cache.py` (key over header, body and tool; byte keys equal file keys; a hit writes no inputs; a second decode starts a process only for the new clip and gives the same bytes; prune; folder rules). Setup bench on the desktop (K:, NVMe), three runs: the cache off, a fresh setup filling it, and a refresh rebuilding the audio from hits; all three give the same 42,208 files (only the known customisation id / timestamp noise and maps.json differ). The audio decode stage (ambience to announcer): 117 s with the cache off, 21.5 s from hits (76 s from hits before the byte lookup); the whole setup 265 s vs 127 s. A refresh from hits starts no decode process (the music export's own ranges still run).
+**Verification.** `tools/asset_pipeline/test_decode_cache.py` (key over header, body and tool; byte keys equal file keys; a hit writes no inputs; a second decode starts a process only for the new clip and gives the same bytes; prune; folder rules). Setup bench on the desktop (K:, NVMe), three runs: the cache off, a fresh setup filling it, and a refresh rebuilding the audio from hits; all three give the same 42,208 files (only the known customization id / timestamp noise and maps.json differ). The audio decode stage (ambience to announcer): 117 s with the cache off, 21.5 s from hits (76 s from hits before the byte lookup); the whole setup 265 s vs 127 s. A refresh from hits starts no decode process (the music export's own ranges still run).
 
 **Open.** The music export (`music_export.py`) decodes with its own vgmstream ranges (about 4 to 7 s per set on the desktop bench) and packs FLAC banks with the game executable, which dominates; caching the packed banks would need the executable in the key. Not cached.
 
 ## Lower-memory machines (2026-11-11, USER-ASKS 586)
 
-**Problem.** Setup's memory gates (map workers, the customiser beside the maps, its later share) only worked on Windows: `available_memory()` returned None elsewhere and every gate reads None as "no limit". The customiser's starting worker count (a quarter of the cores, up to 8, about 2 GiB each) had no memory gate at all, so a 16-thread machine with 8 GB could start about 8 GiB of customiser workers.
+**Problem.** Setup's memory gates (map workers, the customizer beside the maps, its later share) only worked on Windows: `available_memory()` returned None elsewhere and every gate reads None as "no limit". The customizer's starting worker count (a quarter of the cores, up to 8, about 2 GiB each) had no memory gate at all, so a 16-thread machine with 8 GB could start about 8 GiB of customizer workers.
 
 **Change.**
 - `install.py` `available_memory()`: Linux reads `MemAvailable` from `/proc/meminfo`; macOS sums the free, inactive and purgeable pages from `vm_stat`. Windows stays the smaller of free RAM and the commit headroom.

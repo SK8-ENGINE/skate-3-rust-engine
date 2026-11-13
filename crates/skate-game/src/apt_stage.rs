@@ -145,7 +145,7 @@ impl Bindings<'_> {
                 return Ok(Some(Value::Undefined));
             }
             "setTextFormat" | "setNewTextFormat" => {
-                // TextField.setTextFormat: the format colour becomes the field's text colour (NOT RETAIL YET: AS2 semantics).
+                // TextField.setTextFormat: the format color becomes the field's text color (NOT RETAIL YET: AS2 semantics).
                 if let (Some(Value::Object(format)), Some(level)) = (args.last(), self.level_of(object)) {
                     self.state.levels[level].movie.set_text_format(vm, object, *format)?;
                 }
@@ -245,7 +245,7 @@ impl Bindings<'_> {
     }
     /// Removes a movie loaded into `target`, if any (unload queued like a removal).
     fn unload_into(&mut self, vm: &mut Vm, target: usize) {
-        // A load still queued for this clip is cancelled: a screen opened and closed in one frame (the Challenge Map
+        // A load still queued for this clip is canceled: a screen opened and closed in one frame (the Challenge Map
         // teleport reveals the pause menu and closes it at once) otherwise loaded into the dead holder on the next
         // update and stayed rooted forever (laptop session 2026-10-18: four teleports, then the object budget).
         self.state.loads.retain(|l| l.target != target);
@@ -265,7 +265,7 @@ impl Bindings<'_> {
 
 impl Host for Bindings<'_> {
     fn property_changed(&mut self, vm: &mut Vm, object: usize, key: &str) -> Result<(), String> {
-        // Same as the HUD host: a new text or autosize re-localises and re-measures the field.
+        // Same as the HUD host: a new text or autosize re-localizes and re-measures the field.
         if key.eq_ignore_ascii_case("_x") || key.eq_ignore_ascii_case("_y") {
             if let Some(level) = self.level_of(object) {
                 self.state.levels[level].movie.script_moved.insert(object);
@@ -1198,7 +1198,7 @@ unhandled: {:?}", game.calls, stage.unhandled());
         let types: Vec<String> = game.settings.rows.iter().map(|id| format!("{id}:{:?}", registry.data().setting(id).map(|s| s.widget))).collect();
         assert_eq!(rows, game.settings.rows.len(), "{types:?}");
         let draws = stage.draw(|key, movie| set.scene(key, movie)).unwrap();
-        // Text takes the colour the rows' SetState script sets (`textColor`): the row states' colours appear, not only
+        // Text takes the color the rows' SetState script sets (`textColor`): the row states' colors appear, not only
         // the fields' authored ones (on 0x70BBFF, off 0x385570, selected value 0x37A5FF).
         let script_colours = [0x385570u32, 0x37A5FF];
         let rgb = |d: &crate::apt_scene::Draw| ((d.multiply[0] * 255.).round() as u32) << 16 | ((d.multiply[1] * 255.).round() as u32) << 8 | (d.multiply[2] * 255.).round() as u32;
@@ -1281,8 +1281,8 @@ unhandled: {:?}", game.calls, stage.unhandled());
         assert!(stage.draw(|key, movie| set.scene(key, movie)).is_ok());
     }
 
-    /// Extras (FE 18, template 15): the movie lists its rows through Game.Extras_* (SetState 10), greys the rows the
-    /// host greys, and A on row 0 asks for the cheat code entry. Data-gated (a menu set with main/extras).
+    /// Extras (FE 18, template 15): the movie lists its rows through Game.Extras_* (SetState 10), grays the rows the
+    /// host grays, and A on row 0 asks for the cheat code entry. Data-gated (a menu set with main/extras).
     #[test]
     fn retail_extras_screen_lists_its_rows_and_opens_cheat_entry() {
         let Some(root) = crate::apt_imports::test_menu_set() else {

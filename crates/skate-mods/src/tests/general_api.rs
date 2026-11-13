@@ -316,7 +316,7 @@ fn skyline_waits_for_spawn_receipt_and_reports_failure_without_disabling_mod() {
 }
 
 /// `"enabled_by_default": false` keeps a mod off without a saved preference (dev / test mods),
-/// the manifest default keeps the old behaviour (on), and a saved preference wins.
+/// the manifest default keeps the old behavior (on), and a saved preference wins.
 #[test]
 fn opt_in_mods_start_disabled_without_a_preference() {
     let base = std::env::temp_dir().join(format!("skate-opt-in-{}", std::process::id()));

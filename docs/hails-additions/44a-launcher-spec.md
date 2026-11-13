@@ -88,7 +88,7 @@ Share-Sessions, Save-Result `"<stamp>  <key> <label> [<ver>]\r\n<summary>"` (L:1
 | tool-recomp-update / -getsave | tools | `play-recomp.ps1 -Update` / `-GetSave` | - | - |
 | tool-setup | tools | `setup.ps1 -Install` | - | - |
 
-Recomp/RPCS3 entries come from `config.json` (L:982-994). Grey-out reasons (Entry-Blocked L:1046-1076): missing
+Recomp/RPCS3 entries come from `config.json` (L:982-994). Gray-out reasons (Entry-Blocked L:1046-1076): missing
 setup tools (rust + tool-refresh/build), version source lacks the switch (traceall/statelog/trace via Version-Has
 scanning `crates\skate-game\src\*.rs` for `"<ENV>"`, L:976-989), no `mods_enable`, refresh not supported
 (`--update-game-files` absent), send not set up, share off, no recomp script, recomp exe / bat missing, rpcs3 exe or
@@ -155,7 +155,7 @@ C:69-83). Back pops (or OnBack); empty stack re-pushes Main (C:1072-1076). A tex
 | Screen | Shows / items | Actions | Ref |
 |---|---|---|---|
 | Start splash (checking) | rolling board, logo, stage text; "B twice to skip" after 3 s of self fetch | runs `pending`, then prefetch lists; min 1.1 s | C:531-588, LcdSplash C:2227 |
-| Main "Skate launcher" | Play: <version>; Versions; What to test; Recomp (grey if none); RPCS3 (grey); Tools; Last session; Exit. Two-column grid tiles. Launcher commit next to the wordmark, newer one if any | pushes pages / ShowText / Close | C:605-618, C:1095 |
+| Main "Skate launcher" | Play: <version>; Versions; What to test; Recomp (gray if none); RPCS3 (gray); Tools; Last session; Exit. Two-column grid tiles. Launcher commit next to the wordmark, newer one if any | pushes pages / ShowText / Close | C:605-618, C:1095 |
 | Play (`EntryPage` group rust, 2 cols) | rust entries + Share item; detail panel: NOW SELECTED, READY / NOT AVAILABLE pill, info, records; play prompt | Begin(entry) or LabelPage when ask=1 | C:620-645, LcdInfo C:2134 |
 | Recomp / RPCS3 | entries of group recomp / retail | same | C:620 |
 | Tools | tools entries + Share item + Opt-ins and settings + Open on (monitor) + Set up the launcher + Clear builds | | C:635-640 |
@@ -194,7 +194,7 @@ same args (+`--after-update`), hide, close when the child exits (C:507-529). Sin
 | Left/right in lists | same as up/down (linear step, also in 2-col grids) | C:1079-1080 |
 | Flags | `--snapshot <png> [screen][@0..1][#seed] [WxH]` (screens: main versions tools setup play play-traceall waiting fetching checking job build failed), `--bench <txt> [WxH]` (default 1243x777), `--wear-test <txt> <png>`, `--standby-test <txt> <png>`, `--same-monitor`, `--after-update` (internal), launch options as direct mode | C:2280-2306, C:355-404, R:13-20 |
 
-Open position: 62 % of the work area height, aspect 1240:760, centred on the primary screen, or with
+Open position: 62 % of the work area height, aspect 1240:760, centered on the primary screen, or with
 `--same-monitor` / `open-on-launching-monitor.txt` on the monitor of the foreground window (else under the cursor)
 (C:197-204, C:467-471).
 
@@ -231,14 +231,14 @@ State dir: `<repo>\.local\steam-launcher` when the launcher lives under `<repo>\
 | `PLAY.bat` via `cmd /c` | the version's PLAY script for the OS (check what engine PLAY.sh exists; unverified) or `bin/skate3rust` directly | same |
 | `scripts\Build.ps1 -TargetDirectory` | needs a POSIX build entry (cargo build --locked + post steps); open: Build.ps1 parity | same |
 | process names skate3rust.exe / skate3.exe / rpcs3.exe | `skate3rust`, `rpcs3` (AppImage name varies), recomp: none | `skate3rust`, `rpcs3.app` |
-| Recomp (skate3recomp, Windows build) | grey out ("Windows only"); maybe via Wine later | grey out |
+| Recomp (skate3recomp, Windows build) | gray out ("Windows only"); maybe via Wine later | gray out |
 | RPCS3 | native Linux build (AppImage); same args | native macOS build |
 | winget + UAC installs (Git, VS Build Tools, LLVM, Python 3.13, rustup, gh, Vulkan check) | apt/dnf/pacman via pkexec once; rustup script; Vulkan loader + mesa; `python3.13` not `py -3.13` | brew; Xcode CLT; MoltenVK; no elevation for brew |
 | `cmd /c mklink /J` asset junctions | symlinks (std::os::unix::fs::symlink) | symlinks |
 | CIM query of cargo.exe command line | /proc/<pid>/cmdline (sysinfo crate) | sysinfo crate |
 | taskkill /T /F | kill process group (setsid + killpg) | same |
 | robocopy, Invoke-WebRequest, ZipFile, Get-FileHash | Rust: reqwest/ureq, zip, sha2, fs copy | same |
-| release asset `skate3rust-windows-x64.zip` | needs `-linux-x64` release assets (not published today: grey out prebuilt) | `-macos-*` same |
+| release asset `skate3rust-windows-x64.zip` | needs `-linux-x64` release assets (not published today: gray out prebuilt) | `-macos-*` same |
 | XInput | SDL3 gamepad (already vendored sdl3-sys) | SDL3 |
 | Layered per-pixel-alpha window (UpdateLayeredWindow), drag by caption message | transparent undecorated winit window; X11 needs compositor, Wayland ok; drag via `drag_window()` | transparent works |
 | Named mutex single instance + bring to front | lock file / abstract socket; raise via IPC message | same |
@@ -250,7 +250,7 @@ State dir: `<repo>\.local\steam-launcher` when the launcher lives under `<repo>\
 | `%USERPROFILE%\.cargo\bin` prepend | `$HOME/.cargo/bin` | same |
 | Paths with `\`, `C:\path\to` placeholder | PathBuf; placeholder check per OS | same |
 | self-update copies tools/steam-launcher and rebuilds exe | replace own binary from a release asset per OS, or cargo build; restart-in-place via re-exec | same |
-| share / send / recomp share scripts (`.ps1`) | need pwsh or ports; grey out until ported | same |
+| share / send / recomp share scripts (`.ps1`) | need pwsh or ports; gray out until ported | same |
 
 Hardest: (1) Build.ps1 and PLAY.bat have no POSIX twin in this launcher's flow; (2) transparent shaped window plus
 fold/hide around a fullscreen game on Wayland / Steam Deck; (3) self-update of a compiled Rust binary in place;
@@ -258,8 +258,8 @@ fold/hide around a fullscreen game on Wayland / Steam Deck; (3) self-update of a
 
 ## 6. Camcorder look (repaint in egui)
 
-Unit space 1240 x 760, scaled uniformly and centred (Render C:1251-1265). Panel `PanelR` (20,20,1172,720) radius 34,
-screen `ScreenR` (172,52,990,557) (C:1161). Colours: Plastic 54,56,62; PlasticHi 100,103,112; PlasticDark 24,25,29;
+Unit space 1240 x 760, scaled uniformly and centered (Render C:1251-1265). Panel `PanelR` (20,20,1172,720) radius 34,
+screen `ScreenR` (172,52,990,557) (C:1161). Colors: Plastic 54,56,62; PlasticHi 100,103,112; PlasticDark 24,25,29;
 Print 200,202,208; RecRed 230,40,32 (C:1162-1163); LCD ink 244,246,250, dim 168,178,196, amber hi 255,198,88 / lo
 238,124,12 / mid 255,172,44, green 124,220,96, red 255,98,86 (C:1910-1911).
 
@@ -269,7 +269,7 @@ Print 200,202,208; RecRed 230,40,32 (C:1162-1163); LCD ink 244,246,250, dim 168,
 | Gasket, glass, screen | dark gasket round ScreenR, LCD bitmap drawn into it at `ScreenLevel` brightness | LcdPanel, LcdCanvas C:1916-1953 |
 | Bezel keys | HOME (40,70,110,48), SET (40,372,110,48), POWER (48,588,94,36), DISPLAY (716,640,84,32); T/W rocker, START/STOP, tape keys (PLAY/STOP/REW/FF) along the bottom (coords unverified); key face 92,95,104 -> 44,46,52, hover 132,136,146 -> 70,72,80, label Tahoma 19 bold | HardKey C:1278-1283, LcdPanel |
 | Hinge barrel | rounded cylinder (1186,150,38,460) r16, gradient Dark/Hi/Plastic/Dark at 0/.28/.62/1, groove lines every 70 from y 200 | Hinge C:1285-1291, Cylinder C:1267 |
-| Open / close swing | power-on 1.2 s (`OnTotal`), close 1.3x faster; swing time 0.08+0.6*u(0.85,1.15); BackOut overshoot u(0.2,1.2); screen-on delay with optional flicker (0..2 dips); panel drawn as perspective strips from a cached bitmap while turning | Assembly, Vary, PanelOpen, ScreenLevel C:1192-1216; FlipPanel C:1405, Slice C:1387, PanelShot C:1373; Rust: `swing_panel` in camcorder.rs tessellates the panel's shapes and moves every vertex with the same perspective and darkening (triangles split to 1/32 of the width in place of the 48 strips). Mine, not the classic's (the user asked for it to feel like a camera's flip screen): opening is pulled on a friction hinge (constant acceleration over the first 25 %, steady, braking over the last 30 %, then a 0.8..1.4 % detent click), closing is pushed against the friction, slows near the body and the latch snaps it shut with a 1.8 % rebound (`trapezoid`, `heavy_open`, `heavy_close`); swing 0.08 + 0.8 x u(0.85,1.15) s, power-on 1.65 s; one camera for the turning panel (mine; the classic's eye is on the hinge line with a 0.6 depth factor): the eye in front of the panel's centre, 2.4 panel widths back, so the face recedes towards the middle; the panel is 6 % of its width thick and its hinge-end side faces you on the right of the front face as it turns: the right half of the face outline (both 34-radius corners and the edge) extruded back in the same projection, with front / back shells and a seam, so it meets the top and bottom edges (`hinge_side`); the hinge barrel is drawn again in front of it. Shut is the face edge-on to that eye (pi - atan(4.8), about 102 degrees), so a closed panel shows only its side. `--standby-test <txt> <png>` is ported with the classic checks (lit while up, nothing left of the hinge when folded). The power-on clock starts once the window is on screen and Windows' own open / close animation is off for the window (`window::own_window_shown`, DWMWA_TRANSITIONS_FORCEDISABLED): before, the first part of the swing ran before the window showed. Colour helpers (`rgba`, `mix`, `lerp`) work on unmultiplied channels (Color32 is premultiplied; reading it as unmultiplied applied alpha twice and made the screen sheen and other translucent fills nearly invisible). `SKATE_LAUNCHER_FRAMELOG=<file>` logs every animated frame (clock, open, level). |
+| Open / close swing | power-on 1.2 s (`OnTotal`), close 1.3x faster; swing time 0.08+0.6*u(0.85,1.15); BackOut overshoot u(0.2,1.2); screen-on delay with optional flicker (0..2 dips); panel drawn as perspective strips from a cached bitmap while turning | Assembly, Vary, PanelOpen, ScreenLevel C:1192-1216; FlipPanel C:1405, Slice C:1387, PanelShot C:1373; Rust: `swing_panel` in camcorder.rs tessellates the panel's shapes and moves every vertex with the same perspective and darkening (triangles split to 1/32 of the width in place of the 48 strips). Mine, not the classic's (the user asked for it to feel like a camera's flip screen): opening is pulled on a friction hinge (constant acceleration over the first 25 %, steady, braking over the last 30 %, then a 0.8..1.4 % detent click), closing is pushed against the friction, slows near the body and the latch snaps it shut with a 1.8 % rebound (`trapezoid`, `heavy_open`, `heavy_close`); swing 0.08 + 0.8 x u(0.85,1.15) s, power-on 1.65 s; one camera for the turning panel (mine; the classic's eye is on the hinge line with a 0.6 depth factor): the eye in front of the panel's center, 2.4 panel widths back, so the face recedes towards the middle; the panel is 6 % of its width thick and its hinge-end side faces you on the right of the front face as it turns: the right half of the face outline (both 34-radius corners and the edge) extruded back in the same projection, with front / back shells and a seam, so it meets the top and bottom edges (`hinge_side`); the hinge barrel is drawn again in front of it. Shut is the face edge-on to that eye (pi - atan(4.8), about 102 degrees), so a closed panel shows only its side. `--standby-test <txt> <png>` is ported with the classic checks (lit while up, nothing left of the hinge when folded). The power-on clock starts once the window is on screen and Windows' own open / close animation is off for the window (`window::own_window_shown`, DWMWA_TRANSITIONS_FORCEDISABLED): before, the first part of the swing ran before the window showed. Color helpers (`rgba`, `mix`, `lerp`) work on unmultiplied channels (Color32 is premultiplied; reading it as unmultiplied applied alpha twice and made the screen sheen and other translucent fills nearly invisible). `SKATE_LAUNCHER_FRAMELOG=<file>` logs every animated frame (clock, open, level). |
 | Standby fold / resume | fold with screen lit when a game shows, hide; resume lit and recording | Fold/Resume C:1190-1191, LitFlip C:1367 |
 | LCD scene | dimmed dusk skate spot behind menus; skateboard rolling along the bottom with ollies (speed u(120,190), offset, rhythm u(5.5,8)) | Scene C:1955, LcdBoard C:2071, Board C:1128, Rolling C:1124 |
 | Status row | STBY / REC + glowing dot while a job runs, HDV 1080i badge, tape counter (runs only while recording), glossy battery | LcdStatus C:2014, Badge C:2044, Pill C:2004 |
@@ -297,8 +297,8 @@ cap, progress parser = BuildView), `play.rs` (entries, env per entry, PLAYING.tx
 import), `setup/{windows,linux,macos}.rs` (tool checks + installs), `selfupdate.rs`, `platform/{windows,unix}.rs`
 (process names, kill tree, links, monitor, foreground), `ui/{app,pages,input,camcorder,lcd,wear,sticker}.rs`.
 
-Parity checklist (one line per behaviour):
-- [ ] `entries` prints 9 tab columns per entry in the same order and grey-out texts as L:1287-1300.
+Parity checklist (one line per behavior):
+- [ ] `entries` prints 9 tab columns per entry in the same order and gray-out texts as L:1287-1300.
 - [ ] `versions`, `status`, `notes`, `config-get`, `sizes`, `game-settings`, `setup-check` byte-compatible rows.
 - [ ] Built-ins hails-additions / upstream-main, `builtin_versions`, versions.json overrides by id, default `this` version.
 - [ ] version-next / prev wrap around; version-set writes version.txt.
@@ -317,7 +317,7 @@ Parity checklist (one line per behaviour):
 - [ ] pending: self-update, asset link repair, newest-session detection, missed send, exit 10 semantics.
 - [ ] Self-update: skip while a game runs, `self_update:false`, backup of differing files, restart into new binary with --after-update.
 - [ ] Refresh Game Files: REFRESHING.txt, GAME_FILES line, exit code 2 text.
-- [ ] Import DLC: LIVE/PIRS/CON header, content type 2, title 0x454108E6, name at 0x411, sanitised folder, skip same size, then refresh.
+- [ ] Import DLC: LIVE/PIRS/CON header, content type 2, title 0x454108E6, name at 0x411, sanitized folder, skip same size, then refresh.
 - [ ] Clear builds: sizes, confirmations, refused while playing, GB freed line.
 - [ ] Opt-ins / settings stepping; refused while playing.
 - [ ] Share consent page and on/off; send blocked reasons.
@@ -330,7 +330,7 @@ Parity checklist (one line per behaviour):
 - [ ] Fold/hide when the game window shows, resume with result; power-on / power-off animations; close plays power-off.
 - [ ] Wear and sticker: rolled marks stay on the wear map (`--wear-test` PASS), sticker persisted in camcorder-sticker.txt, stickers\*.png override.
 - [ ] `--snapshot` all screens, `@` and `#` suffixes, `--bench` output.
-- [ ] Linux / macOS: recomp greyed with reason; installs via the OS package manager; symlinks instead of junctions.
+- [ ] Linux / macOS: recomp grayed with reason; installs via the OS package manager; symlinks instead of junctions.
 
 ## Open items
 

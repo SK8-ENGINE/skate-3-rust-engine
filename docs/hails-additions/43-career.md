@@ -20,7 +20,7 @@ in the engine. The challenge work (doc 42) runs own the spot on its own, without
   straight-line), the save layout (b862, checked), team and branding (b870), unlocks (b872), the crossbar and Skate
   Profile feeds (b873 + follow-ups), presentation (b874), achievements (b881), and specs for every challenge family
   (b858 tutorials, b875 films / photos / follow the leader, b876 races / Hall of Meat, b877 contests / turn-based).
-- The M1 design (b887): career logic as an engine-independent module driven by serialisable events, the progression
+- The M1 design (b887): career logic as an engine-independent module driven by serializable events, the progression
   graphs as a data table translated at setup (no Lua runtime), one `career.json` per player profile, unlocks recorded
   but everything left unlocked by default (an earlier decision of the user), and a `sdk.career` mod entry.
 
@@ -237,20 +237,20 @@ defaults, load replay, start). Challenge results that arrive meanwhile wait and 
 - Saved looks (research b983, b988): retail saves teammate looks in their own "CAC" record next to the career
   record, five slots (0 = the player), and a slot with a look is teammate n's spawn gate (b977). Ours:
   `settings/profiles/local/cac.json` (`skate3rust.cac` v1, `crates/skate-data/src/cac_save.rs`), five slots, each
-  `{source: preset {id} | custom | mod {id}, profile}` where `profile` is a customiser profile (the
+  `{source: preset {id} | custom | mod {id}, profile}` where `profile` is a customizer profile (the
   `settings/character.json` form). The player's own look stays in `settings/character.json`. An unreadable slot loads
   empty (retail resets a slot whose read fails); an unreadable file is kept as `cac.json.bad`. Retail parts the
-  customiser does not apply yet (the 13 tint records, stamps) ride along as extra profile keys.
+  customizer does not apply yet (the 13 tint records, stamps) ride along as extra profile keys.
 - Mods: `sdk.career.set_teammate_look(n, profile)` (nil clears), event `career_teammate_look {n, set}`, the snapshot's
   teammates carry `look` (its source). A mod's looks go when the mod stops, so that teammate's gate closes.
 - Teammate presets (research b986, b988, b990, b994; `crates/skate-data/src/teammate_presets.rs`): the leaf rows of
   vault class progression_preset_teammate (`preset00`..`preset09`, ids 0..9, names `ID_TEAMMATE_PRESET_01`..`10`;
   `default` is a parent, so not a preset, 828DA0D8), each naming `data/cacrecipes/SavedRecipe<id>.bin`. Read at career
   load from the installed collections and recipe files (no setup step), off the main thread. A recipe becomes a
-  customiser profile: gender, first asset + material per slot, truck / wheel, the four gestures, the 19 morph floats by
+  customizer profile: gender, first asset + material per slot, truck / wheel, the four gestures, the 19 morph floats by
   the morph table's `target_order` (read from the same collections, b994 / b996), and the 13 tint records and tattoo
-  records kept raw as `retail_tints` / `retail_tattoos` (their customiser mapping is open, b990). The stamp tail is not
-  read yet (units open, b996). Retail lists the presets sorted by localised name; `sorted_by` does that for the list
+  records kept raw as `retail_tints` / `retail_tattoos` (their customizer mapping is open, b990). The stamp tail is not
+  read yet (units open, b996). Retail lists the presets sorted by localized name; `sorted_by` does that for the list
   screen. `CareerState::apply_preset(n, key)` writes the look into slot n with source `preset {id}` (retail 8257DC48 ->
   827D5288). Mods: `sdk.career.set_teammate_preset(n, key)`; the snapshot lists `presets` {key, id, name_text}. A
   preset look is engine-owned and stays when the mod stops.
@@ -260,11 +260,11 @@ defaults, load replay, start). Challenge results that arrive meanwhile wait and 
   with their slot (`teammate_index`, data), `SkaterWorld::eligible` drops them from the pool pick, the pool and a call
   request while the slot is empty, and the population tick takes the filled slots from `SaveSlotLooks`, which the
   career publishes from `cac.json` whenever a look changes (no map reload). A teammate on a line wears its slot's
-  look: `living_world/npc_outfits.rs` assembles the customiser profile from the customiser's parts under one
+  look: `living_world/npc_outfits.rs` assembles the customizer profile from the customizer's parts under one
   container (materials, tattoos, morphs) and binds it to the stock skeleton like any NPC look. Lines, tricks and voice
   come from the rows' own data (AI profile `teammate_default`, voices 100..103).
 - FE 62 (Spawn Skater) lists a teammates group (key 1, `ID_CIC_TEAMMATES`, 82559EB8) after You: each joined teammate
-  whose slot has a look, labelled with its name, for Call Skater. Playing as a teammate (Free Play) is not offered
+  whose slot has a look, labeled with its name, for Call Skater. Playing as a teammate (Free Play) is not offered
   yet: the player model does not wear a slot look.
 - Test hooks for scripted checks: `SKATE_TEAMMATE_PRESET=<n>:<preset key>[,...]` gives teammate n a preset's look at
   career load (saved in `cac.json`); `SKATE_CALL_SKATER=<key>[,...]` calls those skaters once per loaded world as FE 62
@@ -275,7 +275,7 @@ defaults, load replay, start). Challenge results that arrive meanwhile wait and 
   while 0 < v < the member count, else `ID_COMMON_UNKNOWN` (`fe_language::format_typed`, `teammate_text`). Used by
   the anywhere photo / film challenges (argument 1..4).
 - Not in yet: the random start logo and the logo rows (backlog 14), the keyboards that rename (13), mod-added preset
-  rows, the leave fade on outfit looks (the fade drives the stock and ped materials, not the customiser's), and the
+  rows, the leave fade on outfit looks (the fade drives the stock and ped materials, not the customizer's), and the
   PLAYER text type.
 - `career/achievements.rs`: a grant needs an existing, enabled row (class 9CB9012080F727B9: platform id, enabled
   gate) and happens once. Sites: the GrantAchievement op, the GrantAchievement presentation event, and the load replay

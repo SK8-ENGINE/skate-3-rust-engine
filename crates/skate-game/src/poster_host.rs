@@ -37,13 +37,13 @@ pub struct PosterHost {
     pub teammates: Vec<String>,
 }
 
-/// The localised text as a literal (`#` + text): the movies show text natives as is (laptop run 2026-11-07 showed `#`
+/// The localized text as a literal (`#` + text): the movies show text natives as is (laptop run 2026-11-07 showed `#`
 /// + id as the raw id).
 fn text(id: Option<&str>, language: &BTreeMap<String, String>) -> Value {
     Value::Text(id.map(|t| format!("#{}", template(language, t))).unwrap_or_default())
 }
 
-/// A title localised with its argument, printed with "%d" / "%i" first (825C2018 / 8264D130; the substitution itself is
+/// A title localized with its argument, printed with "%d" / "%i" first (825C2018 / 8264D130; the substitution itself is
 /// inferred, b947), or the id for the movie to resolve.
 fn title(t: Option<&Title>, language: &BTreeMap<String, String>, numbers: &NumberFormat) -> Value {
     match t {

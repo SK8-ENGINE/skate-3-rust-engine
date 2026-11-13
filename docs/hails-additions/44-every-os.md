@@ -92,7 +92,7 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   (scratch git repositories, a stand-in build script and play script): worktree, fetch, no rebuild when current,
   fast-forward and rebuild on a new commit, PLAYING.txt during play, the session check finding a panic, the result
   line, DLC import by header. Off Windows: builds are one static binary copied into `bin/`, play runs `PLAY.sh`,
-  PowerShell helpers run through `pwsh` when installed, the performance trace is greyed out. New dependencies:
+  PowerShell helpers run through `pwsh` when installed, the performance trace is grayed out. New dependencies:
   `sha2 =0.10.9`; `zip` and `sysinfo` reuse the locked versions. `config.json` keeps its key order (own ordered JSON
   value, `ojson.rs`). Still open: `pending` and `launcher-exe`, then the window (step 4).
 - 2026-11-10, rest of the backend: `pending` (the start check: self-update, assets links, the session that closed
@@ -104,7 +104,7 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   Versions, Label, Clear builds with a confirmation, Share sessions, First-time setup, Set up the launcher (native
   pickers on every OS: Windows Forms, osascript, zenity / kdialog), the job screen (cargo progress, crate, compiled
   and warning counts, the waiting card, two B presses cancel, the first error), the finished page ("Finished, check
-  this" on a bad result), the previous session at start; the window minimises while a game runs and comes back with
+  this" on a bad result), the previous session at start; the window minimizes while a game runs and comes back with
   the result. `--window <entry> [label] [@version]` is the launch-option mode. Desktop check: the window opens with
   the real state (main menu, the selected version READY, the launcher commit). Next: the camcorder look (doc 41).
 - 2026-11-10, the camcorder look, first pass (`camcorder.rs`, the 1240 x 760 unit space of doc 44a 6): a borderless
@@ -125,17 +125,17 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   marker ink that streaks and shows pores, the panel's top-down light on the marks and the sticker, grain, dirt along
   the lip and the gasket, a faint sheen; scratches as tapered gouges with hairlines; rubbed edges as bare plastic;
   stickers with paper grain, print rubbed thin in patches and dirt at the edge.
-- 2026-11-10, stickers: 30 original skate-culture parody designs (`wear/stickers.rs`) with 4 colour / text
+- 2026-11-10, stickers: 30 original skate-culture parody designs (`wear/stickers.rs`) with 4 color / text
   variations each, and 100 sticker wear patterns (peel side, scuffs, chips, rubbed print) rolled per install
   independently of the design. About half the designs lean on looks and jokes many women skaters pick (a woman
   skater in the filmer's riso style, cherries, band-aid heart, Y2K sparkle, butterfly bearings, evil eye...); a new
   install rolls that set or the rest 50/50. No gender-label stickers. `camcorder-sticker.txt` gains a 7th field (the
   variation); six-field files still load. `--sticker-sheet <png> [design]` renders the designs as clean previews
   (no peel or wear), as the coming Tools sticker picker will.
-- 2026-11-10, window: fixed 1240 x 760 (not resizable, no maximise), centred; snapshots print their image, window
+- 2026-11-10, window: fixed 1240 x 760 (not resizable, no maximize), centered; snapshots print their image, window
   and scale sizes (`SNAPSHOT_SIZE`). One earlier snapshot came out 1440 x 789 while the window was resizable.
 - 2026-11-10, parity pass against the C# window (audit of the doc 44a 7 checklist: 19 lines done, 14 partial, none
-  missing), ported: the window at 62 % of the work area at the panel's shape, centred, on the main monitor or (Tools >
+  missing), ported: the window at 62 % of the work area at the panel's shape, centered, on the main monitor or (Tools >
   Open on, `--same-monitor`) the launching one; one launcher per state folder (a second start brings the first
   forward); the power-on / power-off clock with its rolled swing, wobble and flicker, closing through the power-off,
   the fold before a game and the lit reopen after it; the start check behind the splash (stage line, timer, B twice
@@ -149,7 +149,7 @@ Windows, then Linux and macOS runs, then the Steam shortcuts move over.
   screen by screen against the C# snapshots; the remaining difference is line wrapping (GDI's hinted glyph widths).
 - Next: the Rust launcher's own release binary and self-update, the switchover from SkateLauncher.exe, wear that builds
   with use, the sticker picker in Tools, the stickers folder override, `--wear-test` / `--bench` / `--standby-test`,
-  Linux / macOS grey-outs, more character stickers.
+  Linux / macOS gray-outs, more character stickers.
 
 ### Switching launchers
 
@@ -160,11 +160,11 @@ The new launcher replaces SkateLauncher.exe in place, so Steam shortcuts keep wo
 - The classic launcher's Tools > **Try the new launcher** (`launcher.ps1` `tool-try-new-launcher`): downloads and checks
   it, keeps the classic exe as `SkateLauncher.classic.exe`, puts the new one in as `SkateLauncher.exe`, writes
   `launcher-flavour.txt` (`rust`) and `restart.txt` in the state folder; the classic window restarts into it.
-- While the flavour is `rust`, every update path keeps the new launcher current from the release (the start check,
+- While the flavor is `rust`, every update path keeps the new launcher current from the release (the start check,
   Tools > Update the launcher, build.bat's `launcher-exe`) instead of rebuilding the classic exe; `launcher.ps1`'s
   `Rebuild-LauncherExe` leaves it alone.
 - The new launcher's Tools > **Switch back to the classic launcher** puts the classic exe back (or rebuilds it), removes
-  the flavour file and restarts into it.
+  the flavor file and restarts into it.
 - On Windows the new launcher is a windowed program (no console behind it from Steam); its text commands attach to the
   terminal they were started from, and every program it starts gets CREATE_NO_WINDOW (`proc.rs`).
 
@@ -172,7 +172,7 @@ The new launcher replaces SkateLauncher.exe in place, so Steam shortcuts keep wo
 
 [Doc 44a](44a-launcher-spec.md) (2026-11-10): every backend command and entry with the lines the window parses, every
 screen and how it calls the backend, the inputs and flags, the state folder files and their formats (so the Rust app
-stays compatible), a per-OS table, the camcorder look's geometry, colours, fonts and timings, and a module layout
+stays compatible), a per-OS table, the camcorder look's geometry, colors, fonts and timings, and a module layout
 with a parity checklist of about 35 lines.
 
 Hardest per-OS problems found:
@@ -183,7 +183,7 @@ Hardest per-OS problems found:
 - Self-update and prebuilt versions: only a Windows release zip is published today; Linux and macOS need their own.
 - The backend shells out to PowerShell helpers (send, share, recomp share, `setup-dev-assets.ps1`): these move into
   Rust or get a shell twin.
-- The Skate 3 recomp is a Windows build: greyed out on Linux and macOS (RPCS3 runs on all three).
+- The Skate 3 recomp is a Windows build: grayed out on Linux and macOS (RPCS3 runs on all three).
 
 ## Open
 

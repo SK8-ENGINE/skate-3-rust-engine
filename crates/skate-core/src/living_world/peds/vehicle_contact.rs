@@ -90,7 +90,7 @@ impl VehicleContactParams {
     }
 }
 
-/// A car's collision box, world space: centre, unit forward in xz, half extents (x right,
+/// A car's collision box, world space: center, unit forward in xz, half extents (x right,
 /// y up, z forward).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CarBox {
@@ -112,7 +112,7 @@ pub struct PedCylinder {
 pub struct VehicleContact {
     /// Unit direction (xz) from the car's box towards the ped.
     pub normal: [f32; 2],
-    /// Overlap along `normal`, metres.
+    /// Overlap along `normal`, meters.
     pub depth: f32,
     /// Ped feet position after the push (height kept, as retail keeps the root's y).
     pub pushed: Vec3,
@@ -147,7 +147,7 @@ pub fn detect(car: &CarBox, ped: &PedCylinder) -> Option<VehicleContact> {
         }
         (eu / d, ew / d, ped.radius - d)
     } else {
-        // Centre inside the box: out through the nearest side.
+        // Center inside the box: out through the nearest side.
         let (pu, pw) = (hu - u.abs(), hw - w.abs());
         if pu <= pw {
             (if u < 0.0 { -1.0 } else { 1.0 }, 0.0, pu + ped.radius)

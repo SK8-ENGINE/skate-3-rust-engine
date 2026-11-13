@@ -46,6 +46,7 @@ OBJECTIVES = _field('Objectives')
 FAILURES_WITH_EVENTS = 'Hash_B69AF085F7A6D275'
 PRESENTATION_EVENTS = 'Hash_BD96B775B855E129'
 FAILURE_FIRST = 'Hash_B053106604767956'
+FAILURES_INLINE = 'Hash_40D40861DD9A6CC6'  # FailureObjectives: inline tObjectiveDefinition list (b938 / b940)
 # HintObjectives (82C755B8, research b942): the same row shape as the failure rows.
 HINTS = 'Hash_ECAEB8E619A68AF3'
 DEFINITION = 'Hash_E13D9C326E4D98D5'  # tObjectiveDefinition: completion condition text offset, description offset
@@ -93,8 +94,8 @@ GATES = 'Hash_819849159B9E26AD'
 GATE_VOLUME = 'Hash_013BDB7AF1756799'
 GATE_INDICATOR = 'Hash_B1BF3FF96CC7F6AD'
 # Race gate presentation (research race-gate-indicators.md): the gate's ribbon (tSplineBankObject = a ribbon_indicator
-# RefSpec + a ribbon_spline_colour RefSpec), Time_Bonus, gate audio; the race's skipable flag, minimap icon cap, grey
-# icon and the grey / final / leg finish ribbons (absent rows: the game's retail defaults).
+# RefSpec + a ribbon_spline_colour RefSpec), Time_Bonus, gate audio; the race's skipable flag, minimap icon cap, gray
+# icon and the gray / final / leg finish ribbons (absent rows: the game's retail defaults).
 GATE_RIBBON = 'Hash_E02F0BA9F04FFF16'
 GATE_TIME_BONUS = 'Hash_881D391E8B51AFE5'
 GATE_AUDIO = 'Hash_DC41AFD60FDAD913'
@@ -133,6 +134,21 @@ RESULT_COLUMNS = [_field('ResultsScreenHALIDCol%d' % i) for i in (1, 2, 3)]
 MUSIC_TYPE = 'Hash_44754347A934FDCD'  # eChallengeMusicType (research music-challenges section 6)
 MUSIC_PLAYLIST = 'Hash_874EC914B4D34708'  # the challenge's aud_playlists RefSpec (8248B258; default 614B4D4D82510720)
 ONLINE_COMPETITORS = 'Hash_598056F37D38D27A'
+# Follow the leader (research b875 / b1006): family follow_the_leaders (ChallengeType 0x17), run by objectives_shared.
+FOLLOW = 'follow_the_leaders'
+FTL_END_VOLUME = _field('FTLEndVolume')
+FTL_MAX_DISTANCE = _field('FTLMaxFollowDistance')
+CHALLENGE_BOUNDARY = _field('ChallengeBoundary')
+COUNTDOWN_DELAY = _field('CountdownDelay')
+PREFILM_TIME = _field('PrefilmTime')
+TOTAL_FILM_TIME = _field('TotalFilmTime')
+TIME_BEFORE_REPLAY = _field('TimeToWaitBeforeReplay')
+ALLOW_PLAYER_BAIL = _field('AllowPlayerBail')
+ALLOW_OBJECTIVE_FAILURE = _field('AllowObjectiveFailure')
+ALLOW_SESSION_MARKERS = _field('AllowSessionMarkersToBeSet')
+RESET_AI_ON_BAIL = _field('ResetAILinesOnBail')
+RESET_AI_ON_MARKER = _field('ResetAILinesOnPlayerUseSessionMarker')
+RESET_OBJECTIVES_ON_MARKER = _field('ResetObjectivesOnPlayerUseSessionMarker')
 
 
 def chain(rows, cls, key):
@@ -254,6 +270,22 @@ def objective_rows(rows_by_hash, objectives, binary, binary_of=None):
             entry['points_valid'] = translate(lua_text(source, found[0]))
         failures = inherited_field(rows_by_hash, objective, FAILURES_WITH_EVENTS)
         entry['failures'] = [failure_row(rows_by_hash, ref, binary, binary_of) for ref in refs(failures[0] if failures else None)]
+        # The inline FailureObjectives (b940: checked after the with-events list when none of those fired; empty on
+        # tutorials, the leader distance on follow the leader, b1006 §0.3): condition and failure text per item.
+        inline = inherited_field(rows_by_hash, objective, FAILURES_INLINE)
+        entry['failures_inline'] = []
+        if inline:
+            from .objective_lua import LuaSyntaxError
+            source = (binary_of or (lambda _row: None))(inline[1]) or binary
+            for item in ((inline[0].get('array') or {}).get('items') or []):
+                raw_item = bytes.fromhex(item)
+                text_offset = struct.unpack_from('>I', raw_item, 4)[0] if len(raw_item) >= 8 else 0
+                try:
+                    condition = translate(lua_text(source, {'data': item}))
+                except LuaSyntaxError:
+                    condition = None
+                text = cstring(source, text_offset).decode('utf-8') if text_offset else None
+                entry['failures_inline'].append({'condition': condition, 'text': text or None})
         first = inherited_field(rows_by_hash, objective, FAILURE_FIRST)
         entry['failure_first'] = bool(first and first[0].get('data', '00')[:2] == '01')
         hints = inherited_field(rows_by_hash, objective, HINTS)
@@ -741,10 +773,113 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             challenge_type=_u32(fields.get(CHALLENGE_TYPE)), music_type=num(params, MUSIC_TYPE, 'i32', num(fields, MUSIC_TYPE, 'i32')),
             competitors=competitors(COMPETITORS), rounds=rounds)
 
+    def follow(key, fields, bank_binary):
+        """A follow the leader row (b875 / b1006): the local params over their framework parents, the start (with its
+        slots: the player 0, the leader 1), the end volume the leader and the player race to, the objective groups."""
+        if key not in local:
+            raise ValueError('no local data vault')
+        if key not in hulls:
+            raise ValueError('no hull')
+        _, archive, vlt_entry, bin_entry = local[key]
+        data, binary = read_vault(archive, vlt_entry, bin_entry, 'local')
+        own_row = next((r for r in data['collections'] if r['class'] == PARAMS and key_hash(r['key']) == hash64(key)), None)
+        if own_row is None:
+            raise ValueError('no params row')
+        p, seen, parent = dict(own_row['fields']), set(), own_row['parent']
+        while parent and key_hash(parent) not in seen and key_hash(parent) in framework:
+            seen.add(key_hash(parent))
+            parent, more = framework[key_hash(parent)]
+            for name, value in more.items():
+                p.setdefault(name, value)
+        folder = work / 'hulls' / MISSIONS / key
+        if not folder.is_dir():
+            hulls[key][0].extract_entries(hulls[key][1], work / 'hulls')
+        world = int((fields.get(WORLD) or {}).get('data', '0' * 16)[:16], 16)
+        district = next((d for d, _ in global_locators() if hash64(d) == world), None)
+
+        def raw(name):
+            return bytes.fromhex(((p.get(name) or fields.get(name)) or {}).get('data') or '')
+
+        def f32(name, default=None):
+            b = raw(name)
+            return round(struct.unpack('>f', b[:4])[0], 6) if len(b) >= 4 else default
+
+        def flag(name, default=False):
+            b = raw(name)
+            return b[0] != 0 if b else default
+
+        def number(name, default=None):
+            """A float field, or an int field (whole values read as a tiny float are taken as the int)."""
+            b = raw(name)
+            if len(b) < 4:
+                return default
+            value = struct.unpack('>f', b[:4])[0]
+            return struct.unpack('>i', b[:4])[0] if 0 < abs(value) < 1e-30 else round(value, 6)
+
+        def trigger(name):
+            b = raw(name)
+            if not b:
+                return None
+            try:
+                _, volume_name, instance = parse_trigger(b, binary)
+            except (ValueError, struct.error, IndexError):
+                return None
+            shape = volume_of(folder, instance)
+            return dict(name=volume_name, id='%016x' % instance, volume=shape) if shape else None
+
+        start_raw = raw(START)
+        if not start_raw:
+            raise ValueError('no StartLocation')
+        start_name = cstring(binary, struct.unpack('>I', start_raw[:4])[0]).decode('utf-8')
+        starts = [r['matrix'] for _, _, arena in stream_arenas(folder) for r in location_records(arena) if r['locator'] == start_name]
+        if not starts and district:
+            starts = global_locators().get((district.casefold(), start_name), [])
+        if len({json.dumps(m) for m in starts}) != 1:
+            raise ValueError(f'start locator {start_name}: {len(starts)} records')
+        slots = next((s for _, _, arena in stream_arenas(folder) for s in [locator_slots(arena, start_name)] if s), [])
+        paths = raw(ROUND_PATHS)
+        names = [n for n in (cstring(binary, o).decode('utf-8') if o else '' for o in (struct.unpack_from('>200I', paths, 0) if len(paths) >= 0x328 else ())) if n]
+        competitors = []
+        for item in ((fields.get(COMPETITORS) or {}).get('array') or {}).get('items') or []:
+            offset, kind = struct.unpack_from('>II', bytes.fromhex(item), 0)
+            competitors.append(dict(character=cstring(bank_binary, offset).decode('utf-8'), kind=kind))
+        location = location_field(fields)
+        sign_up = None
+        if location:
+            location_name = cstring(bank_binary, int(location['data'], 16)).decode('utf-8')
+            places = global_locators().get((district.casefold(), location_name), []) if district else []
+            if not places:
+                places = [r['matrix'] for _, _, arena in stream_arenas(folder) for r in location_records(arena) if r['locator'] == location_name]
+            if len({json.dumps(m) for m in places}) == 1:
+                sign_up = dict(locator=location_name, matrix=places[0])
+        title_id = (fields.get(TITLE) or {}).get('data') or None
+        return dict(
+            id=key, family=FOLLOW, map=label_of(district) if district else None, district=district,
+            title_id=title_id, title=text.get(title_id) if title_id else None,
+            description_id=(fields.get(DESCRIPTION) or {}).get('data') or None,
+            challenge_type=_u32(fields.get(CHALLENGE_TYPE)), location=sign_up,
+            sign_up_radius=radius(fields, SIGN_UP_RADIUS), discovery_radius=radius(fields, DISCOVERY_RADIUS),
+            start=dict(locator=start_name, matrix=starts[0], slots=slots),
+            end_volume=trigger(FTL_END_VOLUME), boundary=trigger(CHALLENGE_BOUNDARY),
+            max_follow_distance=number(FTL_MAX_DISTANCE),
+            countdown_delay=f32(COUNTDOWN_DELAY), prefilm_time=f32(PREFILM_TIME), total_film_time=f32(TOTAL_FILM_TIME),
+            time_before_replay=f32(TIME_BEFORE_REPLAY), out_of_bounds_time=number(OUT_OF_BOUNDS_TIME),
+            owned_display_time=f32(OWNED_TIME), killed_display_time=f32(KILLED_TIME),
+            allow_player_bail=flag(ALLOW_PLAYER_BAIL, True), allow_objective_failure=flag(ALLOW_OBJECTIVE_FAILURE),
+            allow_session_markers=flag(ALLOW_SESSION_MARKERS), reset_ai_on_bail=flag(RESET_AI_ON_BAIL, True),
+            reset_ai_on_marker=flag(RESET_AI_ON_MARKER, True), reset_objectives_on_marker=flag(RESET_OBJECTIVES_ON_MARKER),
+            spawn_offboard=flag(SPAWN_OFFBOARD),
+            intro=decoded_events(p.get(PRESENTATION['intro']), binary, bank_binary),
+            ai_paths=dict(names=names, all_paths=struct.unpack_from('>I', paths, 0x320)[0] == 1 if len(paths) >= 0x328 else True,
+                          param=struct.unpack_from('>I', paths, 0x324)[0] if len(paths) >= 0x328 else 0),
+            competitors=competitors,
+            objectives=dict(owned=objective_programs(rows_by_hash, fields.get(OWNED), bank_binary, binary_of),
+                            killed=objective_programs(rows_by_hash, fields.get(KILLED), bank_binary, binary_of)))
+
     class_of = lambda name: 'Hash_%016X' % hash64(name)
     ribbon_names = {hash64(k): k for (c, k) in rows if c in (class_of('ribbon_indicator'), class_of('ribbon_spline_colour'))}
     icon_names = {hash64(k): k for (c, k) in rows if c == class_of('fe_map_icons')}
-    result, tutorials, races, contests, skipped = [], [], [], [], []
+    result, tutorials, races, contests, follows, skipped = [], [], [], [], [], []
     for (cls, key), (parent, _) in sorted(rows.items()):
         if cls != CHALLENGE or key.endswith('_ol'):
             continue
@@ -765,6 +900,12 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
         if RACES in walked[1:]:
             try:
                 races.append(race(key, fields, origin[cls, key][1]))
+            except (KeyError, ValueError, StopIteration, struct.error) as error:
+                skipped.append(f'{key} ({error})')
+            continue
+        if FOLLOW in walked[1:]:
+            try:
+                follows.append(follow(key, fields, origin[cls, key][1]))
             except (KeyError, ValueError, StopIteration, struct.error) as error:
                 skipped.append(f'{key} ({error})')
             continue
@@ -848,8 +989,9 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'format': FORMAT, 'version': VERSION, 'challenges': result, 'tutorials': tutorials,
-                                  'own_the_lots': lots, 'races': races, 'contests': contests}, indent=1), encoding='utf-8')
+                                  'own_the_lots': lots, 'races': races, 'contests': contests, 'follow_the_leaders': follows},
+                                 indent=1), encoding='utf-8')
     report(f'Challenges: {len(result)} ({", ".join(FAMILIES)}) on {len({c["map"] for c in result})} maps, '
-           f'{len(tutorials)} tutorials, {len(lots)} own the lots, {len(races)} races'
+           f'{len(tutorials)} tutorials, {len(lots)} own the lots, {len(races)} races, {len(follows)} follow the leader'
            + (f'; left out: {", ".join(skipped)}' if skipped else ''))
     return result

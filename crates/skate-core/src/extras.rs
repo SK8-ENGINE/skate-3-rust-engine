@@ -38,7 +38,7 @@ pub struct ExtrasRow {
     pub id: String,
     pub label: String,
     pub action: ExtrasAction,
-    /// Greyed (not ported, or redeemed).
+    /// Grayed (not ported, or redeemed).
     pub greyed: bool,
 }
 
@@ -72,14 +72,14 @@ impl Default for ExtrasRules {
                     false,
                 ),
                 // FE 25 (template 30 `extras/credits.swf`, b489): the retail credits plus mods' sections. WIP 2026-10-22,
-                // greyed: the screen opens and its 979 lines load, but the movie's text fields do not draw yet and the
+                // grayed: the screen opens and its 979 lines load, but the movie's text fields do not draw yet and the
                 // Back label's inline button tag is not laid out (b491).
                 row("extras.credits", "ID_EXTRA_CREDITS", ExtrasAction::PushScreen("credits".into()), true),
-                // Ours: this project's licenses in the text viewer FE 3 (b322). WIP, greyed for now (user 2026-10-19:
-                // "skip it and grey it out for now"; "mark it as WIP and we can come back to it"). Left to check: the
+                // Ours: this project's licenses in the text viewer FE 3 (b322). WIP, grayed for now (user 2026-10-19:
+                // "skip it and gray it out for now"; "mark it as WIP and we can come back to it"). Left to check: the
                 // long licenses text with the raised VM budget (retail_text_viewer_shows_the_licenses).
                 row("extras.licenses", "ID_EXTRA_LICENSES", ExtrasAction::TextViewer { title: "ID_EXTRA_LICENSES_TITLE".into(), body: "licenses".into() }, true),
-                // FE 24 (video player) and the reel videos are not ported: greyed.
+                // FE 24 (video player) and the reel videos are not ported: grayed.
                 row("extras.skate_reel", "ID_SKATE_REEL_VIDEOS", ExtrasAction::SkateReel, true),
             ],
             list_state: 10,
@@ -139,7 +139,7 @@ impl Extras {
         rules.rows.get(row).is_some_and(|r| !r.greyed)
     }
 
-    /// OnMenuSelect (0x826558E8): the row's action (None for a greyed or missing row).
+    /// OnMenuSelect (0x826558E8): the row's action (None for a grayed or missing row).
     pub fn select(&mut self, rules: &ExtrasRules, row: usize) -> Option<ExtrasAction> {
         let r = rules.rows.get(row).filter(|r| !r.greyed)?;
         if r.action == ExtrasAction::SkateReel {

@@ -1,16 +1,16 @@
 ---
-name: optimisation
-description: Make engine code faster WITHOUT changing behaviour - measure first, prove output is identical, and put every change through adversarial review before it lands. Use for any performance work (stutter, frame time, audio/physics/render cost, load times), and for further passes over the native audio.
+name: optimization
+description: Make engine code faster WITHOUT changing behavior - measure first, prove output is identical, and put every change through adversarial review before it lands. Use for any performance work (stutter, frame time, audio/physics/render cost, load times), and for further passes over the native audio.
 ---
 
-# Optimisation
+# Optimization
 
-Built from the native-audio optimisation passes of upstream PR #32 (merged): the tools, baselines,
+Built from the native-audio optimization passes of upstream PR #32 (merged): the tools, baselines,
 proofs, pitfalls and the review checklist that worked there. Helper scripts are in `tools/` next to this file
-(installed under `<repo>/.claude/skills/optimisation/tools/`; the shell scripts find the repo root from there).
+(installed under `<repo>/.claude/skills/optimization/tools/`; the shell scripts find the repo root from there).
 
 ## Rules (binding)
-- **Optimise only with proof of identical behaviour** (skill `regression-check` section 3b). Byte-identical output
+- **Optimize only with proof of identical behavior** (skill `regression-check` section 3b). Byte-identical output
   is the bar. A tolerance needs an explicit reason and the project owner's OK. Never reassociate floats, never swap
   `mul_add` for `a * b + c` (or the reverse), never change the order of RNG draws.
 - **Measure first, then change.** No change without a baseline number for the thing it should improve, measured the
@@ -25,7 +25,7 @@ proofs, pitfalls and the review checklist that worked there. Helper scripts are 
 
 ## Process
 1. **Reproduce and measure in real play.** Read the `AUDIO_TIMING` lines (`SKATE_AUDIO_TIMING=1`, one line per second
-   in `logs\game-*.stderr.log`: `name=max/avg us x count`). Summarise per system (per-second max median / p90 /
+   in `logs\game-*.stderr.log`: `name=max/avg us x count`). Summarize per system (per-second max median / p90 /
    worst, average, calls per second) with `tools/audio_timing_summary.py LOG...`. Correlate spikes with the log lines
    around them (for example `AUDIO_EMITTER start ... (native)`).
 2. **Reproduce headless and repeatably.** `tools/e2e_bench.sh LABEL [row|fps300]`: the e2e scenarios plus whole
@@ -54,7 +54,7 @@ proofs, pitfalls and the review checklist that worked there. Helper scripts are 
 - `e2e_bench.sh LABEL [MODE...]`: builds into `.local/opt-target`, its own target dir, so it never waits on or
   invalidates the main build. Renders scen + real in `row` (one host call per 60 Hz row) and `fpsN` (the game's
   host at N fps, console MixMap cadence) modes. Writes `.local/audio-re/opt/runs/LABEL/<set>-<mode>/{timing.txt,
-  hashes.txt}`. `LABEL=base` keeps the `.f32` renders (large); other labels delete them unless `KEEP=1`. Honours
+  hashes.txt}`. `LABEL=base` keeps the `.f32` renders (large); other labels delete them unless `KEEP=1`. Honors
   `CARGO_TARGET_DIR` / `RUSTFLAGS` for experiments.
 - `compare_runs.sh BASE NEW`: hash identity per set and mode, then `timing_summary.py`.
 - `timing_summary.py RUN...`: pools `*.ours.timing.tsv` (written by the e2e harness when `E2E_TIMING=1`) and prints

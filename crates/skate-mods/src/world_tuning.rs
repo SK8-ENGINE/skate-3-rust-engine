@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub const DOMAINS: [&str; 11] = ["living_world", "props", "carry", "shadows", "backdrop", "respawn", "exposure", "ghost", "decals", "video_screens", "prop_sounds"];
+pub const DOMAINS: [&str; 12] = ["living_world", "props", "carry", "shadows", "backdrop", "respawn", "exposure", "ghost", "decals", "video_screens", "prop_sounds", "vehicles"];
 
 /// Longest skater fade-in after a placement a mod may set (s).
 pub const MAX_GHOST_FADE_IN_SECONDS: f32 = 60.0;
@@ -116,7 +116,7 @@ pub struct LivingWorldPatch {
     pub npc_line_controller: Option<NpcLineControllerPatch>,
     /// The simulated NPC skaters' path follower: line end trigger and lost tests.
     pub skater_path: Option<SkaterPathPatch>,
-    /// The ped behaviour runtime (stock ped AI graph on each ped's brain).
+    /// The ped behavior runtime (stock ped AI graph on each ped's brain).
     pub ped_brain: Option<PedBrainPatch>,
     /// Traffic horn values per driver record (`default`, `driver_fast`, `driver_normal`, `driver_reckless`,
     /// `driver_taxi`, or `all`, applied first).
@@ -263,7 +263,7 @@ impl NpcAvoidPatch {
     }
 }
 
-/// Ped behaviour runtime fields (0..=100 each) and retail values: docs/hails-additions/26a-living-world-overview.md#ped-behaviour-fields
+/// Ped behavior runtime fields (0..=100 each) and retail values: docs/hails-additions/26a-living-world-overview.md#ped-behavior-fields
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PedBrainPatch {
@@ -449,7 +449,7 @@ pub struct PedNavPatch {
     pub stuck_seconds: Option<f32>,
     pub give_up_seconds: Option<f32>,
     pub yield_patience: Option<f32>,
-    /// How far an unreachable wander / route target may move to the nearest reachable navmesh point (metres).
+    /// How far an unreachable wander / route target may move to the nearest reachable navmesh point (meters).
     pub rewrite_range: Option<f32>,
     pub crosswalk: Option<String>,
 }
@@ -473,7 +473,7 @@ pub struct PedBodyPatch {
     pub proxy_mass: Option<f32>,
 }
 
-/// One capsule between two rig bones: centred at `centre` (0 = `from`, 1 = `to`), along `from -> to`; m / kg.
+/// One capsule between two rig bones: centered at `centre` (0 = `from`, 1 = `to`), along `from -> to`; m / kg.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PedBodyPartPatch {
@@ -649,7 +649,7 @@ pub struct CarryPatch {
     pub grab_bit: Option<u32>,
     /// Bit whose rising edge toggles placement (retail 20, B).
     pub placement_bit: Option<u32>,
-    /// Pickup reach in metres to the prop's surface (engine default 2.0).
+    /// Pickup reach in meters to the prop's surface (engine default 2.0).
     pub grab_range: Option<f32>,
     /// Move Object speed pushing forward, m/s at full stick (engine default 1.4).
     pub push_speed: Option<f32>,
@@ -659,7 +659,7 @@ pub struct CarryPatch {
     pub side_speed: Option<f32>,
     /// Move Object turn, rad/s at full right stick X (engine default 1.6).
     pub turn_rate: Option<f32>,
-    /// Gap in metres between the grab edge and the skater (engine default 0.35).
+    /// Gap in meters between the grab edge and the skater (engine default 0.35).
     pub grip_reach: Option<f32>,
     /// Linear command clamp (retail 20).
     pub linear_clamp: Option<f32>,
@@ -684,7 +684,7 @@ pub struct CarryPatch {
     pub mass_speed: Option<[[f32; 8]; 2]>,
     /// Curve yaw inertia -> yaw gain.
     pub inertia_yaw_gain: Option<[[f32; 8]; 2]>,
-    /// Metres the skater may fall behind its grab point before letting go (engine rule for mods; default 0 = off, retail lets go by record qualification).
+    /// Meters the skater may fall behind its grab point before letting go (engine rule for mods; default 0 = off, retail lets go by record qualification).
     pub let_go_distance: Option<f32>,
     /// Grabbing a prop drops a carried board (retail true, 82D442D0 -> LetGoOfSkateboard 82D75440).
     pub drop_board: Option<bool>,
@@ -716,7 +716,7 @@ pub struct CarryPatch {
     pub commanded_material: Option<[f32; 2]>,
     /// Upright test on the prop's up axis y for the upright free pair (retail 0.65, 82C54B00; -1..1).
     pub upright_cos: Option<f32>,
-    /// Linear command at the centre of mass (retail true; false = at the grip point, lever torque).
+    /// Linear command at the center of mass (retail true; false = at the grip point, lever torque).
     pub apply_at_com: Option<bool>,
     /// Yaw command replaces the prop's angular accumulator (retail true; false = added).
     pub yaw_replaces_torque: Option<bool>,
@@ -784,6 +784,37 @@ pub struct BackdropPatch {
     pub visible: Option<bool>,
     /// Draw the unpaired far-proxy terrain cells (retail true).
     pub proxy_terrain: Option<bool>,
+}
+
+/// Traffic cars (ask 611): which cars the census spawns and what they look like. Names are the export's stable ones
+/// (`vehicles.json`: census categories, entities, `livingworld_models` records). Empty = retail.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VehiclesPatch {
+    /// New entity -> the existing entity it starts as (its spec, follower values, colors and size).
+    #[serde(default)]
+    pub entities: BTreeMap<String, String>,
+    /// Census category -> the entities it spawns, in pick order (replaces the category's list; `[]` spawns none).
+    #[serde(default)]
+    pub spawn_tables: BTreeMap<String, Vec<String>>,
+    /// Entity -> the `livingworld_models` record it draws.
+    #[serde(default)]
+    pub models: BTreeMap<String, String>,
+    /// Model record -> a GLB asset path drawn instead of the export's.
+    #[serde(default)]
+    pub glbs: BTreeMap<String, String>,
+    /// Scale on both tint colors (retail 1).
+    pub paint_gain: Option<f32>,
+}
+
+impl VehiclesPatch {
+    fn validate(&self) -> bool {
+        let named = |s: &String| !s.is_empty() && s.len() <= 128;
+        self.paint_gain.is_none_or(|g| g.is_finite() && (0.0..=8.0).contains(&g))
+            && self.entities.iter().all(|(k, v)| named(k) && named(v) && k != v)
+            && self.spawn_tables.iter().all(|(k, v)| named(k) && v.len() <= 256 && v.iter().all(named))
+            && self.models.iter().chain(&self.glbs).all(|(k, v)| named(k) && named(v))
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -943,6 +974,19 @@ impl Merge for PedNavPatch {
 impl Merge for PedObstaclesPatch {
     fn merge(&mut self, b: &Self) {
         merge_opts!(self, b; enabled, min_half_extent, moving_speed, recut_fraction, detour_margin, target_snap, step_height, held_is_obstacle, moving_solid, skaters, skater_half_extents, contact_slide, contact_slide_dot, avoid_horizon, avoid_ray_scale, avoid_accel, avoid_scale, avoid_head_on_dot, avoid_crossing_dot, avoider_extent, avoider_extent_tail, path_turn_accel, path_turn_full_deg, path_turn_boost_deg, path_turn_boost_rate, path_turn_boost_max, path_turn_max_deg, path_turn_radius, controller_step, contact_slow_fraction, contact_max_speed, brake_decel, brake_goal_radius, brake_body_radius, brake_away_fraction);
+    }
+}
+impl Merge for VehiclesPatch {
+    fn merge(&mut self, b: &Self) {
+        for (mine, later) in [(&mut self.entities, &b.entities), (&mut self.models, &b.models), (&mut self.glbs, &b.glbs)] {
+            for (k, v) in later {
+                mine.entry(k.clone()).or_insert_with(|| v.clone());
+            }
+        }
+        for (k, v) in &b.spawn_tables {
+            self.spawn_tables.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+        merge_opts!(self, b; paint_gain);
     }
 }
 impl Merge for PedVehicleContactPatch {
@@ -1492,6 +1536,7 @@ pub enum Patch {
     Decals(DecalsPatch),
     VideoScreens(VideoScreensPatch),
     PropSounds(PropSoundsPatch),
+    Vehicles(VehiclesPatch),
 }
 
 /// Parse and validate a patch for `domain` (`None` = unknown domain, unknown field or bad value).
@@ -1508,6 +1553,7 @@ pub fn parse(domain: &str, patch: &Value) -> Option<Patch> {
         "decals" => Patch::Decals(serde_json::from_value(patch.clone()).ok()?),
         "video_screens" => Patch::VideoScreens(serde_json::from_value(patch.clone()).ok()?),
         "prop_sounds" => Patch::PropSounds(serde_json::from_value(patch.clone()).ok()?),
+        "vehicles" => Patch::Vehicles(serde_json::from_value(patch.clone()).ok()?),
         _ => return None,
     };
     let ok = match &p {
@@ -1522,6 +1568,7 @@ pub fn parse(domain: &str, patch: &Value) -> Option<Patch> {
         Patch::Decals(p) => p.validate(),
         Patch::VideoScreens(p) => p.validate(),
         Patch::PropSounds(p) => p.validate(),
+        Patch::Vehicles(p) => p.validate(),
     };
     ok.then_some(p)
 }
@@ -1547,6 +1594,10 @@ mod tests {
         assert!(!valid_patch("living_world", &json!({"npc_grind_disttocog": 1.5})));
         assert!(valid_patch("props", &json!({"default": {"push_transfer": 0.5}, "by_template": {"bench01": {"collision_box": {"center": [0, 0.4, 0], "half_extents": [1, 0.4, 0.3]}}}})));
         assert!(valid_patch("carry", &json!({"grab_bit": 21, "grab_range": 3.5})));
+        assert!(valid_patch("vehicles", &json!({"entities": {"my_cab": "taxi01"}, "spawn_tables": {"taxis": ["my_cab"], "sports": []}, "models": {"my_cab": "vehicle_taxi01"}, "glbs": {"vehicle_taxi01": "mods/x/cab.glb"}, "paint_gain": 1.5})));
+        assert!(!valid_patch("vehicles", &json!({"entities": {"a": "a"}})));
+        assert!(!valid_patch("vehicles", &json!({"paint_gain": -1.0})));
+        assert!(!valid_patch("vehicles", &json!({"routes": {}})));
         // The NPC skaters' obstacle avoider.
         assert!(valid_patch("living_world", &json!({"npc_avoid": {"enabled": false, "speed_margin": 2.0, "radius_pedestrian": 12.0, "cone": 1.0, "max_entries": 8}})));
         assert!(!valid_patch("living_world", &json!({"npc_avoid": {"cone": 4.0}})));

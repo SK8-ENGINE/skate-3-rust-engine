@@ -18,7 +18,7 @@ when the player picks one. So the baked spawn must be right for every map.
 
 `tools/asset_pipeline/map_writer.py` (`SpawnSelector`) chose, for every
 district except University, the **upward-wound collision triangle nearest the
-world origin** and spawned 1 m above its centre. Two properties of the retail
+world origin** and spawned 1 m above its center. Two properties of the retail
 data defeat that:
 
 1. Skate-park origins sit at a corner of the park, not its middle.
@@ -40,14 +40,14 @@ locators (below). The converter never read them.
 ## Intermediate attempt (kept as a fallback)
 
 A geometric `ground_spawn()` was added first: ignore winding, search outward
-from the area-weighted centre of flat surfaces, and accept a point that is
+from the area-weighted center of flat surfaces, and accept a point that is
 the lowest surface at its XZ, has ≥ 2.5 m headroom, and has no flat surface
 within 25 m (by triangle extent) more than 1 m lower.
 
 **Regression found in play:** applied to city maps, the search starts from the
-area-weighted centre of the whole district. For Industrial (a port) that point
-is out in the harbour: the spawn became (−864.7, −3.0, 414.1), on a 1,604 m²
-collision-only floor at y −4.0 with nothing above it (likely the harbour bed)
+area-weighted center of the whole district. For Industrial (a port) that point
+is out in the harbor: the spawn became (−864.7, −3.0, 414.1), on a 1,604 m²
+collision-only floor at y −4.0 with nothing above it (likely the harbor bed)
 and no visible geometry nearby, so the world looked invisible while collision
 held the player up. (An earlier version of this note said "under the streets";
 collision analysis at that point showed otherwise.) The streaming map validator

@@ -39,6 +39,31 @@ pub fn shaped_speed(speed: f32, shape: f32, factor: f32, t: &BandTuning) -> f32 
     speed + t.shape_gain * speed * shape + t.band_gain * speed * factor
 }
 
+/// The follower band's distance ramp (8246F300, b969: follow the leader's leader); data per challenge, a mod can
+/// replace it or switch it off (SwitchOffFollowerRubberBanding's equivalent: `None` at the host).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FollowerBand {
+    pub near: f32,
+    pub far: f32,
+}
+
+impl Default for FollowerBand {
+    fn default() -> Self {
+        Self { near: 5.0, far: 15.0 }
+    }
+}
+
+/// The follower band factor: the AI's distance to the player ramps `|factor|` from 0 at `near` to 1 at `far`; the sign
+/// comes from the AI's facing: the player behind it slows it, the player ahead of it speeds it up [inferred: b969
+/// leaves the sign open]. Feed it to `shaped_speed` as the band factor.
+pub fn follower_band(ai: [f32; 3], ai_forward: [f32; 3], player: [f32; 3], b: &FollowerBand) -> f32 {
+    let to = [player[0] - ai[0], player[1] - ai[1], player[2] - ai[2]];
+    let distance = (to[0] * to[0] + to[1] * to[1] + to[2] * to[2]).sqrt();
+    let magnitude = ((distance - b.near) / (b.far - b.near).max(f32::EPSILON)).clamp(0.0, 1.0);
+    let dot = to[0] * ai_forward[0] + to[1] * ai_forward[1] + to[2] * ai_forward[2];
+    if dot < 0.0 { -magnitude } else { magnitude }
+}
+
 /// Most racers a race holds, the player included (race_shared asserts it).
 pub const MAX_COMPETITORS: usize = 6;
 
@@ -115,6 +140,18 @@ pub fn line_allowed_on_leg(line_flags: u32, leg: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_follower_band_ramps_from_five_to_fifteen_meters_and_slows_a_leader_the_player_trails() {
+        let b = FollowerBand::default();
+        let band = |player: [f32; 3]| follower_band([0.0; 3], [0.0, 0.0, 1.0], player, &b);
+        assert_eq!(band([0.0, 0.0, -4.0]), 0.0, "inside the near distance");
+        assert!((band([0.0, 0.0, -10.0]) + 0.5).abs() < 1e-6, "half way, player behind: slower");
+        assert_eq!(band([0.0, 0.0, -30.0]), -1.0);
+        assert_eq!(band([0.0, 0.0, 30.0]), 1.0, "player ahead: faster");
+        let t = BandTuning::default();
+        assert!((shaped_speed(1.0, 0.0, -1.0, &t) - 0.875).abs() < 1e-6, "+-12.5 %");
+    }
 
     #[test]
     fn the_band_slows_a_racer_ahead_and_speeds_one_behind_between_two_and_five_seconds() {

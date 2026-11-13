@@ -18,10 +18,10 @@ could not be steered. This change ports that step; NPCs still use the replay tie
   the ground wipeout check `82D8F9E0`, then, while record flag bit 31 is set, the board path `82C05EC0`:
   - bit 30, position `82C056B0`: `d = (target - deck) * gain`; the deck (part 6 alone, `82D9C8C8` -> `82BD4318`,
     waking a frozen body with `82ADF7B8`) moves by `min(|d|, max_step)` along `d` when `|d| > 1e-6`
-    (`0x830BD350`, initialised to 1e-6 by `82F826F8`);
+    (`0x830BD350`, initialized to 1e-6 by `82F826F8`);
   - bit 28, velocity `82C05868`: the deck body's linear velocity approaches the target velocity the same way;
   - bit 29, facing `82C05988`: the target forward in the ground frame (`controller+292` -> `+752`), y dropped,
-    normalised, its signed angle from +Z about +Y (`8296EC98`) wrapped to [-pi, pi], times the gain, clamped to the
+    normalized, its signed angle from +Z about +Y (`8296EC98`) wrapped to [-pi, pi], times the gain, clamped to the
     maximum (degrees, `0x8206D110` = pi/180); the deck rotation becomes `D * F^T * Ry * F` and the whole board is set
     (`82C0B2C8`).
 - Gains: the `physics_ai` vault record (`*(*(0x830CFDA4)+272)+4`, holder `8289D5C8` -> `8289D2E8`, class
@@ -58,7 +58,7 @@ untouched; without bit 31 nothing runs.
 ## NPC skater trick choice (M5 port, 2026-10-08)
 
 **Problem.** The replay tier always did the trick recorded on the line. Retail's ambient NPC skaters do not: in
-their default behaviour an ollie or flip slot is re-picked from the character's AI profile, so the same line shows
+their default behavior an ollie or flip slot is re-picked from the character's AI profile, so the same line shows
 different flips from different skaters and from one pass to the next. Not play-tested yet.
 
 **What retail does** [code, TU3; read in the recomp disassembly, reference only]:
@@ -68,7 +68,7 @@ different flips from different skaters and from one pass to the next. Not play-t
 - A higher chain level (heelflip2 / 3 / 4, kickflip2 / 3 / 4 and the nollie forms: table +8 base is another trick and
   not the ollie 128) takes no action: the base trick already running covers it. The late flips have the ollie as
   base and are not chain levels.
-- Behaviour mode (behaviour context +60; `sub_824733A0` creates the ambient behaviour with mode 1):
+- Behavior mode (behavior context +60; `sub_824733A0` creates the ambient behavior with mode 1):
   - 0: the recorded trick. `sub_82469FA8` walks the next start nodes within 120 frames whose trick's previous level
     (+4) is the current id, but it assigns that previous level each time, which is the id it already holds, so it
     always returns the recorded trick (an earlier research note read this as "takes the highest level"; the code
@@ -82,7 +82,7 @@ different flips from different skaters and from one pass to the next. Not play-t
   `addze` = signed `frames > 50`). The window end or the line end passes.
 - Pick `sub_82469A28` -> `sub_8245FE58`: the nollie table (runtime profile +8) when the recorded trick's name
   starts with `n` / `N` (`sub_82469048`), else the regular table (+0). `u = rand32 / 2^32`; walk the 8-byte entries
-  (weight, trick) adding weights (normalised to sum 1 at load, `sub_824720C8`) and take the first with `u < sum`,
+  (weight, trick) adding weights (normalized to sum 1 at load, `sub_824720C8`) and take the first with `u < sum`,
   else entry 0. `sub_82469A28` also keeps the recorded trick when the trick's attribute record has no family entries
   in the per-category list. That check always passes: `sub_82DA1BF0` puts every record into its category's list
   (it skips only a missing record) and all 105 ollie / flip ids have a record (research b187 [code + data]; main
@@ -253,7 +253,7 @@ Aggregation `sub_82464FA8`: highest floor, lowest cap; an entry without one inva
 without a cap stops (cap 0); a floor more than 5.0 above the own speed is dropped. Targets: the earliest blocking
 entry along the path, the skitch target with a 60-tick cooldown (`sub_824650A0`, `sub_82465198`), free gaps of the
 path (`sub_82461DC8`). Mode `sub_82465578`: 4 skitch (`GrabWorld` signal), 3 steer when the path is split (the gap
-nearest the skater's lateral position, its centre, `sub_82465280`; the target moves that far across the path,
+nearest the skater's lateral position, its center, `sub_82465280`; the target moves that far across the path,
 `sub_82464E30`, controller `+933`), 1 speed up to the floor, else 2 slow to the cap; low props (under 0.8 m) give 6
 when contact is within 1 s, a stop in front of a prop gives 7 within 1.5 s. The speed shape (`sub_82470830`) floors
 (mode 1) or caps (mode 2) the AI record speed.
@@ -395,7 +395,7 @@ the line's end; mode 6 enters sub-mode 4, which skips the speed shape (replay an
 simulated skater's trick dispatch.
 
 **NOT RETAIL YET.** Mode 7 is wired for simulated skaters only (section below). The replay tier keeps its recorded
-tricks in sub-mode 4. The chooser's mode-7 gates `S+71` and `+6007` are not modelled.
+tricks in sub-mode 4. The chooser's mode-7 gates `S+71` and `+6007` are not modeled.
 
 **Verification.** skate-core `ai_controller` (4) and `ai_signals` tests; skate-game npc / living_world 80 pass. Not
 play-tested.
@@ -535,10 +535,10 @@ re-checked every address below in the recomp):
   boardslides have an empty list. Intent names: the executable's enum table (0x82FCB260, 146 names).
 - **The takeoff board yaw** (`sub_8246B1F8`): on the takeoff edge, d = heading(recorded board forward) -
   heading(recorded skater forward) of the node the jump lands on (corrected 2026-11-01, see [below](#board-yaw-reads-the-landing-node)), where `sub_8296EC98(v, +Z, +Y)` is the acos of the
-  normalised dot with +Z, made `2 pi -` it when `cross(v, +Z) . +Y < 0` (so `atan2(-v.x, v.z)` in [0, 2 pi); 0 for a
+  normalized dot with +Z, made `2 pi -` it when `cross(v, +Z) . +Y < 0` (so `atan2(-v.x, v.z)` in [0, 2 pi); 0 for a
   zero vector; node matrix row 2 = the quaternion applied to +Z, `sub_82453970`). d is wrapped to [-pi, pi], folded
   to [-pi/2, pi/2] (nose and tail on the same line); above 0.31416 rad (18 deg) `BoardAdjustAngle` = +-pi/2 by the
-  sign of d and `BoardAdjustMag` = |d| x 2/pi (`0x822F8B7C`, 0.63662: 90 deg = 1.0, the full FLAT clip; not clamped; we used 6.0606 from the neighbouring `0x822F8C7C` until 2026-11-02, research b801). The air arm (`sub_8246B358` -> `sub_82471008`) posts
+  sign of d and `BoardAdjustMag` = |d| x 2/pi (`0x822F8B7C`, 0.63662: 90 deg = 1.0, the full FLAT clip; not clamped; we used 6.0606 from the neighboring `0x822F8C7C` until 2026-11-02, research b801). The air arm (`sub_8246B358` -> `sub_82471008`) posts
   them every airborne tick, after the yaw steer; with a manual anticipated ahead it posts -2.677 (nosemanual) / 0.257
   instead, magnitude |0.5|. This was the open sign: decoded, no guess left.
 
@@ -554,7 +554,7 @@ the placement hold skip it; low props clear the slot). Logs: `NPC_SKATER_SIM_SLO
 
 **Moddability.** The schedules are the scorable records' data (a content override of `scoring_trick` changes them);
 `npc_simulated {board_yaw, board_yaw_dead_zone, board_yaw_mag_scale}`; the profile byte comes from
-`skater_profiles.json`. Slot and yaw are plain data on the NPC (serialisable, deterministic, no RNG).
+`skater_profiles.json`. Slot and yaw are plain data on the NPC (serializable, deterministic, no RNG).
 
 **Verification.** Unit tests in `ai_signals.rs` (grind slot and schedule until the end node, schedule windows and
 category arms, revert keys and the profile gate, the heading against `atan2(-x, z)`, the fold and dead zone, a
@@ -852,7 +852,7 @@ keyed by the NPC skater's stable id.
   GroundTrick / AirTrick with no trick clip and the puppet fell back to `G_5050_FS_LOW_0_CYC` (a 50-50 grind pose) on
   the ground or `IA_IDLE_LO_N_0_CYC` in the air.
 - **Change:** a recorded trick the choice dropped opens no span; the record (`chosen -1`) is still logged and mirrored.
-  A START_TRICK node without a trick slot keeps its old behaviour (open below).
+  A START_TRICK node without a trick slot keeps its old behavior (open below).
 - **Tests:** `a_dropped_slot_opens_no_trick_span` (skate-core npc_tricks tests); skate-core living_world 341 pass.
   Not play-tested.
 - **Open (b187):** whether retail's AI jump follows the recorded trajectory (`82D682E8` / `82D67A00`): a swapped trick's
@@ -896,7 +896,7 @@ keyed by the NPC skater's stable id.
 - **Why `Bumped` lasts the whole clip (b195, b196 [code]):** retail (`82C14810` / `82C14978`) and ours
   (`selection.rs:126-154`) only take a transition whose target has an enabled, active leaf; every active leaf under
   `Riding.Turning.Push` needs a `RightPush` / `LeftPush` intent, which an AI skater does not hold, so `Bumped` runs to
-  its `WillExpire 0.1` exits in both. A pushing player leaves at once. Retail behaviour; no change.
+  its `WillExpire 0.1` exits in both. A pushing player leaves at once. Retail behavior; no change.
 
 ## Simulated NPC skaters steer by the effective deck after a flip (2026-10-17)
 
@@ -1096,7 +1096,7 @@ Change: `npc_simulated.radius` defaults to `f32::MAX` (`npc_sim.rs`), so the han
 the "too far" wait never fire; a new skater starts on node 0 and switches to physics on its first safe node, as
 retail places an AI skater on a node with the spawn push. A finite radius (mod key, 0 to 500 m) stays a mod's cost
 choice; `max` stays 3. The tier itself stays opt-in (`SKATE_NPC_SIM=1` / the living world NPC physics choice) until
-play-tested. Cost: the per-NPC solve dominates (a local research note); speed-ups only behaviour-identical.
+play-tested. Cost: the per-NPC solve dominates (a local research note); speed-ups only behavior-identical.
 
 Test: `living_world_npc_sim_has_no_default_distance_limit` (npc_tests). skate-game unit tests 814 passed. Not
 play-tested; frame time with three far skaters simulated not measured yet.
@@ -1134,7 +1134,7 @@ times. Malformed lines 0. (The push logs the board, not the actor, so the pushed
 every actor evaluated in the window read false.)
 Result: retail does not read Bumped after the spawn push, which is the outcome our pre-fill gives; kept, now pinned by
 `a_spawn_push_with_a_prefilled_history_does_not_read_as_bumped` (skate-core `physics/tests/board_ground.rs`). No
-engine behaviour change. The hooks go to the recomp fork's research-hooks branch in the commit window.
+engine behavior change. The hooks go to the recomp fork's research-hooks branch in the commit window.
 
 ## NPC skater hitches of ~200 ms: a failed first step dropped a pooled body (2026-10-19)
 
@@ -1192,7 +1192,7 @@ plans fail at the same spots (nodes 69 and 36).
   grid that stops once no farther ring can be nearer; ties to the lower polygon index. The navmesh path service uses
   `locate(from)` first (unchanged on the mesh) and this search when it fails. New setting
   `ControllerBSettings::start_locate_radius` (default `f32::MAX` = retail; a mod can cap it, 0.5 = the old
-  behaviour); `PathService::solve` takes it. The peds' `NavRules` (0.5 / 4.0) are unchanged.
+  behavior); `PathService::solve` takes it. The peds' `NavRules` (0.5 / 4.0) are unchanged.
 - **Files:** `crates/skate-core/src/living_world/peds/nav.rs` (`locate_start_nearest`, `closest_point`),
   `crates/skate-core/src/living_world/controller_b.rs` (setting, trait, navmesh service).
 - **Tests:** `walk_back_start_snaps_from_an_obstacle_cut` (a start 2 m inside a 4 x 4 m cut and 2.8 m up snaps to the
@@ -1376,9 +1376,9 @@ Which trick an NPC skater does at a recorded trick slot (doc 26, "NPC skater tri
 
 Retail (TU3, evidence only; re-implemented, nothing copied): the PathController's dispatcher `sub_8246A2E0` runs on every start-trick node (event 1) the skater passes. Ollie and flip slots (table820862A8 category 1 / 2) go to `sub_8246A080`; every other category (grinds, grabs, manuals, slides, reverts, plants) does the recorded trick.
 - A higher chain level (heelflip2 and up) takes no action: the base trick already running covers it.
-- Behaviour mode (behaviour context +60): 0 = the recorded trick (`sub_82469FA8` walks the chain within 120 frames but only ever keeps the recorded id: it assigns each matched node's previous level, which is the id it already has); 1 = the default (`sub_824733A0` creates the ambient behaviour with it): when the gate passes, a weighted pick from the character's profile table, else the recorded trick; 2 = a scripted list (not ported yet); 3 and up = no trick.
+- Behavior mode (behavior context +60): 0 = the recorded trick (`sub_82469FA8` walks the chain within 120 frames but only ever keeps the recorded id: it assigns each matched node's previous level, which is the id it already has); 1 = the default (`sub_824733A0` creates the ambient behavior with it): when the gate passes, a weighted pick from the character's profile table, else the recorded trick; 2 = a scripted list (not ported yet); 3 and up = no trick.
 - Gate `sub_82469C60`: walk forward from the slot summing the nodes' frames until 300; a start node first passes only when it is an ollie / flip whose previous level is the recorded trick; a landing (airborne seen, then a node without it) passes only when the next node is not a start node and more than 50 frames passed (the landing node's frames included); the end of the window or the line passes.
-- Pick `sub_82469A28` -> `sub_8245FE58`: the nollie table (profile +8) when the recorded trick's name starts with `n` / `N` (`sub_82469048`), else the regular table (profile +0); `u = rand32 / 2^32`; walk the weights (normalised to sum 1 at load, `sub_824720C8`) and take the first entry with `u < sum`, else entry 0.
+- Pick `sub_82469A28` -> `sub_8245FE58`: the nollie table (profile +8) when the recorded trick's name starts with `n` / `N` (`sub_82469048`), else the regular table (profile +0); `u = rand32 / 2^32`; walk the weights (normalized to sum 1 at load, `sub_824720C8`) and take the first entry with `u < sum`, else entry 0.
 
 Not retail yet / determinism choice: retail draws `rand32` from the skater's random source (skater vfunc +36) in tick order. Here the draw is `derive(seed, [line, node, frame])`: the same distribution, but a pure function of the NPC's seed and the slot, so the choice does not depend on how many other draws came first and a client could check it. `sub_82469A28` also keeps the recorded trick when its trick attribute record has no family entries; the per-category lists are built from every record (`sub_82DA1BF0`) and all 105 ollie / flip ids have one, so the check always passes [code + data, research b187].
 
@@ -1458,7 +1458,7 @@ NOT RETAIL YET: the 4.5 m lost test after a line-end re-pick, the node-change ha
 
 ### Line end trigger
 
-Retail [code, TU3, research b694, re-read b701 2026-10-30; constants dumped]: controller A's tick (`8246D560`) runs the line end test `8246D3C0` before the projection. The nearest forward node becomes the search node at once. On the path the line end starts when last tick's B is past the second-last segment, or on it with t above 0.8 (`0x8208824C`; B is `pc+0x2C0` / `+0x2C4`, not A as b701 labelled it: research b729, checked the loads in `8246D3C0` and `8246E3B8`); off the path when the nearest node is the last. A line end chains (`8246C7F8`) and then tests lost at 4.5 m (`0x821DDA68`) in the same call, from the chained-to node or, when nothing chained, the old search node; otherwise a search that stayed on its node tests lost at 6.0 m (`0x8208F74C`).
+Retail [code, TU3, research b694, re-read b701 2026-10-30; constants dumped]: controller A's tick (`8246D560`) runs the line end test `8246D3C0` before the projection. The nearest forward node becomes the search node at once. On the path the line end starts when last tick's B is past the second-last segment, or on it with t above 0.8 (`0x8208824C`; B is `pc+0x2C0` / `+0x2C4`, not A as b701 labeled it: research b729, checked the loads in `8246D3C0` and `8246E3B8`); off the path when the nearest node is the last. A line end chains (`8246C7F8`) and then tests lost at 4.5 m (`0x821DDA68`) in the same call, from the chained-to node or, when nothing chained, the old search node; otherwise a search that stayed on its node tests lost at 6.0 m (`0x8208F74C`).
 
 Ours (stage 1 of the line end port, 2026-10-30): `PathFollow::search` (the test; true at the line end), `PathFollow::line_end_lost` (4.5 m) and `PathFollow::project` (the projection); `PathFollow::tick` runs all three for a skater that never chains. The simulated NPC runs the 4.5 m test after the cursor chained at the last node or when the search reports a line end; key `PathTuning::line_end_t` (0.8). Stage 2 (2026-10-30): `choose_next_line` searches from the simulated skater's body point (`BodyGate::point`, `82467FC8`; the replay tier from its last node), and the mode 1 fallback (`82458968`, b701 R10) takes the nearest invalid start when it is no farther than the nearest valid one and that one is at least `fallback_valid_d2` (36, 6 m) away, else the nearest valid one, else the nearest invalid one; a hit needs a valid line within the radius. A simulated cursor with nothing to chain to holds on its last node (no `Finished`) and searches again every tick as retail does (b118); the advance loop stops when a step makes no progress. Retail has no leave fade at a held line end (research b702), so a held simulated skater stays until a population cull.
 
@@ -1517,7 +1517,7 @@ Detail moved out of the code comments of `crates/skate-core/src/riding/grounded/
 Retail (TU3, evidence only; re-implemented): `UpdatePostPhysics 82D387A8` runs the ground wipeout check `82D8F9E0`, then, while record flag bit 31 ("steer to target", Processed `1776`) is set, `82C05EC0(controller, physics_ai)`:
 - bit 30: position `82C056B0`: `d = (target - deck) * gain`, the deck translation moves by `min(|d|, max_step)` along `d` (only when `|d| > 1e-6`), set on part 6 alone (`82D9C8C8` -> `82BD4318`);
 - bit 28: velocity `82C05868`: the deck body's linear velocity moves toward the target the same way (`gain`, `max_change`);
-- bit 29: facing `82C05988`: the target forward in the ground frame (`controller+292` -> `+752`) with y = 0 and normalised, its signed angle from +Z about +Y (`8296EC98`) wrapped to [-pi, pi], times `gain`, clamped to `max_degrees` (deg -> rad by `0x8206D110`); the deck rotation becomes `D * F^T * Ry(step) * F` about its own position and the whole board is set (`82C0B2C8`).
+- bit 29: facing `82C05988`: the target forward in the ground frame (`controller+292` -> `+752`) with y = 0 and normalized, its signed angle from +Z about +Y (`8296EC98`) wrapped to [-pi, pi], times `gain`, clamped to `max_degrees` (deg -> rad by `0x8206D110`); the deck rotation becomes `D * F^T * Ry(step) * F` about its own position and the whole board is set (`82C0B2C8`).
 
 The gains are the `physics_ai` vault record (`*(*(0x830CFDA4)+272)+4`, class `527C93F55CFC663D`; `default` record values below). The player never has the record: its Processed `1776` stays clear, so this never runs for it.
 
@@ -1575,7 +1575,7 @@ nodes back) are in research b523; the retail checks it proposes are open.
 
 - **Lateral ratio (`pc+868`, `sub_8246CCC8`, asm-checked):** retail divides the distance to A by the NARROWEST
   same-side lane width of A and the next 4 nodes; the lane flag (`pc+932`) still compares with A's own width. Ours
-  divided by A's width only, so where the lane narrows within 4 nodes our skater still counted as "centred" (ground
+  divided by A's width only, so where the lane narrows within 4 nodes our skater still counted as "centered" (ground
   steer aiming at the far look-ahead) while retail already blends toward the near point. Change: `path_follow.rs`
   (`PathTuning::lane_lookahead`, default 4). Test `the_lateral_ratio_uses_the_narrowest_width_ahead`.
 - **Steep re-snap scan (`sub_8246D168`, asm-checked):** retail tests "node lower than the search node" before the
@@ -1602,7 +1602,7 @@ nodes back) are in research b523; the retail checks it proposes are open.
   Both flipped together. Tests: `steer_point_puts_each_width_on_its_own_side`, the gap test now expects the left gap
   at +x. Not ported: b527's finer box-corner rules in `sub_82462448` and the zero-width case of the steer point.
 - **Lost test direction (`sub_82468DD8` / `sub_82454648`):** the lane edge points come from node n's own step,
-  normalised in 3D (ours took the next node's step, normalised flat). The side was already retail's. Test
+  normalized in 3D (ours took the next node's step, normalized flat). The side was already retail's. Test
   `the_lost_test_uses_the_nodes_own_direction`.
 - Not play-tested.
 ## The record's lane flags as retail: NPC skaters steer back onto their line (2026-10-25, USER-ASKS 345, research b600 to b602)
@@ -1616,8 +1616,8 @@ rejected and they landed off the line.
 
 Cause [code, both sides]: retail's per-tick update `sub_8246FA30` calls the ground steer `sub_8246AA00` and then the
 record builder `sub_8246DB50` in the same tick (recomp `skate3_recomp.8.cpp` 56672 / 56973). `sub_8246AA00` stores
-`pc+944` = inside the lane (`pc+932`) and lateral (`pc+868`) under 0.6 (centred) and `pc+945` = not avoid-steering
-(`pc+933`), trick category not 9, not centred and distance (`pc+828`) over 0.4 m (rejoining) (`8.cpp` 44225-44275).
+`pc+944` = inside the lane (`pc+932`) and lateral (`pc+868`) under 0.6 (centered) and `pc+945` = not avoid-steering
+(`pc+933`), trick category not 9, not centered and distance (`pc+828`) over 0.4 m (rejoining) (`8.cpp` 44225-44275).
 `sub_8246DE38` reads both for the record bits (above: B needs `pc+945` clear, C needs `pc+944` clear): while rejoining
 the board path's velocity and facing pulls are off and the ground steer turns the skater back. Ours never set either
 byte (`npc_sim.rs` set only `byte_933`), so all pulls ran on every on-path tick and held the skater parallel to the
@@ -1629,7 +1629,7 @@ Change: `ground_steer::lane_flags` (the two flags; `heading_error` uses it too, 
 existing `GroundSteerTuning` data (`lane_centre`, `rejoin_start`). Category 9 is still not mapped (as the ground steer,
 b121 open).
 
-Test: `ground_steer::tests::lane_flags_mark_centred_and_rejoining_as_retail` (centred, 1.5 m off, 0.3 m off,
+Test: `ground_steer::tests::lane_flags_mark_centred_and_rejoining_as_retail` (centered, 1.5 m off, 0.3 m off,
 avoiding, category 9); the record bits from the flags: the `ai_record` tests.
 Open (b602): the speed loss is partly inferred (the skid between the full-stick steer and the pulls); the avoid point
 written back into the steer's far aim (`sub_82464E30`, `pc+352`) and the low prop rule are smaller parity items; the
@@ -1642,7 +1642,7 @@ landing loss of skater #7 at node 26. Not play-tested.
   `82464E30(avoider, &far, A + 15)`, then `8246AA00` steers at the moved point. Before the steer target's path point
   the far point shifts by `lateral` x the lane width on that side (`82454798`); past it the anchor is the target's path
   point, or A + 15 once that is past the target too (`8245A100`). Widths on the result are 0. `82454798` with a zero
-  width shifts `lateral` metres on the unit side.
+  width shifts `lateral` meters on the unit side.
 - Change: `avoid::avoid_aim` + `before` (skate-core `living_world/avoid.rs`), the zero-width edge in
   `avoid::steer_point`, `path_follow::path_point`, `npc_sim.rs` `avoid_far` feeds the ground steer's `far`.
   `GroundSteerTuning::avoid_anchor_ticks` (retail 15.0, `0x820BD16C`).
@@ -1663,7 +1663,7 @@ landing loss of skater #7 at node 26. Not play-tested.
 
 **Anticipation.** The trick signals' heading is `pc+824` too: `sub_824696B8` posts `AnticMag` only under `|pc+0x338| < pi/4` (read in Ghidra). Our steer runs after the signals, so they read last tick's value. `sub_824691A0` gates the anticipated trick (`pc+796`) on the off-line distance alone, so `ai_signals::anticipated` lost its heading and open-trick gates.
 
-**Verification.** `a_fakie_skater_travelling_along_the_line_is_not_against_it`, `the_anticipated_trick_ignores_heading_and_an_open_trick`. Muted 300 s University run, before and after the push change: bails 15 -> 10, give-ups 4 -> 1. Muted 240 s runs with the anticipation changes switched separately, University community skate park and DownTown (`tools/dev-bench/npc_matrix.sh`), totals over both: neither 19 bails, 1 give-up, 293 landings; heading only 19, 4, 270; gates only 19, 4, 270; both 17, 6, 276. No combination wins at both spots: University favours neither, DownTown favours both. NPC runs diverge after the first few bails, so a difference this size between builds is noise. The code reads decide these changes, not the runs, and neither set shows the push change's effect at a measured rate. A play session is still the check.
+**Verification.** `a_fakie_skater_travelling_along_the_line_is_not_against_it`, `the_anticipated_trick_ignores_heading_and_an_open_trick`. Muted 300 s University run, before and after the push change: bails 15 -> 10, give-ups 4 -> 1. Muted 240 s runs with the anticipation changes switched separately, University community skate park and DownTown (`tools/dev-bench/npc_matrix.sh`), totals over both: neither 19 bails, 1 give-up, 293 landings; heading only 19, 4, 270; gates only 19, 4, 270; both 17, 6, 276. No combination wins at both spots: University favors neither, DownTown favors both. NPC runs diverge after the first few bails, so a difference this size between builds is noise. The code reads decide these changes, not the runs, and neither set shows the push change's effect at a measured rate. A play session is still the check.
 **Writer gates (`sub_824696B8`, runs inside the dispatcher `sub_8246A2E0`, so after the push and with the slot as dispatched).** `AnticMag` / `AnticAngle`: anticipated ollie or flip, `pc+0x39E` clear, `|pc+0x338|` under pi/4, slot category not 8; an open trick of another category does not stop it. `Crouch`: node flag 0x02, `pc+0x39E` clear, no anticipation posted, slot category 0. `Manual` ahead: upcoming category 8, slot category not 8, and `pc+0x3A0` (the airborne byte, copied from `+0x1B6` in `sub_8246A700`) or `pc+900` under 5 (ticks since the landing edge, same function, starts at 7200). `pc+0x39E` is set by the push writer `sub_8246B4C8` and cleared each tick in `sub_8246F6E8`. Ours: `ai_signals::signals`, `drop_for_push`, `NpcSim::since_landing`. Test: `the_writer_gates_anticipation_on_a_manual_and_on_the_push`. Checked against the code only; no session has tested it yet.
 
 **Open.** Node 60's reason 3 bails are unchanged: 63.3 degrees against the 63.0 limit (`WIPEOUT_REASONS deck_error`), cause open. `pc+0x26C` as the line direction is inferred (b341).
@@ -1690,6 +1690,6 @@ landing loss of skater #7 at node 26. Not play-tested.
 - At a line-end chain retail writes no velocity (`8246C7F8`, `82468AC8`); the only speed lever is the board path pull `82C05868` (min(0.5 |dv|, 0.2) per tick), and only while the record's velocity bit is set, which both clear while rejoining. After those chains the skater is flagged rejoining for about half a second and is back on the line (about 0 m off) within a second (`NPC_SKATER_REJOIN`), so the pull runs for most of the run-up.
 - `82467FC8`, the AI's body point, is the deck rigid body's position (board part 6), the same point ours uses for the push gate, the speed source, the rejoin distance and the lateral error (b818).
 - New log `NPC_BOARD_PULL` (`physics/board_path.rs`, log only, when the deck is more than 1.5 m/s off its target): muted 300 s DownTown run, 1584 ticks. The pull changes the deck speed by a median 0.18 m/s per tick, but the deck keeps only a median 0.09 m/s per tick toward the target, the same faster or slower than the target, so half of each pull is undone before the next tick (the pull writes the deck body only).
-- **Retail keeps the same half [trace].** A recomp hook on the velocity step `82C05868` (`AIPULL`, research-hooks, category `aiskater`, the same 1.5 m/s filter), a muted 6 min idle run at DownTown [-221.8, 40.0, 1.7] with the player off the board: 927 pulls by 3 NPC skaters, gain 0.5 and cap 0.2, one pull per skater every 16.6 ms (60 Hz, as ours). Applied a median 0.19 to 0.20 m/s per tick, kept 0.09 to 0.10 m/s per tick toward the target (faster than the target 0.098, slower 0.090), against ours 0.18 applied and 0.09 kept. So the pull and what survives of it match retail; the half lost to the board solve is retail behaviour, not ours.
+- **Retail keeps the same half [trace].** A recomp hook on the velocity step `82C05868` (`AIPULL`, research-hooks, category `aiskater`, the same 1.5 m/s filter), a muted 6 min idle run at DownTown [-221.8, 40.0, 1.7] with the player off the board: 927 pulls by 3 NPC skaters, gain 0.5 and cap 0.2, one pull per skater every 16.6 ms (60 Hz, as ours). Applied a median 0.19 to 0.20 m/s per tick, kept 0.09 to 0.10 m/s per tick toward the target (faster than the target 0.098, slower 0.090), against ours 0.18 applied and 0.09 kept. So the pull and what survives of it match retail; the half lost to the board solve is retail behavior, not ours.
 - **Open:** the take-offs that launch below 0.8 of the recorded speed (29 of 145 accepted in the 300 s DownTown run, the node 41 bail among them: ours 5.8 m/s against the recorded 7.84). The windup, the launch clamp, the pull, the line-end chain, the body point and the KnownAir hand-over all match retail; which of those 29 cases are real losses (as at node 41) and which follow recordings that slow down themselves is not sorted yet.
 - **Sorted with `NPC_TAKEOFF` (2026-11-03).** New log line (`living_world/npc_sim.rs`, log only): on the first air tick after a trick dispatch, the NPC, its line node, our deck speed, the recording's own speed at that node and the node before, and the nearest recorded jump's start speed. A muted 600 s DownTown run, 241 take-offs: 188 at the recorded approach speed, 19 below the recorded jump speed but at the approach speed (the recording slows down there itself), and 33 real losses below 0.8 of the recorded approach (ratios 0.40 to 0.80; 20 in PhysicsAir, 13 in KnownAir). That first count measured on the first air tick, which includes the KnownAir hand-over dip (b816): at node 32 all six NPCs launched at 8.3 m/s, above the recorded 7.33, and node 24 was a pop out of a 5-0 grind. The line now also gives `launch`, the GroundAnimation launch speed recorded during the windup, and `from`, the state the take-off came from. A muted 300 s DownTown run: of 102 take-offs from GroundAnimation, 20 launch below 0.8 of the recorded approach (6 more are slow on the first air tick only); since the launch never falls below 0.8 of the body speed, those 20 were already riding slower than the recording before the trick. 13 of the 20 are within the first 25 nodes of a line, where a new NPC starts from the spawn push (0.75 of the recorded speed, as retail); the others (nodes 56, 60, 93, 135 to 137, 189) are open. Second machine (the laptop, 600 s muted runs on 66fc2419, the first-air-tick measure): DownTown 35 of 254 take-offs below 0.8 of the recorded approach (14 %, the desktop 33 of 241) at the same repeating spots (nodes 21, 25, 32, 137), 15 bails, 0 panics; University 0 of 160 (all at 0.88 to 0.97 of the recording), 12 bails, 0 panics. Same runs on 80424d68 (with `launch`): DownTown 36 of 211 GroundAnimation take-offs launch below 0.8 of the recorded approach (17 %, the desktop 20 %), 12 of them in the first 25 nodes, node 137 again with four NPCs; University 95 of 160, all one jump at node 5 just after the spawn, launching at 6.45 m/s = 0.75 of the recorded 8.6 (the spawn push) and riding the recorded arc at 8.3 m/s from the next tick. `launch` is blank for take-offs that did not come through GroundAnimation, by design, and for 8 GroundAnimation ones that recorded no jump. Node 137 is no loss either: the line (`...4182`) rides up a kicker from the trick node 132 and leaves it at node 136 with a recorded jump start velocity of 8.84 m/s; the step speed of the take-off node (11.67) is the jump transition, not the approach, and ours launches at 8.03 to 8.17 (0.91). Measured against the recorded jump start speed where a jump lies within 6 nodes, the laptop DownTown run has 27 of 203 GroundAnimation launches below 0.8, 11 in the first 25 nodes. The worst later one (andrew_reynolds, line `...9244` node 58 -> 60: 3.38 against 7.85) pops onto a 0.4 m ledge 2 frames after the trick node in the recording, while every traced NPC pop comes 8 PhysicsGround plus 5 to 6 GroundAnimation ticks after the dispatch (about 0.23 s), so ours reaches the ledge face mid-windup. The 8 + 5 to 6 ticks are the stock ollie windup, not a delay of ours (research b820): the trick intent reaches the graphs on the dispatch tick, `FromAntic` plays the `_G` clip (not interruptable), PhysicsGround becomes GroundAnimation when the animated board lifts past `animated_board_threshold` (`player/selector/ground.rs`, TU3 `0x82BDC6C8`), and the take-off follows on `_A`; retail's dispatch `8246A080` / `82469448` adds no timer or early fire for ollies and flips (lead 0, b188), so retail spends the same windup. The recordings agree: from every start-trick node to its first airborne node (`npc_line_dump <pack> gaps`), DownTown 1696 pops with a median of 19 frames (70 % at 14 or more, 6 % at 5 or fewer), University 1661 with a median of 17 (68 %, 8 %). Node 58's 2-frame gap is one of the few short ones; with the windup retail plays it pops about 1.9 m later too. So the remaining slow launches past the spawn ramp are recording outliers, not a port difference. Not proven with a recomp hook (the hooks b820 names: `8246A2E0`, `0x82BDC6C8` and the ground selector, near line `...9244` node 58).

@@ -36,7 +36,7 @@
 //! the local player, owner byte +72 — UNCERTAIN meaning). The roll and ollie voices' bus is not
 //! recovered (SFX Master here).
 //!
-//! Not modelled: the cartoon DLC sets (bank 8), the body poster's first-hit torso message
+//! Not modeled: the cartoon DLC sets (bank 8), the body poster's first-hit torso message
 //! (`sub_824BCEB0`) and Hall of Meat layer, the step-on force (`+500..+503`: `+720` / `+814` are not published) and which
 //! update rewrites the manual-landing holder `+36` (taken as a touchdown voice of kind 4).
 use super::collision::Message;
@@ -281,7 +281,7 @@ impl SpeedGraph8 {
 /// The body poster's material of a body region (`sub_824BCBA0`: head 97, torso 98, arms 100, legs
 /// 99), its cloth contact (`+112`: none / denim 109 / skin 107 / denim 108) and its pad contact
 /// (`+120`: 110, the face 112 with the face point in contact, 111 on the limbs). The Hall of Meat
-/// layer (`+128`, materials 102..106 while the global `+859` byte is set) is not modelled.
+/// layer (`+128`, materials 102..106 while the global `+859` byte is set) is not modeled.
 pub fn body_materials(region: usize, face: bool) -> (i32, i32, i32) {
     match region {
         0 => (97, NO_MATERIAL as i32, if face { 112 } else { 110 }),
@@ -393,7 +393,7 @@ pub struct Contacts {
     grunt_armed: bool,
     /// The bail grunt is due (set by the body poster; the NPC host takes it).
     pub bail_grunt: bool,
-    /// Collide lines due (824BDA90): one record per poster call, in order; local main-cast branch not modelled.
+    /// Collide lines due (824BDA90): one record per poster call, in order; local main-cast branch not modeled.
     pub collides: Vec<CollideCall>,
     /// The team line's cooldown (`entry+492`, s): counted down by dt at the start of every call,
     /// set to [`ContactsTuning::coll_team_cooldown`] when the team line is asked for.
@@ -691,7 +691,7 @@ impl Contacts {
     /// hit adds the second message at tier 1 × the window scale, as the deck), the cloth contact
     /// against nothing at tier 0 with the region's level, and the pad contact by
     /// `sub_824BCCF8`'s thresholds. Cooldowns count down by min(time scale, 1) per frame.
-    /// Not modelled: the first-hit torso message (`sub_824BCEB0`, gated by an unidentified game
+    /// Not modeled: the first-hit torso message (`sub_824BCEB0`, gated by an unidentified game
     /// global at `*(0x82083C38) + 0x2FCB4`), the Hall of Meat layer and the bail flags `+406..+416`
     /// (they feed game events, not sounds).
     fn body(&mut self, s: &AudioState, t: &PlayerTuning, c: &ContactsTuning) {

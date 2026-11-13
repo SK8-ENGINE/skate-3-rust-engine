@@ -452,7 +452,7 @@ fn lenient_float(s: &str) -> f32 {
     (1..=rest.len()).rev().filter(|&i| rest.is_char_boundary(i)).find_map(|i| rest[..i].parse::<f32>().ok()).unwrap_or(0.0)
 }
 
-/// One event type's behaviour (retail start / update / done / undo / stop slots; b900).
+/// One event type's behavior (retail start / update / done / undo / stop slots; b900).
 pub trait Handler: Send + Sync {
     fn start(&mut self, event: &Event);
     fn update(&mut self, _event: &Event, _dt: f32) {}

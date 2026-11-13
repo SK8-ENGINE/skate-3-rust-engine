@@ -21,7 +21,7 @@ impl Default for RunFromHonkerParams {
 }
 
 /// `826A1358`: the goal and speed for a ped at `ped` running from a car at `car` along `dir`. `None` when the
-/// direction has no horizontal part (degenerate, as the normalise in retail).
+/// direction has no horizontal part (degenerate, as the normalize in retail).
 pub fn run_goal(ped: Vec3, car: Vec3, dir: Vec3, p: &RunFromHonkerParams) -> Option<(Vec3, f32)> {
     // S = norm(D x (0, -1, 0)) = norm((Dz, 0, -Dx)).
     let l = (dir[2] * dir[2] + dir[0] * dir[0]).sqrt();

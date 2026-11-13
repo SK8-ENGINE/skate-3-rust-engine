@@ -145,7 +145,7 @@ impl Fade {
         out
     }
 
-    /// 82D5C010 (a fade event's undo): every active slot is cancelled (finished on the next tick); overlay off.
+    /// 82D5C010 (a fade event's undo): every active slot is canceled (finished on the next tick); overlay off.
     pub fn cancel_all(&mut self) {
         for s in self.slots.iter_mut().filter(|s| s.active) {
             s.cancel = true;

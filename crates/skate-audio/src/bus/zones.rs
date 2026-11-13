@@ -6,7 +6,7 @@
 //!
 //! The host hands in, per game frame, the active `.ems` nodes whose attribute type is 5 in the
 //! emitter manager's list order ([`Zone`]: node identity, attribute key `+24`, the attribute's
-//! preset key, the normalised distance `+12` — 0 inside the inner core, 1 at the edge — and the
+//! preset key, the normalized distance `+12` (0 inside the inner core, 1 at the edge) and the
 //! zone position), the `audio_reverb` region key at the skater, and the camera (`*(0x83083C38) +
 //! 0x2F078`: position `+48`, forward `+64`).
 //!
@@ -32,7 +32,7 @@ pub struct Zone {
     pub attribute: u64,
     /// The attribute record's reverb preset key (`sub_8248CDC8` → `sub_8248CE30`, `+8`).
     pub preset: u64,
-    /// Node `+12`: the normalised distance (0 = inner core, 1 = edge).
+    /// Node `+12`: the normalized distance (0 = inner core, 1 = edge).
     pub d: f32,
     /// The zone position (x, z) the blend rotates toward (node record `+8` / `+16`).
     pub position: [f32; 2],
@@ -138,7 +138,7 @@ impl EnvNetwork {
 
     /// `sub_824DEEF0`: blend `side` (1 − d) against the other side (d) and turn `side`'s reverb
     /// outputs toward the zone. Without a camera retail calls the object's vfunc 28 (UNCERTAIN,
-    /// not modelled: nothing changes).
+    /// not modeled: nothing changes).
     fn blend(&mut self, side: usize, zone: &Zone, camera: Option<&Camera>) {
         let Some(cam) = camera else { return };
         let d = self.selector.timers[side];

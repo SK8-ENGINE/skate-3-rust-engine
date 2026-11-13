@@ -15,7 +15,7 @@ fn ps_quote(s: &str) -> String {
     s.replace('\'', "''")
 }
 
-/// A folder, or None when cancelled.
+/// A folder, or None when canceled.
 pub fn folder(title: &str) -> Option<PathBuf> {
     if cfg!(windows) {
         let script = format!("Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = '{}'; if ($d.ShowDialog() -eq 'OK') {{ $d.SelectedPath }}", ps_quote(title));
@@ -33,7 +33,7 @@ pub fn folder(title: &str) -> Option<PathBuf> {
     None
 }
 
-/// A file, or None when cancelled. `filter`: a Windows filter (`ISO or default.xex|*.iso;default.xex|All files|*.*`).
+/// A file, or None when canceled. `filter`: a Windows filter (`ISO or default.xex|*.iso;default.xex|All files|*.*`).
 pub fn file(title: &str, filter: &str) -> Option<PathBuf> {
     if cfg!(windows) {
         let script = format!("Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.OpenFileDialog; $d.Title = '{}'; $d.Filter = '{}'; if ($d.ShowDialog() -eq 'OK') {{ $d.FileName }}", ps_quote(title), ps_quote(filter));

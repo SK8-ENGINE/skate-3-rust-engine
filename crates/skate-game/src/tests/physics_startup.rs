@@ -8,7 +8,7 @@ fn stock_skater_startup_builds_the_graphs_and_physical_body_from_the_same_rig() 
     let manifest = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &manifest).unwrap();
     let mut physics = GamePhysics::load(root).unwrap();
-    // This regression isolates grounded controls on the flat fixture. The production box is only six metres wide:
+    // This regression isolates grounded controls on the flat fixture. The production box is only six meters wide:
     // sustained kickturning leaves it, correctly selecting KnownAir and ForcePhysics2. Separate air_playback tests
     // exercise the shipped course and deliberate roll-off.
     physics.world = (ground::flat_world(physics.settings.floor_material)).into();

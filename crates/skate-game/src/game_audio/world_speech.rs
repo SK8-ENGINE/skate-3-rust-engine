@@ -1296,7 +1296,7 @@ mod tests {
     /// out3, else out2, × the voice float; the echo send out21, the env send out15; filters out13 / out14; the PEAK from the
     /// azimuth curves) are compared with the recomp's first GAIN / SEND (per send module: `+0x570`
     /// before the gain, `+0x7D0` after the filters) / LPF / HPF / PEAK targets of the voice. The
-    /// PEAK is also checked without our geometry: the recomp's (centre, gain) must lie on the two
+    /// PEAK is also checked without our geometry: the recomp's (center, gain) must lie on the two
     /// curves at one azimuth. Prints every row and the agreement.
     #[test]
     #[ignore = "needs the private install data and the recomp level export"]
@@ -1367,7 +1367,7 @@ mod tests {
             if let Some([freq, gain, _]) = r.first.peak {
                 peak_n += 1;
                 // The azimuth the recomp's gain says (the gain curve falls from 0.4 to 0.1), then
-                // the centre the other curve gives there.
+                // the center the other curve gives there.
                 let (mut lo, mut hi) = (0.0f32, 32767.0f32);
                 for _ in 0..40 {
                     let mid = 0.5 * (lo + hi);

@@ -109,7 +109,7 @@ Identities and what each section does:
 Files are checked when the mod starts (and by `check_mod`): WAVs must be PCM16, 1–2 channels, 8–48 kHz, at most 30 s
 (beds 600 s, wheel / grain streams 60 s); `.abk`, `.splc`, `.mxb` and `.grain` files must parse. Limits: 64 MiB of PCM
 per mod and 256 MiB for all running audio mods, 512 sample replacements, 64 banks, 1024 files and 4096 records per
-mod. Licence note: overlays reference retail identities (names, keys, slot numbers); mods ship their own audio.
+mod. License note: overlays reference retail identities (names, keys, slot numbers); mods ship their own audio.
 
 ## C. Map audio (custom maps)
 
@@ -247,7 +247,7 @@ Verification:
 - No-mod identity: the headless e2e bench (13 scripted scenarios and whole play sessions, the 60 Hz host and 300 fps;
   84 renders and voice logs) is byte-identical to the pre-PR build after every phase (R1, R2, R3, R5); the merge of the
   #32 work into this branch did not change it either, nor did the second merge (#32 at `cb71483` with
-  optimisation pass 2 and the world gaps (tazer, ped body falls, speech echo, main-cast speech, NPC loose-board
+  optimization pass 2 and the world gaps (tazer, ped body falls, speech echo, main-cast speech, NPC loose-board
   slide) plus upstream `main` `4488651`): the 84 outputs equal #32's own bench run of that tree. A data-gated test shows the merge path with an empty overlay
   reproduces the real install's manifest field for field.
 - R1: a restart mid-scenario plays bit for bit like a fresh runtime from that point; a mod replacing an emitter bank's
@@ -314,14 +314,14 @@ Gaps the first version left open:
   `ui_canvas` `items`, `ui_menu` `items` and each item's `children`, `player_detach` `candidates`, raycast `exclude`.
   Fields that are maps or free values (`network_state` `value`, world-audio `value`, struct options such as
   `options = {}`) are not touched. Not changed: `Shape` `points` / `hulls` (in skate-dynamics) still refuse `{}` at
-  deserialisation; an empty hull is invalid either way, only the error text differs. Before this, for example
+  deserialization; an empty hull is invalid either way, only the error text differs. Before this, for example
   `sdk.ui.menu(key, {..., items = {{..., children = {}}}})` and `sdk.player.detach{candidates = {}}` failed the same
   way. Tests: `vm::empty_table_lists::every_list_field_takes_an_empty_table_and_a_list` (a real mod through `Vm` /
   `api.lua` / `_submit`: `{}` and a normal list for every field; empty where entries are required = a validation error,
   never a serde one; a named-key table still refused), `map_fields_keep_empty_tables_as_maps`, `lua_list::tests`
   (gaps, 0, negative, fractional and named keys refused; JSON unchanged). The upstream test
   `mesh_buffer_write_rejects_empty_uv_table` now checks the write is refused by validation (it still is, by
-  `_submit`) instead of by deserialisation. No-mod e2e `m5` = `m4` (84/84 identical).
+  `_submit`) instead of by deserialization. No-mod e2e `m5` = `m4` (84/84 identical).
 - **Found by the in-game autotest: `pop` / `land` were wrong for a mod that subscribed at load.** Problem: a mod
   calling `sdk.audio.subscribe` in `on_load` (the normal case: before native audio starts) got pops untagged for the
   whole session, and any player `Skate_Collisions` Splice row with id 0 tagged `land` (the `land` rows of the DownTown
@@ -385,7 +385,7 @@ sdk.audio.stop('siren', 0.3)
 Existing mods: the bundled Skyline Drive mod's engine, turbo, brake and pop voices (`body` + `offset`, `spatial_scale`,
 no `falloff`) now play natively with the default reach, following the car's body, panned by the retail panner, under
 the Ambience volume (`group` default `world`); at most 12 of them at once, inside the 24. The SDK `audio-example`'s
-tick (`spatial = false`) plays natively, centred. Their levels differ from the Bevy voices (retail emitter law
+tick (`spatial = false`) plays natively, centered. Their levels differ from the Bevy voices (retail emitter law
 instead of Bevy's spatial gain): an in-game listen is open.
 
 What happens:
@@ -398,7 +398,7 @@ What happens:
   reach is the `.ems` record test of a sphere (`radius`, inner `core`) with the retail falloff curve
   (`eVolumeFalloffType`: `squared` (1 − d)², `linear` 1 − d, `flat`), `level = volume × curve(d)`; outside its reach
   it is silent and keeps playing (a loop is heard again when the listener comes back). A sound without a position
-  (`spatial = false`) takes the non-positional outputs (out2 dry, out7 send, out3 low-pass), centred.
+  (`spatial = false`) takes the non-positional outputs (out2 dry, out7 send, out3 low-pass), centered.
 - The MixMap instances come from a **private MixMap**: retail's MixMap file built with the Global slot and 32
   Emitter instances, its Global inputs (master, music, reverb, pause) copied from the game's MixMap before each of
   its ticks, ticked with the game's pass (the same console evaluations) and only while an instance is held. Its
@@ -419,7 +419,7 @@ What happens:
 
 Proofs (`game_audio::mod_voices::tests`, data-gated where they need the install):
 `the_private_mixmap_matches_the_retail_emitter_outputs`, `a_native_mod_voice_plays_through_the_mixer_with_retail_pan_and_send`
-(panned right at 5 m right, dry and send, silent beyond its reach, non-positional centred, no send with
+(panned right at 5 m right, dry and send, silent beyond its reach, non-positional centered, no send with
 `reverb = false`, everything gone when the mod stops), `native_one_shots_end_and_fades_stop`,
 `a_restart_reopens_loops_in_the_new_runtime`, `a_removed_native_mod_voice_restores_retail` (the same retail scenario
 with and without a mod voice: bit-identical before it, different while it plays, bit-identical again from the frame
@@ -587,13 +587,13 @@ per mod the `audio.json` rules, then the runtime ones, by key). 32 rules per mod
   the request. Each rule has a ring of 4 voices.
 
 **Where the rule's sound plays** (user decision 2026-10-04: positional, and a mod chooses the position where that
-audio plays; until then it played centred). `play.at`:
+audio plays; until then it played centered). `play.at`:
 
 | `at` | position | fields |
 |---|---|---|
-| `owner` (default) | the owner of the game's sound, followed every frame while the sound plays: the local skater's centre of mass (the position retail's player sounds follow, MixMap 3DObjPos 60010010), the car or ped (`WorldOwners`), the NPC skater's centre of mass (`NpcSkaters`), the emitter record's position (an emitter start) | `offset` [x, y, z] m added to the owner's position (world axes, y up; −100..100) |
+| `owner` (default) | the owner of the game's sound, followed every frame while the sound plays: the local skater's center of mass (the position retail's player sounds follow, MixMap 3DObjPos 60010010), the car or ped (`WorldOwners`), the NPC skater's center of mass (`NpcSkaters`), the emitter record's position (an emitter start) | `offset` [x, y, z] m added to the owner's position (world axes, y up; −100..100) |
 | `world` | a fixed world position | `position` [x, y, z] (required; ±100 km) |
-| `centre` (alias `center`) | non-positional, centred: the retail non-positional emitter outputs (out2 dry, out7 send, out1 pitch, out3 low-pass), the behaviour before the decision | none |
+| `centre` (alias `center`) | non-positional, centered: the retail non-positional emitter outputs (out2 dry, out7 send, out1 pitch, out3 low-pass), the behavior before the decision | none |
 
 A positional rule sound is a native mod voice with a position (H): the private MixMap's Emitter instance gets the
 position the way a retail emitter state does (`native::write_position`: listener, skater, source), so it has the
@@ -605,7 +605,7 @@ exactly the reach the replaced emitter has; a car 40 m (retail's traffic list cu
 (the ped list cut, `PED_LIST_RADIUS`); a skater 30 m (retail's skater audio radius, `skaters::AUDIO_RADIUS`; the local
 player too, whose sounds sit in the same Player MixMap slot); all with the squared curve. With `at = 'world'` the reach
 still defaults to the owner's. An owner that is gone while its sound plays (a car despawned) leaves the sound at its
-last position; an owner never found (gone before the sound opened) plays it centred. Emitter records do not move: the
+last position; an owner never found (gone before the sound opened) plays it centered. Emitter records do not move: the
 sound stays at the record's position. Checked when the rule is set / the overlay is read, before the WAV is loaded:
 `offset` only with `owner`, `position` exactly with `world`, `falloff` not with `centre`, the ranges.
 
@@ -633,7 +633,7 @@ while muted, rows and the ped's steps unchanged, replace = dropped + one sound, 
 `emitters::tests::a_rule_mutes_an_emitter_start`, `mod_voices::tests::a_rule_sound_plays_in_the_mod_bank`;
 positional (2026-10-04): `mod_rules::tests::rule_sounds_are_placed_at_their_owner` (the request's owner travels
 with the sound: the local skater, a car by id with an offset and the mod's reach, an NPC skater's request at a fixed
-position, centred, an emitter record with its own reach; an emitter request without its record centred),
+position, centered, an emitter record with its own reach; an emitter request without its record centered),
 `owners_are_located_with_their_retail_reach` (skater 30 m, car 40 m, ped 50 m, fixed record; unknown ids not found),
 data-gated `mod_voices::tests::a_positional_rule_sound_plays_at_its_owner` (a replaced horn panned right at its car
 5 m right with the send, following the car left, staying where the car was when it is gone, silent beyond the car's
@@ -952,7 +952,7 @@ started", the ear (or a headless render) proves the level.
 
 A local runner (not part of the PR) starts the game on DownTown with a copy of the mod in a run folder and a private
 `SKATE3_MOD_SETTINGS` folder (`<id>.json` = `{"enabled": true, "values": {"autotest": true, ...}}`), muted and
-minimised by default or audible (15 s steps, 3 s gaps), edits / reverts the copy's `audio.json` when asked, stops the
+minimized by default or audible (15 s steps, 3 s gaps), edits / reverts the copy's `audio.json` when asked, stops the
 game after `AUTOTEST done` and tabulates the lines; a second pass with the mod disabled asserts retail (`Map audio
 DownTown: ["retail"]`, the retail crossfade bank, no overlay, the install's 9 Csis projects, no mod log line).
 
@@ -977,7 +977,7 @@ mod + runner only:
   the end, and in `on_unload` (the engine clears a mod's camera when the mod stops anyway). The camera override does
   not freeze the game: the skater keeps its input and physics, only the view is fixed (hence the circling).
 - The step texts say which beep is which: the map's Baby_Cry_1 emitter (replaced samples, plays while the camera is
-  near it) vs the mod's centred F6 post.
+  near it) vs the mod's centered F6 post.
 - The runner adds `hud_countdown` (>= 16 `AUTOTEST_HUD` lines with a countdown) and `camera_returned` (the log line).
 - Not checkable from Lua: whether the F7 post's voices really fell silent. `sdk.audio.info().native_voices` counts only
   the mod's native-mixer WAVs, not AEMS voices of a post; `F7_release` still checks the handle. A per-handle voice count
@@ -1027,7 +1027,7 @@ therefore **one content overlay at the `Library` level**: mods ship manifest-sha
 files, merged mod first and then the install, by retail identity. With no audio mod active the overlay is empty and
 `Library` is the same value it is today, so retail stays the default and byte-identical. Everything hard-coded
 that is *data* (map → `.ems` files, beds, crossfade banks, bank lists, keep-list) moves into the manifest (setup
-export) or into a code table that the overlay can extend. Behaviour that data can't express gets a small **runtime
+export) or into a code table that the overlay can extend. Behavior that data can't express gets a small **runtime
 API**, the same for Rust engine systems and Lua: retail posts / globals / MixMap reads, tuning overrides, emitters
 and reverb zones as world-audio objects, mod WAVs routed through the native mixer, and audio events (observe in Lua,
 suppress / replace through declarative native rules). The API follows the SDK conventions: commands validated
@@ -1180,7 +1180,7 @@ Rules:
   (install manifest + overlays), and the native runtime **restarts at the next safe point**: `Native` is dropped and
   `start_with` runs again, the world hosts take the map-epoch reset, and the location / zone state is rebuilt. This
   is a short sound cut at enable / disable only. A bank-level hot swap (unload + `ensure_bank` + epoch, the map-change
-  path) is an optimisation for later (L1). With no audio-content mod the rebuild never happens.
+  path) is an optimization for later (L1). With no audio-content mod the rebuild never happens.
 
 **Rust (engine side):** `AudioContent` resource: `register(owner, Overlay)` / `unregister(owner)`, with
 `Overlay` the same parsed type the mod file becomes. `Library::load_with(asset_root, &[Overlay])` merges it, and
@@ -1381,7 +1381,7 @@ All done (2026-10-04, branch `audio/moddability-2`): L1–L5 and L7 in section M
   - the oracle tests (evaluator, MixMap, DSP, grain, splice) unchanged;
   - R2: the exported `maps` table equals the old code tables for all 10 maps.
 - **Choke-point cost:** with no subscribers / rules, the bench's per-pass timings match within noise and no
-  allocation happens in the hook (skill optimisation §3b review).
+  allocation happens in the hook (skill optimization §3b review).
 - **Per feature, one mod-driven test** (headless, data-gated where needed):
   - sample replace → the voice reads the mod PCM;
   - bank replace / add → class binding and the patch plays;
@@ -1418,7 +1418,7 @@ All done (2026-10-04, branch `audio/moddability-2`): L1–L5 and L7 in section M
 - **Content licensing:** overlays reference retail identities, not retail data. Mods ship their own audio, and
   nothing copied from the game goes into the repo. Example mods use self-made
   sounds.
-- **Concurrent edits:** the files are the same as the ongoing world / speech work and the optimisation pass, so this
+- **Concurrent edits:** the files are the same as the ongoing world / speech work and the optimization pass, so this
   runs after them (#32 first).
 
 ## 4. Research for this PR (2026-10-04)

@@ -236,7 +236,7 @@ impl RailHit {
 /// Named rules of the shared rail query; retail values by default, mod-tunable.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct RailRules {
-    /// 82C4C4E0 skips a prop whose origin is this far from the query box centre (0x822F8F68 = 225, squared).
+    /// 82C4C4E0 skips a prop whose origin is this far from the query box center (0x822F8F68 = 225, squared).
     pub prop_radius: f32,
     /// Records per query, static and providers together (82C1EAD8).
     pub cap: usize,

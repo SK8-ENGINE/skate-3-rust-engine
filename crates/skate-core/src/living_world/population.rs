@@ -445,7 +445,7 @@ pub(crate) fn census_pass(cfg: &CensusKindConfig, st: &mut KindState, inputs: &T
         return;
     }
     // Guard (engine, not retail; doc 26 "Cars flying off"): a focus with a non-finite position or
-    // speed gives no circle. An infinite centre would put every NPC beyond the cull and empty the
+    // speed gives no circle. An infinite center would put every NPC beyond the cull and empty the
     // whole population in one pass; without a usable circle this pass neither culls nor spawns.
     let circles: Vec<_> = inputs.observers.iter().map(|o| range.around(o)).filter(|(c, centre)| c.cull.is_finite() && c.spawn_outer.is_finite() && centre.iter().all(|v| v.is_finite())).collect();
     if circles.is_empty() {

@@ -69,7 +69,7 @@ fn challenge_map_nodes_have_hooks_and_stay_greyed_until_handled() {
     assert!(!registry.visible(&all, &MenuContext::new("Career").with(facts::GAME_MODE, 1.0)));
     let aletown = EntryRef::map(EntryKind::FeLocation, "dist_downtown_aletown");
     let challenge = EntryRef::map(EntryKind::Challenge, "some_challenge");
-    // Every node is a real entry with hooks; nothing has a handler yet, so all are greyed, folders too.
+    // Every node is a real entry with hooks; nothing has a handler yet, so all are grayed, folders too.
     for n in registry.data().map_nodes.clone() {
         assert!(registry.visible(&n.entry, &ctx), "{}", n.entry.hook_id());
         assert!(!registry.enabled(&n.entry, &ctx), "{} greyed", n.entry.hook_id());
@@ -78,7 +78,7 @@ fn challenge_map_nodes_have_hooks_and_stay_greyed_until_handled() {
     assert_eq!(EntryKind::parse("fe_locations"), Some(EntryKind::FeLocation));
     // Display order inside a folder follows the sort order.
     assert_eq!(registry.data().map_children(&downtown).iter().map(|n| n.entry.id.as_str()).collect::<Vec<_>>(), ["dist_downtown_canalplaza", "dist_downtown_aletown"]);
-    // A teleport handler enables the location and, through it, its folder and the root; the challenges stay greyed.
+    // A teleport handler enables the location and, through it, its folder and the root; the challenges stay grayed.
     let count = Arc::new(AtomicUsize::new(0));
     registry.register_handler(aletown.clone(), engine_handler("teleport", count.clone()));
     assert!(registry.enabled(&aletown, &ctx) && registry.enabled(&downtown, &ctx) && registry.enabled(&root, &ctx));
@@ -90,7 +90,7 @@ fn challenge_map_nodes_have_hooks_and_stay_greyed_until_handled() {
     assert!(matches!(registry.dispatch(MenuAction::Select { entry: aletown.clone() }, &ctx), Outcome::Forward(Owner::Mod(ref m), _) if m == "m"), "the mod's Lua gets it");
     registry.remove_owner(&Owner::Mod("m".into()));
     assert_eq!(registry.dispatch(MenuAction::Select { entry: aletown.clone() }, &ctx), Outcome::Handled(Owner::Engine("teleport".into())));
-    // Without the engine handler everything is greyed again.
+    // Without the engine handler everything is grayed again.
     registry.remove_owner(&Owner::Engine("teleport".into()));
     assert!(!registry.enabled(&root, &ctx));
     // A node not in the data is no entry.
@@ -308,7 +308,7 @@ fn step_uses_the_retail_rule_and_engine_binding_round_trips() {
     let sfx = EntryRef::setting("ID_GAMESETTINGS_SFXVOLUME");
     let play = EntryRef::setting("ID_GAMESETTINGS_DIFFICULTY_OPTIONS");
     let engine = Owner::Engine("audio".into());
-    // Unbound rows are greyed and Left / Right does nothing.
+    // Unbound rows are grayed and Left / Right does nothing.
     assert_eq!(r.dispatch(MenuAction::Step { entry: sfx.clone(), direction: Direction::Right }, &ctx), Outcome::Ignored);
     r.bind_value(sfx.clone(), engine.clone(), ValueHook::Stored(SettingValue::Float(0.75)));
     r.bind_value(play.clone(), Owner::Engine("difficulty".into()), ValueHook::Stored(SettingValue::Int(2)));
@@ -322,7 +322,7 @@ fn step_uses_the_retail_rule_and_engine_binding_round_trips() {
     // The engine's own source changed (settings file): the binding follows without an event.
     r.set_owner_value(&sfx, &engine, SettingValue::Float(0.3));
     assert_eq!(r.value(&sfx), Some(SettingValue::Float(0.3)));
-    // Online, the Difficulty link is greyed but the rule itself is unaffected.
+    // Online, the Difficulty link is grayed but the rule itself is unaffected.
     assert!(!r.enabled(&EntryRef::setting("ID_GAMESETTINGS_DIFFICULTY_SETTINGS"), &MenuContext::new("Career").with(facts::GAME_MODE, 4.0)));
 }
 

@@ -101,7 +101,7 @@ pub(crate) fn load_package(assets: &Path, map: &SkateMap) -> Option<(SkateMap, V
 }
 
 /// Each placed piece's draw inputs by its MOBJ id (the sidecar's `instances`: `instance_id` low 32 bits, as setup's
-/// `mobj_extension` writes the id): its `tint` RGB (white when absent) and its layout's world shadow colours
+/// `mobj_extension` writes the id): its `tint` RGB (white when absent) and its layout's world shadow colors
 /// (`shadow_colours`, research b443; the retail (0.2, 0.2, 0.2) when the world is no park world).
 pub(crate) fn load_draws(assets: &Path, map: &SkateMap) -> std::collections::HashMap<u32, crate::retail_render::ParkDraw> {
     let Some(layout) = layout_of(map) else { return Default::default() };

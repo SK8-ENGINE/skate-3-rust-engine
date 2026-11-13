@@ -30,7 +30,7 @@ pub mod movie_state {
     pub const REFRESH_TINT: i32 = 24;
 }
 
-/// What the screen reads from the replay each frame (local player only; a serialisable snapshot).
+/// What the screen reads from the replay each frame (local player only; a serializable snapshot).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReplayScreenFeed {
     /// The replay is open (instant or editor): the screen shows.

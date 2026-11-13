@@ -1,6 +1,6 @@
-# eEQChain (material) buses, EQ jitter, LFO task and owner send buses: behavioural spec
+# eEQChain (material) buses, EQ jitter, LFO task and owner send buses: behavioral spec
 
-Written 2026-10-02 from the TU3 (title update 3) recomp's generated code (reference only, read for behaviour), the image dump and the
+Written 2026-10-02 from the TU3 (title update 3) recomp's generated code (reference only, read for behavior), the image dump and the
 user's vault. Companion to `aems-voice-graph-spec.md` (§3.3 routing records, §4.10 bus modules, §6.2 buses), which
 this supersedes for the material buses. Tags as there: [R] our reading of the lifted code, [IMG] image constant,
 [VLT] vault value, [TR] matched against a retail trace, UNCERTAIN = not proven. Throwaway local scripts
@@ -71,10 +71,10 @@ For each bus i = 0..7:
 - if the record's enable byte is **0** (buses 5–7, or a missing record): post jitter values (§2) to both PI20
   with clamps, and DCl0 = clamp(clip field, 0, 1000) (0x82165A10 = 0.0, 0x82256FE8 = 1000.0);
   - freq = clamp(v, 0, 96000) (0x822F8920); gain = clamp(v, 0.1, 20) (0x820641A8, 0x820996EC);
-    Q = clamp(v, 0.2, 20) (0x82099280). The clamps are `fsel` max/min (NaN → upper/lower bound behaviour as fsel).
+    Q = clamp(v, 0.2, 20) (0x82099280). The clamps are `fsel` max/min (NaN → upper/lower bound behavior as fsel).
 - **always**: created[i] = 0.
 
-Net behaviour: buses 0–4 get a **fresh random preset at the first use after each clear**, i.e. at most once per
+Net behavior: buses 0–4 get a **fresh random preset at the first use after each clear**, i.e. at most once per
 2 game frames per bus, and only when a voice/component resolves the bus with create ≠ 0. Buses 5–7 all receive the
 **same** jitter values every second frame, whether or not anything is routed there.
 
@@ -149,7 +149,7 @@ timestamp (one creation = one re-roll of all six).
 - Inside the §2.3 bounds: dsp 904/904, 553/553, 980/980 lines; all 4050/4050, 8637/8637, 12666/12666.
   Observed extremes reach the bounds (e.g. 100.0009..699.9996 Hz, 0.5..2.0, Q 0.25..5.75).
 - Buses 6 and 7 carry **identical** values at the same timestamps (checked 20.5 s window): one shared source.
-- Before the first jitter step bus 6 showed exactly the centres 400 / 1.25 / 3.0 and 2000 / 1.75 / 3.0 (6159 ms, dsp).
+- Before the first jitter step bus 6 showed exactly the centers 400 / 1.25 / 3.0 and 2000 / 1.75 / 3.0 (6159 ms, dsp).
 ### 4.3 Update cadence
 - Bus 5–7 changes: median 9.5 ms apart in the recomp (its game frame rate, not 60 Hz; UNCERTAIN host pacing).
 - |Δvalue|/a2 per logged change, all_163809 bus 7 PI20#1 freq: quantiles (10/25/50/75/90 %) 0.107 / 0.292 / 0.670 /
@@ -183,7 +183,7 @@ No other caller of `sub_82488DD0` exists. Whether the level is refreshed after b
 graphs `Sub0 → Gai0 → PI20 → Sen0 → Sen0 → Sen0` at mgr+56 / mgr+60, then ReverbModel1 (`RM10`) graphs mgr+64/+68
 (order 201), four order-202 graphs mgr+72..+84 (HI20/LI20/Pn21 present), four order-201 7-module graphs mgr+88..+100.
 The trace's 18420/18820 have exactly GAIN, PEAK, 3 SENDs in that module order → mgr+56 = 0x40C18420,
-mgr+60 = 0x40C18820 (the LFO centres below confirm). The effect returns (mgr+108/+112, `Sub0 → Del0 → PI20 → Sen0 →
+mgr+60 = 0x40C18820 (the LFO centers below confirm). The effect returns (mgr+108/+112, `Sub0 → Del0 → PI20 → Sen0 →
 Gai0 → Pn21 → Sen0`) are the trace's 0x40C40770 / 0x40C40020 (PEAK, 1-ch SEND, GAIN, 6-ch SEND).
 
 ### 6.2 LFO task: `sub_824907D8` builds, `sub_82490B60` runs [R, IMG]

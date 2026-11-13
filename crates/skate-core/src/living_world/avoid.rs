@@ -25,7 +25,7 @@ impl ObstacleKind {
 pub struct AvoidSettings {
     /// The global avoidance switch (retail byte `+608` of a game object, clear = on).
     pub enabled: bool,
-    /// Gather radii, metres: skaters 64 (`0x820ED958`), peds 8 (`0x82099250`), vehicles 20
+    /// Gather radii, meters: skaters 64 (`0x820ED958`), peds 8 (`0x82099250`), vehicles 20
     /// (`0x820996EC`), props 16 (`0x820C2054`).
     pub radius_skater: f32,
     pub radius_pedestrian: f32,
@@ -111,7 +111,7 @@ pub struct Obstacle {
     /// Stable id (living-world id, prop id, player 0).
     pub id: u64,
     pub kind: ObstacleKind,
-    /// Centre (boxes) or feet (circles), world.
+    /// Center (boxes) or feet (circles), world.
     pub position: Vec3,
     pub velocity: Vec3,
     /// Box axes (unit; x side, y up, z forward).
@@ -129,7 +129,7 @@ pub struct PathPoint {
     pub point: Vec3,
     /// Unit path direction there.
     pub direction: Vec3,
-    /// Path width left / right of the line there, metres (node bytes `+0x25/+0x26` / 50,
+    /// Path width left / right of the line there, meters (node bytes `+0x25/+0x26` / 50,
     /// `sub_82F71580`).
     pub width_left: f32,
     pub width_right: f32,
@@ -570,8 +570,8 @@ fn pick_targets(s: &AvoidSettings, state: &mut AvoidState, out: &mut AvoidOutput
 }
 
 /// `sub_82465280`: the gap to steer into. On or near the path (|lateral| < 2 path widths,
-/// `0x82060C50`) the gap nearest the skater's lateral position, else the gap whose centre on the
-/// target's path point is nearest the skater; its centre (`0.5 x (lo + hi)`). 0 without gaps.
+/// `0x82060C50`) the gap nearest the skater's lateral position, else the gap whose center on the
+/// target's path point is nearest the skater; its center (`0.5 x (lo + hi)`). 0 without gaps.
 pub fn gap_choice(gaps: &[[f32; 2]], me: &AvoidSelf, target: Option<&PathPoint>) -> f32 {
     let mut best = (f32::MAX, 0.0f32);
     for g in gaps {
@@ -603,7 +603,7 @@ pub fn gap_choice(gaps: &[[f32; 2]], me: &AvoidSelf, target: Option<&PathPoint>)
 
 /// `sub_82464E30` -> `sub_82454798`: the path point moved `lateral` path widths across the path
 /// (the left width for negative values, the right one otherwise).
-/// A zero width shifts `lateral` metres on the unit side, like retail.
+/// A zero width shifts `lateral` meters on the unit side, like retail.
 pub fn steer_point(p: &PathPoint, lateral: f32) -> Vec3 {
     let w = if lateral < 0.0 { p.width_left } else { p.width_right };
     add(p.point, scale(right_of(p.direction), lateral * if w > 0.0 { w } else { 1.0 }))

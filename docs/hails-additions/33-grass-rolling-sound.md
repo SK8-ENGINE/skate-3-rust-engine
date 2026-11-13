@@ -108,7 +108,7 @@ is cached, so disabling the mod restores the retail routing on the next frame.
 
 ## Surface line in the play log (2026-10-29)
 
-A report like this one could only be placed from the trace-all audio state log. The play log now has a `SURFACE` line (`game_audio/skate_events.rs` `observe`) on every change of the ground surface tag while a wheel is down, at most 4 a second: `SURFACE tag= materials=[w0, w1, w2, w3] wheels= at=(x, y, z) state=` (the per-wheel audio material, the board position). A log line only, no behaviour. Builds; not seen in a session yet.
+A report like this one could only be placed from the trace-all audio state log. The play log now has a `SURFACE` line (`game_audio/skate_events.rs` `observe`) on every change of the ground surface tag while a wheel is down, at most 4 a second: `SURFACE tag= materials=[w0, w1, w2, w3] wheels= at=(x, y, z) state=` (the per-wheel audio material, the board position). A log line only, no behavior. Builds; not seen in a session yet.
 
 ## Open questions
 

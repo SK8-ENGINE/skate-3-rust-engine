@@ -556,7 +556,7 @@ fn walk_back_start_snaps_from_an_obstacle_cut() {
         let (_, k, q) = brute(p).unwrap();
         assert_eq!((got.poly, got.position), (k, q), "{p:?}");
     }
-    // The plan: today's start plans and is accepted; with the peds' 0.5 m (the old behaviour) it does not.
+    // The plan: today's start plans and is accepted; with the peds' 0.5 m (the old behavior) it does not.
     let s = ControllerBSettings::default();
     let input = BInput { position: on_block, body: [1.0, 0.0, 0.0], can_move: true, ..Default::default() };
     let goal = [9.5, 0.0, 9.5];

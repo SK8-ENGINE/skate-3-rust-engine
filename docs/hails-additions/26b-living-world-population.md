@@ -20,7 +20,7 @@ Part of doc 26, the living world (index: [26-living-world.md](26-living-world.md
     pack per line set; doc 42 "race AI racers"). Format details: [`living-world/skaters-data.md`](living-world/skaters-data.md).
 - **`skate-data::aipath`**: the line format, the pack container and the per-district dedupe.
 - **`native_roster`**: the NPC pool (`npc_pool`) and teammate binding (`bind_teammates`): the disc has no look for
-  `teammate_NN` (retail reads it from the save), so a recruited teammate binds to a customiser look in
+  `teammate_NN` (retail reads it from the save), so a recruited teammate binds to a customizer look in
   `settings/living_world_teammates.json`; unbound = not recruited = never spawns.
 
 Files: `crates/skate-data/src/aipath.rs`, `crates/skate-data/tests/aipath_data.rs`,
@@ -39,11 +39,11 @@ What retail does, checked in the code for this milestone (tags [code] / [data]; 
   2, props 3), each a cull pass then a spawn pass [code]. So each census kind gets a pass every 4 ticks.
 - **Census circle**: the `livingworld_census_ranges` sets lerped by the player's speed `|v| x 3.6` km/h
   (`sub_826B7D60`, `0x822F8628`); peds 50-60 m ring / 70 m cull at 45 km/h, 50-80 / 90 with offset 20 at 80 km/h;
-  vehicles 80-100 / 110 [data]. Cull = 3-D squared distance to the circle centre (`sub_826BA8B0`) [code].
+  vehicles 80-100 / 110 [data]. Cull = 3-D squared distance to the circle center (`sub_826BA8B0`) [code].
 - **Spawn pass** `sub_826B9940` (peds) / `sub_826B9B90` (vehicles): gated by the manager byte, `0x83082929` and
   `IsOnline`; 2 attempts / at most 1 spawn; initial populate 6000 attempts / 600 spawns in an 8-80 m ring
   (`0x82099250`, `0x820E5748`) [code]. Ring point (`sub_82E17508`): direction from two uniform draws in
-  [-0.5, 0.5) normalised, radius uniform in [inner, outer] (linear), heading = u32 x 2pi / 2^32 (`0x822F9598`) [code].
+  [-0.5, 0.5) normalized, radius uniform in [inner, outer] (linear), heading = u32 x 2pi / 2^32 (`0x822F9598`) [code].
 - **Cap at the point** `sub_826B8A28`: the record painted in the census layer at the spawn point, max population x
   density (Free Play scale, truncated; skipped in zombie mode). **An unpainted point has no record and cap 0** for
   peds and vehicles (the lookup only resolves a record when the layer query hits) [code]; this corrects the
@@ -58,7 +58,7 @@ What retail does, checked in the code for this milestone (tags [code] / [data]; 
   A.I. Skaters `+340` off: no spawns (`sub_8245C548`) and the per-skater checks despawn every ambient NPC
   (`sub_8245A9B8`, the `r25` gate) [code]; retail keeps and still spawns the up to 3 requested ("Call Skater")
   skaters, which ours does not have yet (todo fe62-spawn-skater.md). The menu rows store tenths (step 0.1, below 0.09
-  snaps to 0; labels are bands over 10 bars, b551). Open for multiplayer: `FreePlay` is not serialisable (skate-core
+  snaps to 0; labels are bands over 10 bars, b551). Open for multiplayer: `FreePlay` is not serializable (skate-core
   has no serde).
 - **Ambient skaters** `sub_8245BA28`: 60-tick cycle (cull 0, pool 15, spawn 30, checks 3-12 / 18-27 / 33-57),
   desired 3 (0 online), AI cap 5, 7 slots shared with players, spawn at the start node of an unused line 60-90 m away
@@ -95,7 +95,7 @@ observers, slot budget); it runs in one place (`NetRole` Standalone / Host; a Cl
 records with `PopulationState::apply_records`). The core takes a list of observers (culls use all of them; the
 spawn pass rotates through them; one observer = retail). Every entity has a stable `LivingWorldId` (kind + serial,
 never reused in a session); records carry kind, id, tick, position, heading, the entity's own seed and the choice
-(census record + category, or line id + character + slot) and serialise as `WireRecord`. Rosters are `BTreeMap`s;
+(census record + category, or line id + character + slot) and serialize as `WireRecord`. Rosters are `BTreeMap`s;
 no frame-time dependence. No transport or replication code. Retail default stays: nothing ambient spawns online.
 
 Moddability: every rule value is a public config field (code defaults, data ranges), settings are one resource,
@@ -124,13 +124,13 @@ Verification (milestone 2):
   settings.
 
 
-## NPCs vanishing in view (leave fade, census centre), 2026-10-05
+## NPCs vanishing in view (leave fade, census center), 2026-10-05
 
 **Problem.** The user reported that peds and skaters kept disappearing at random while still in sight, which
 they do not remember happening often in retail.
 
 **Root cause.** (1) Replay NPC skaters were removed on the spot at the end of a line with no branch, a
-placeholder, often in plain view. (2) The census circle centre moved along the horizontal velocity; retail uses
+placeholder, often in plain view. (2) The census circle center moved along the horizontal velocity; retail uses
 the 3-D velocity, so on slopes our cull circle sat higher or lower than retail's.
 
 **Evidence** [code, TU3 recompilation, reference only]:
@@ -144,13 +144,13 @@ the 3-D velocity, so on slopes our cull circle sat higher or lower than retail's
   passes `duration - 1 s`; `sub_8246EE30` sets that duration to `clamp(5 s + rest of the current line, 1.5 s,
   7.9 s)`; `sub_8246EF78` cancels the fade (`+1872 = FLT_MAX`) when the state ends. Retail skaters therefore
   fade for 0.8 s and are removed at opacity 0.2, never popping out at full opacity.
-- Census centre: `sub_826B7530` normalises the 3-D velocity (see a local research note).
+- Census center: `sub_826B7530` normalizes the 3-D velocity (see a local research note).
 
 **Change.** New `skate_core::living_world::leave_fade` (`LeaveFadeConfig { fade_seconds: 1.0, despawn_alpha: 0.2
 }` as data-driven retail defaults in `SkaterConfig::leave_fade`, `LeaveFade`, `frames_to_line_end`). The replay
 NPC starts fading 1 s before a line end with no branch group ahead and is removed below 0.2; the opacity is
 published as the `NpcFade` component (alpha) for rendering and mods. Deterministic (a function of the spawn
-record and the tick), host decides the removal, clients mirror. `CensusRange::around` moves the centre along
+record and the tick), host decides the removal, clients mirror. `CensusRange::around` moves the center along
 the 3-D velocity.
 
 **Files.** `crates/skate-core/src/living_world/{leave_fade.rs, mod.rs, config.rs, census.rs, tests.rs,
@@ -253,7 +253,7 @@ test in `living_world/tests.rs` (config off, kept on mod reset, a running popula
   distances (far peds keep the cheaper LOD). NPC skaters fade by time (1 s), so only their ranges scale. Cars
   have no draw fade; their census cull scales like the peds'.
 - Settings: `LivingWorldSettings::npc_draw_distance` (in effect; a mod reads and sets it) and
-  `user_npc_draw_distance` (the player's menu choice). `apply` writes the sanitised value into the core config
+  `user_npc_draw_distance` (the player's menu choice). `apply` writes the sanitized value into the core config
   every step. `reset_mod_overrides()` (mod disabled) restores every mod-changeable field to retail and the draw
   distance to the player's own choice, keeping the session flags.
 - Menu: GRAPHICS row "NPC draw distance" (Left / Right or Enter cycles Retail, 1.5x, 2x, 3x), saved in
@@ -272,7 +272,7 @@ tests.rs}`, `crates/skate-game/src/living_world/{mod.rs, peds.rs, tests.rs}`, `c
 No vehicle file changed (cars read the scaled census circle in the core).
 
 **Verification.**
-- 1x behaviour-identical: the decision stream (every spawn / despawn record with position, heading, seed,
+- 1x behavior-identical: the decision stream (every spawn / despawn record with position, heading, seed,
   choice, plus the final counts) of the core's seeded 100 s run (player circling at 8 m/s, skaters, peds, cars;
   seeds 1234, 99, 7) was dumped before the change and after it: byte-identical (421,816 bytes, same SHA-256).
   Kept as tests: `draw_distance_retail_runs_the_unchanged_config` (no scaled copy at 1x; explicit 1.0 gives the
@@ -325,7 +325,7 @@ vanishing in view".
 `physical:BipedGround` the whole time. The jump from 9 cars to 0 within one second means the focus moved more than
 the 110 m car cull radius in under a second, which walking cannot do.
 
-**Change.** The focus is now the player's character: the skeleton's physical centre of mass and its velocity
+**Change.** The focus is now the player's character: the skeleton's physical center of mass and its velocity
 (`board_frames.centre_of_mass` / `com_velocity`, the Skeleton16144/16176 values that `render_pose.rs` publishes
 into the reckoning fields). These are valid on board, walking, in the air and in a bail. The deck is only the
 fallback when no skater is loaded. Near-zero velocity is zeroed as retail does. The non-finite guard is unchanged.
@@ -366,13 +366,13 @@ deck 500 m off; every ped and car stays within cull range of the player and noth
 - **Evidence:** a headless test on the real DownTown map (stock graphs, pad-driven: step off, drop, walk away)
   measured 2 to 3.5 ms per tick with the board dropped and 27 to 29 ms once hidden, 22 ms of it in that query.
 - **Change:** `query_primitives` returns right after its buffer reset when the volume list is empty. Pure
-  optimisation: the old loop gave the same empty result and the same buffer state. It covers every caller (board,
+  optimization: the old loop gave the same empty result and the same buffer state. It covers every caller (board,
   skeleton, prop world). The bug is in shared physics and exists on `main`; it is fixed in this PR because walking
   away from the board is part of the living world's tests.
 - **Files:** `crates/skate-core/src/physics/board_world.rs`, `crates/skate-core/src/physics/board_world/tests.rs`,
   `crates/skate-game/src/physics/board_away_tests.rs` (new), `crates/skate-game/src/physics.rs` (test module).
 - **Verification:** `empty_volume_query_is_empty_and_resets_the_previous_result` passes with and without the early
-  return (identical behaviour); the ignored data-gated `hidden_board_tick_costs_no_more_than_a_dropped_board`
+  return (identical behavior); the ignored data-gated `hidden_board_tick_costs_no_more_than_a_dropped_board`
   passes with the fix (2.73 ms hidden vs 2.66 ms dropped) and fails without it (29.3 ms). Not yet confirmed in game.
 - **Open:** in one run a board lying 24 m away cost about 1 ms more per tick than at 0 to 10 m, which looked tied
   to where it landed rather than distance; not investigated.
@@ -485,7 +485,7 @@ Living world, engine side (milestone 2: the population core). Runs `skate_core::
 
 Data: the setup group `livingworld` export (`private/living_world/`): `tables.json` (census caps, ranges), `<District>.census.bin`, `skater_profiles.json`, `skater_paths/<District>.bin`. Without it the world stays empty.
 
-Multiplayer seams (no networking here): `NetRole` decides who runs the population. Standalone and Host run the rules; a Client never does and only mirrors records it is given (`PopulationState::apply_records`). Records serialise (`WireRecord`). Retail default: nothing ambient spawns in an online session (culling still runs).
+Multiplayer seams (no networking here): `NetRole` decides who runs the population. Standalone and Host run the rules; a Client never does and only mirrors records it is given (`PopulationState::apply_records`). Records serialize (`WireRecord`). Retail default: nothing ambient spawns in an online session (culling still runs).
 
 Mod surface (doc 26 "Modding"): `LivingWorldSettings` is the one place settings and mods change the living world; mods patch it through `sdk.world.set_tuning('living_world', ...)` (`modding::world_tuning`), and a mod that stops is undone with `LivingWorldSettings::reset_mod_overrides`.
 
@@ -495,7 +495,7 @@ NPC draw distance (QoL, not retail; `skate_core::living_world::draw_distance`): 
 
 ### Census focus
 
-The census focus of one player: the player's character, not the board (retail `sub_826BDB50` -> `sub_826BE7D0` / `sub_826BE870` read the focused skater's `+52` component position and its velocity [code], a local research note). `position` / `velocity` are the skater's physical centre of mass and its velocity, valid on board, walking, in the air and in a bail; the deck stays wherever the board was left. Non-finite values pass through: the census skips such a focus (`population.rs` guard).
+The census focus of one player: the player's character, not the board (retail `sub_826BDB50` -> `sub_826BE7D0` / `sub_826BE870` read the focused skater's `+52` component position and its velocity [code], a local research note). `position` / `velocity` are the skater's physical center of mass and its velocity, valid on board, walking, in the air and in a bail; the deck stays wherever the board was left. Non-finite values pass through: the census skips such a focus (`population.rs` guard).
 
 ## Code reference: living_world/draw_distance.rs
 
@@ -531,7 +531,7 @@ Multiplayer seams (no networking here): a decision is a pure function of (config
 
 2026-10-23. Retail [code, research b544 / b563 / b546]: 3 companion entries (`[[0x830CFD94]+0xE0]+0x5C`); a call (827C5C50) only fills a free entry (state 1); the ambient manager serves it: the pool loads a requested character ahead of the random pick (8245B7A0), the spawn places it on a fitting free line from 4 m out instead of 60 m, nearest to the player (8245C548); it is a normal ambient skater (cap and slots shared). Despawned (any reason, 8245DCE0 -> 827C6180) it is requested again and comes back; a dismiss (827C6270) frees the entry and the skater rides on as an ambient one; the AI reset (8245D398) clears all entries.
 
-Ours: `skaters.rs` `Companion`, `LivingWorld::call_skater` / `dismiss_skater` / `companions` (`population.rs`), config `companion_slots` 3 and `companion_inner` 4 m (data); `reset_world` clears them; the game's `apply_called_skaters` (`living_world/mod.rs`) takes FE 62's `SpawnSkaterRequest`. NOT RETAIL YET (inferred, open in b563): a called character that already rides becomes the companion at once; the excess cull leaves called skaters alone (else a call above the desired count loops); a called skater spawns past the desired count (whether retail's desired-count gate holds it back is not read). Trail (research b566, style keys checked by main): retail draws a blue ribbon trail along the called skater's path (`827AEC80`, style row `trail_follow` = 0x8330C6CBB7402726 at 0x821AEB70, colour row `default`): every 0.05 s the anchor (a bone + 0.25 m up) is sampled, a point is added past 0.25 m, at most 71 points, a jump past ~2.25 m starts over; 4 trails. Ours: `skate_core::indicator_trail` (rules as data, test) and `visual_indicators.rs` `companion_trails` (one trail per called skater, the exported row found by its hash, the teleporter ribbon's passes and fade, hidden on greenscreen). Anchor and curve (b567, bone strings checked by main): the anchor bone is SkaterPresentationDB's `skateboard_root` (82787EA8 +8), so the trail runs 0.25 m above the board; the drawn curve is a uniform cubic B-spline over the points (N - 3 segments, the style's samples each, u in segment units, nothing below 4 points; `827B2BA8`); ours does the same (`Trail::curve`, `find_bone`, root as fallback; test `curve_is_a_b_spline_from_four_points`). Open: the style's wiggle values (not exported), the trail's world matrix (+0x1C30, assumed identity). Automated run: the trail starts when the called skater spawns and again after a respawn; its look is not checked by eye yet. Not yet: the map icon: retail shows called skaters on the in-game HUD minimap (`Sk8ChallengeSystem::MiniMapManager`, b565), which we do not have. Tests: `called_skater_spawns_on_the_nearest_line_and_slots_are_limited`, `called_skater_returns_after_a_cull_and_dismiss_keeps_it_riding`, `calling_a_riding_character_takes_that_skater`; automated Downtown run: Atiba Jefferson called, spawned 1 s later, kept through the excess cull.
+Ours: `skaters.rs` `Companion`, `LivingWorld::call_skater` / `dismiss_skater` / `companions` (`population.rs`), config `companion_slots` 3 and `companion_inner` 4 m (data); `reset_world` clears them; the game's `apply_called_skaters` (`living_world/mod.rs`) takes FE 62's `SpawnSkaterRequest`. NOT RETAIL YET (inferred, open in b563): a called character that already rides becomes the companion at once; the excess cull leaves called skaters alone (else a call above the desired count loops); a called skater spawns past the desired count (whether retail's desired-count gate holds it back is not read). Trail (research b566, style keys checked by main): retail draws a blue ribbon trail along the called skater's path (`827AEC80`, style row `trail_follow` = 0x8330C6CBB7402726 at 0x821AEB70, color row `default`): every 0.05 s the anchor (a bone + 0.25 m up) is sampled, a point is added past 0.25 m, at most 71 points, a jump past ~2.25 m starts over; 4 trails. Ours: `skate_core::indicator_trail` (rules as data, test) and `visual_indicators.rs` `companion_trails` (one trail per called skater, the exported row found by its hash, the teleporter ribbon's passes and fade, hidden on greenscreen). Anchor and curve (b567, bone strings checked by main): the anchor bone is SkaterPresentationDB's `skateboard_root` (82787EA8 +8), so the trail runs 0.25 m above the board; the drawn curve is a uniform cubic B-spline over the points (N - 3 segments, the style's samples each, u in segment units, nothing below 4 points; `827B2BA8`); ours does the same (`Trail::curve`, `find_bone`, root as fallback; test `curve_is_a_b_spline_from_four_points`). Open: the style's wiggle values (not exported), the trail's world matrix (+0x1C30, assumed identity). Automated run: the trail starts when the called skater spawns and again after a respawn; its look is not checked by eye yet. Not yet: the map icon: retail shows called skaters on the in-game HUD minimap (`Sk8ChallengeSystem::MiniMapManager`, b565), which we do not have. Tests: `called_skater_spawns_on_the_nearest_line_and_slots_are_limited`, `called_skater_returns_after_a_cull_and_dismiss_keeps_it_riding`, `calling_a_riding_character_takes_that_skater`; automated Downtown run: Atiba Jefferson called, spawned 1 s later, kept through the excess cull.
 ## Code reference: living_world/skaters.rs
 
 Detail moved out of the code comments of `crates/skate-core/src/living_world/skaters.rs`; each comment there links its section here.
@@ -553,7 +553,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/con
 
 ### Population config
 
-Population configuration. Code constants of the retail build are the defaults here (labelled [code] with their address); data values (census caps, category weights, ranges) are not duplicated: they come from the user's exported tables (`skate-data::living_world`) and a world without that export stays empty. Every field is public so settings and mods can override it; restoring `PopulationConfig::retail()` (plus the data) undoes a mod.
+Population configuration. Code constants of the retail build are the defaults here (labeled [code] with their address); data values (census caps, category weights, ranges) are not duplicated: they come from the user's exported tables (`skate-data::living_world`) and a world without that export stays empty. Every field is public so settings and mods can override it; restoring `PopulationConfig::retail()` (plus the data) undoes a mod.
 
 ## Code reference: living_world/clock.rs
 
@@ -574,7 +574,7 @@ Detail moved out of the code comments of `crates/skate-core/src/living_world/cen
 
 Census kinds (pedestrians, vehicles): the retail living-world census.
 
-Per pass (`sub_826B7530` peds / `sub_826B7760` vehicles) [code]: 1. the census circle: two `livingworld_census_ranges` sets lerped by the observer's speed in km/h (`sub_826B7D60`): spawn ring inner / outer, cull radius, forward offset of the centre along the velocity; 2. cull: entities whose 3-D distance to the centre exceeds the cull radius go (`sub_826BA8B0` / `sub_826BAAB8`, squared-distance test); 3. spawn (only offline, world ready, not zombie for vehicles): 2 attempts, at most 1 spawn (initial populate: 6000 / 600 in an 8-80 m ring): a random point in the ring (`sub_82E17508`), a random heading, the census record painted at that point and its cap times the density (`sub_826B8A28`), the budget and category roll (`sub_826B8B88`), then the factory (pool).
+Per pass (`sub_826B7530` peds / `sub_826B7760` vehicles) [code]: 1. the census circle: two `livingworld_census_ranges` sets lerped by the observer's speed in km/h (`sub_826B7D60`): spawn ring inner / outer, cull radius, forward offset of the center along the velocity; 2. cull: entities whose 3-D distance to the center exceeds the cull radius go (`sub_826BA8B0` / `sub_826BAAB8`, squared-distance test); 3. spawn (only offline, world ready, not zombie for vehicles): 2 attempts, at most 1 spawn (initial populate: 6000 / 600 in an 8-80 m ring): a random point in the ring (`sub_82E17508`), a random heading, the census record painted at that point and its cap times the density (`sub_826B8A28`), the budget and category roll (`sub_826B8B88`), then the factory (pool).
 
 ## Code reference: living_world.rs
 
@@ -639,8 +639,8 @@ Facing rules on the exported lines (fix 16, fix 23, fix 23 corrected). Every eig
   named in a report.
 - Change: Graphics > "Session Timer" (On / Off, saved as `session_timer` in `settings/graphics.json`, on by default,
   older files default to On). `frame_timing::show_session_timer` draws `h:mm:ss` since the game started in a box
-  attached to the FPS overlay: centred under the frame-time counter in its corner (both sit in one column, the
-  `FrameStack`, which `place_overlay` moves when the counter's corner changes; centred since 2026-11-08 evening), shown
+  attached to the FPS overlay: centered under the frame-time counter in its corner (both sit in one column, the
+  `FrameStack`, which `place_overlay` moves when the counter's corner changes; centered since 2026-11-08 evening), shown
   whether or not the counter is on. Its font is 2.4 % of the window height, at least
   14 (UI pixels carry the DPI scale, so it follows window size and DPI). Before 2026-11-08 it was a fixed 12 px box in
   the bottom left corner, unreadable on a 2878x1738 laptop window (ask 539). It logs `SESSION_TIMER h:mm:00` at every full

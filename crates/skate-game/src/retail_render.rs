@@ -239,10 +239,10 @@ pub(crate) struct FrameStateData {
     pub water_tint: Vec4,
     /// Water look ocean swells (family 31, not retail): x slope amplitude (0 = off), y wavelength (m), z speed (m/s).
     pub ocean_swell: Vec4,
-    /// Water look fountains (family 30, not retail): x metres per basin wave tile (0 = off), y basin calming
+    /// Water look fountains (family 30, not retail): x meters per basin wave tile (0 = off), y basin calming
     /// floor, z cascade foam, w the cascade clock (`water_time` at `cascade_rate`).
     pub fountain: Vec4,
-    /// Water look fountain basins (not retail): rgb body colour, w reflection share of the material's mask.
+    /// Water look fountain basins (not retail): rgb body color, w reflection share of the material's mask.
     pub fountain_body: Vec4,
     /// Water look fountain basins (not retail): x wave tilt gain.
     pub fountain_ripple: Vec4,
@@ -407,7 +407,7 @@ pub(crate) enum RenderClass {
     Blended,
     BlendedTwoSided,
     /// Retail `environment.transparent` (fences): blended, but with depth write
-    /// on, colour writes to RGB only and one-sided culling (depth state 2,
+    /// on, color writes to RGB only and one-sided culling (depth state 2,
     /// blend state 27, rasterizer state 1 in `sub_82CEC170`).
     BlendedDepthWrite,
     /// Retail `incandescent.transparent` (lit signs): blended with depth write
@@ -465,7 +465,7 @@ impl RenderClass {
         matches!(self, Self::BlendedDepthWrite | Self::BlendedDepthWriteRgba)
     }
 
-    /// Whether the colour target's alpha channel is masked off (retail blend
+    /// Whether the color target's alpha channel is masked off (retail blend
     /// state 27 writes RGB only).
     fn masks_alpha(self) -> bool {
         self == Self::BlendedDepthWrite
@@ -557,7 +557,7 @@ impl WorldMaterial {
     }
 }
 
-/// Per-draw inputs of the environmentpark programs (b439, b442 / b443): tint and shadow colours.
+/// Per-draw inputs of the environmentpark programs (b439, b442 / b443): tint and shadow colors.
 #[derive(bevy::render::render_resource::ShaderType, Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ParkDraw {
     /// rgb: the piece's tint; w: opacity, 1 except on a sinking prop's blended copy (`physics::prop_water`).
@@ -668,12 +668,12 @@ impl Material for WorldMaterial {
             fragment.shader_defs.push("WORLD_ALPHA_CUTOFF".into());
         }
         // Bevy's blended pipeline leaves depth write off; the retail fence and
-        // lit-sign states write depth, and the fence state only colour.
+        // lit-sign states write depth, and the fence state only color.
         if key.bind_group_data.retail_depth_write {
             if let Some(depth) = &mut descriptor.depth_stencil {
                 depth.depth_write_enabled = true;
             }
-            // Blend states 24 and 27: SRC_ALPHA / INV_SRC_ALPHA / ADD for colour
+            // Blend states 24 and 27: SRC_ALPHA / INV_SRC_ALPHA / ADD for color
             // and alpha alike (Bevy's ALPHA_BLENDING uses ONE for source alpha).
             let over = BlendComponent {
                 src_factor: BlendFactor::SrcAlpha,
@@ -1057,7 +1057,7 @@ impl MaterialTable {
             .unwrap_or_default()
     }
 
-    /// [MaterialTable::material] with a skate.Park piece's draw inputs (its tint, its world's shadow colours): one
+    /// [MaterialTable::material] with a skate.Park piece's draw inputs (its tint, its world's shadow colors): one
     /// material per distinct (slab, class, inputs), sharing the plain one's buffers and pages.
     pub(crate) fn tinted(&mut self, slab: u16, class: RenderClass, draw: ParkDraw, sink: &mut impl AssetSink<WorldMaterial>) -> Handle<WorldMaterial> {
         if draw == ParkDraw::default() {
@@ -1295,7 +1295,7 @@ struct Channel {
 /// `render-parameters.json` predates the advertisement export.
 const ADVERTISEMENT_M_PARAMS_Y: f32 = 0.35;
 
-/// `m_params.y`, the lit-colour multiplier (`surface.w`): 1.0 for environment, others from setup data.
+/// `m_params.y`, the lit-color multiplier (`surface.w`): 1.0 for environment, others from setup data.
 fn material_multiplier(family: u32, tuning: &MaterialTuning, shader: &str) -> f32 {
     let fallback = match family {
         ADVERTISEMENT_FAMILY => ADVERTISEMENT_M_PARAMS_Y,

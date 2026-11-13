@@ -97,7 +97,7 @@ struct Body {
 }
 
 /// Walk kinematic bodies (1.325 m/s) with the obstacles; returns the closest any body came to
-/// an obstacle centre in each tick via `each`.
+/// an obstacle center in each tick via `each`.
 fn run(m: &NavMesh, o: &mut NavObstacles, props: &mut [ObstacleInput], bodies: &mut [Body], ticks: u32, mut each: impl FnMut(u32, &[Body], &NavObstacles, &mut [ObstacleInput])) {
     let p = WanderParams::default();
     let dt = 1.0 / 60.0;
@@ -160,7 +160,7 @@ fn ped_walks_round_a_resting_prop_and_reaches_its_target() {
     assert!(through, "the control walk crosses the prop");
 }
 
-/// A newspaper box (half extents about 0.25 m) whose use waypoint stands 0.42 m in front of its centre, inside the
+/// A newspaper box (half extents about 0.25 m) whose use waypoint stands 0.42 m in front of its center, inside the
 /// box grown by the agent radius (DownTown `EB4A16533EACEC04`, laptop session 2026-10-19: ped #573 pinned 55 s
 /// against the back of the box, 1.045 m from the waypoint, just outside TargetWaypoint's 1.0 m slide).
 fn newspaper_box() -> ObstacleInput {
@@ -190,10 +190,10 @@ fn a_ped_reaches_a_waypoint_in_front_of_its_prop_from_behind() {
 fn a_target_inside_a_cut_snaps_out_only_within_the_snap_radius() {
     let mut o = NavObstacles::new(ObstacleParams::default());
     o.update(&[newspaper_box()]);
-    // 0.42 m in front of the centre: 0.19 m inside the box grown by 0.35, snapped onto the grown edge.
+    // 0.42 m in front of the center: 0.19 m inside the box grown by 0.35, snapped onto the grown edge.
     let s = o.snap_out([9.58, 0.0, 5.0], 0.35).expect("within the snap radius");
     assert!((s[0] - 9.39).abs() < 0.02 && (s[2] - 5.0).abs() < 1e-4, "snapped to {s:?}");
-    // The centre is 0.6 m from the grown edge: farther than the 0.5 m snap, no point.
+    // The center is 0.6 m from the grown edge: farther than the 0.5 m snap, no point.
     assert!(o.snap_out([10.0, 0.0, 5.0], 0.35).is_none());
     // A free point stays where it is.
     assert_eq!(o.snap_out([8.0, 0.0, 5.0], 0.35), Some([8.0, 0.0, 5.0]));

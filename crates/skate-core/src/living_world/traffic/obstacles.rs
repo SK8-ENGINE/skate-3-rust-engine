@@ -14,7 +14,7 @@ pub struct Obstacle {
     pub id: Option<u64>,
 }
 
-/// The car's frame on the ground plane (unit forward / side, centre, half extents).
+/// The car's frame on the ground plane (unit forward / side, center, half extents).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CarFrame {
     pub position: Vec3,
@@ -99,7 +99,7 @@ fn segment_distance(p: [f32; 2], a: [f32; 2], b: [f32; 2]) -> f32 {
 }
 
 /// `sub_82C41BD0` + the `sub_82C41A90` fallback: the record touches the quad's left, front or right edge (the rear
-/// edge at the car centre is not tested) or lies inside it.
+/// edge at the car center is not tested) or lies inside it.
 pub fn in_the_way(o: &Obstacle, q: &[[f32; 2]; 4]) -> bool {
     let p = [o.position[0], o.position[2]];
     if o.radius > 0.0 && [(q[0], q[2]), (q[2], q[3]), (q[3], q[1])].iter().any(|(a, b)| segment_distance(p, *a, *b) <= o.radius) {

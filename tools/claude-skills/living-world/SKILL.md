@@ -17,7 +17,7 @@ setup time (data-driven defaults a mod can override).
 Format references worth checking (credit them if used): community Skate 3 modding tool documentation for AIPATH
 structs, NavPower navmesh constants and trigger types (including Crowd).
 
-Ped behaviour is data: the stock `Pedestrian.stategraph` runs on the shared graph controller (skate-game
+Ped behavior is data: the stock `Pedestrian.stategraph` runs on the shared graph controller (skate-game
 `ped_graph.rs`), and the mood tables come from the exported `tables.json` (`ped_mood.rs`). Car and prop grab splines
 are RW4 GRABDATA records in `livingworld.big`, parsed by `tools/asset_pipeline/grab_data.py`.
 
@@ -30,7 +30,7 @@ are RW4 GRABDATA records in `livingworld.big`, parsed by `tools/asset_pipeline/g
   in free skate are in scope. Angry peds throw held items; peds also randomly throw held items into trash cans.
 - **Vehicles (traffic)** and **movable objects** are part of the same work.
 - **Multiplayer-ready, no networking yet:** decisions run in one place (a future host) and downstream systems
-  consume serialisable spawn / despawn / event records; observers are a list (local player now, remote players
+  consume serializable spawn / despawn / event records; observers are a list (local player now, remote players
   later); stable `LivingWorldId`s; deterministic ticks and seeded per-entity RNGs; a `NetRole` (Standalone default,
   Host, Client stub). No transport or replication code until it is asked for.
 - Confirm a mechanic exists in Skate 3 before researching it (security guards, for example, are Skate 2 leftovers
@@ -39,7 +39,7 @@ are RW4 GRABDATA records in `livingworld.big`, parsed by `tools/asset_pipeline/g
 ## Shared design (do once)
 One `livingworld` setup export group, one population core (budget, spawn ring, cull, slots shared with online
 players), one CrowdCharacter renderer (reuses multiplayer skinned looks), kinematic collision proxies (like
-`physics::network::Proxies`), one `sdk.living_world` mod API (spawn tables, models, behaviour overrides, density,
+`physics::network::Proxies`), one `sdk.living_world` mod API (spawn tables, models, behavior overrides, density,
 cleanup on disable), host-authoritative multiplayer.
 
 ## Move Object / carrying a prop (retail mechanism)
@@ -66,12 +66,12 @@ DownTown: the default arena has no skater lines.
   `render_basis` to them (`ped_bone_basis` picks it per model), or every bone twists 90 degrees and the waist
   pinches.
 - Recomp analysis: `recomp-research/tools/first_pass.py`, `trace.py`; ped chase timelines and vehicle summaries are
-  written per topic from the NPC / traffic trace lines (skill `recomp-scripted-runs`, trace line catalogue).
+  written per topic from the NPC / traffic trace lines (skill `recomp-scripted-runs`, trace line catalog).
 
 ## Testing
 Scripted and headless wherever possible: data-gated `skate-data` tests on your own assets, deterministic population
-tests with a seeded RNG, behaviour-graph unit tests, collision thresholds (knockdown > 3.0, 6.0 flagged), per-frame
-cadence normalised to the 360's ~30 fps. Gameplay feel and NPC encounters come from passive sessions where a person
+tests with a seeded RNG, behavior-graph unit tests, collision thresholds (knockdown > 3.0, 6.0 flagged), per-frame
+cadence normalized to the 360's ~30 fps. Gameplay feel and NPC encounters come from passive sessions where a person
 plays (scripts can't steer to NPCs). Run skill `regression-check` before calling anything done, and document each
 change with its retail evidence and tests.
 

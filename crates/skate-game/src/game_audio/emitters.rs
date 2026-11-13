@@ -5,7 +5,7 @@
 //! The game side follows TU3 (audio-specs/ems-emitters-re.md; doc 11):
 //! - a record is a sphere when its three extents are equal, otherwise an
 //!   ellipsoid whose semi-axes are the extents along forward = scalars[1..4],
-//!   up and side; the listener's normalised distance `d` must be below 1;
+//!   up and side; the listener's normalized distance `d` must be below 1;
 //! - scalars[0] is an inner core: inside it the level is full, outside `d` is
 //!   rescaled over the rest;
 //! - level = attribute volume x falloff curve ((1-d)^2, 1-d or flat);
@@ -52,7 +52,7 @@ pub(crate) struct MusicZoneWinner {
     pub attribute: u64,
     /// The attribute's `aud_playlists` record key.
     pub playlist: u64,
-    /// Normalised distance in the zone (0 inside its core).
+    /// Normalized distance in the zone (0 inside its core).
     pub distance: f32,
     pub level: f32,
 }
@@ -176,7 +176,7 @@ pub(super) struct ZoneState {
 const PUBLISHED_ZONE: u64 = 1 << 63;
 
 /// Per frame, before `native::reverb_frame`: which reverb zones hold the listener (the camera, as
-/// the emitter query's `0x820CFDD4`), with their normalised distance after the inner core
+/// the emitter query's `0x820CFDD4`), with their normalized distance after the inner core
 /// (`sub_828EA918`'s sphere / ellipsoid test, as for the sound emitters) and their attribute's
 /// preset (`99FD793BC30CF0FA`). Native runtime only.
 pub(super) fn reverb_zones(
@@ -306,7 +306,7 @@ struct Shape {
     core: f32,
 }
 
-/// Normalised distance of `listener` in the shape (0 at the core, 1 at the
+/// Normalized distance of `listener` in the shape (0 at the core, 1 at the
 /// edge), or None outside.
 fn reach(shape: &Shape, listener: Vec3) -> Option<f32> {
     let delta = listener - shape.position;

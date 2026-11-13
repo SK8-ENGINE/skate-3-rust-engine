@@ -10,8 +10,8 @@ pass": the numbers, the identity proof and the lessons).
 
 ## Rules
 - Same output is the bar. The setup is NOT byte-reproducible run to run: about 40 files differ between two runs of the
-  same pipeline (map `.skate` files, park layouts, native props, the customiser set id in paths, HUD / menu manifests
-  that hash their temporary sources, the customiser's `*-complete.json` / `timings.json`). Always compare a change
+  same pipeline (map `.skate` files, park layouts, native props, the customizer set id in paths, HUD / menu manifests
+  that hash their temporary sources, the customizer's `*-complete.json` / `timings.json`). Always compare a change
   against a SECOND run of the unchanged pipeline, and check that the file lists are equal.
 - A full install is about 19 GB: put the scratch base on a drive with room, delete it when done.
 - One setup at a time. Setup runs the game exe headless for map validation (`--validate-maps`), so do not run the game
@@ -33,7 +33,7 @@ pass": the numbers, the identity proof and the lessons).
    It writes `<label>-timing.log` (seconds, progress line) and `<label>-hashes.tsv` (path, size, sha256). Add
    `-X faulthandler` after `py -3.13` when testing threading changes.
 4. A second baseline (`--base base2 --label base2`) for the noise set, then the change (`--label new1`).
-5. Compare: normalise the customiser set id (`sed -E 's#customisation/sets/[^/]+/#customisation/sets/ID/#'`), sort,
+5. Compare: normalize the customizer set id (`sed -E 's#customisation/sets/[^/]+/#customisation/sets/ID/#'`), sort,
    `comm -3` per pair; every path that differs new-vs-base must be in the base-vs-base set, and the path lists must be
    equal. Explain any extra file (for example a pipeline fingerprint recorded in a file) before landing.
 6. Where the time goes: the timing log; per-map phases in the bench install's `maps.json` (`phase_seconds`); inside a

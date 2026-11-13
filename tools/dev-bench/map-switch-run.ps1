@@ -1,5 +1,5 @@
 # Unattended map switch measurement (needs a build with SKATE_MAP_SWITCH, map_transition.rs): start on -From, switch
-# to -To after -After seconds, muted and minimised under the game lock, then print the FRAME_HITCH lines after the
+# to -To after -After seconds, muted and minimized under the game lock, then print the FRAME_HITCH lines after the
 # switch request. Usage: map-switch-run.ps1 -Checkout <dir> [-From University] [-To DownTown] [-After 15] [-Extra <regex>] [-GameArgs <args>] [-KeepLog <path>]
 param(
     [Parameter(Mandatory)][string]$Checkout,

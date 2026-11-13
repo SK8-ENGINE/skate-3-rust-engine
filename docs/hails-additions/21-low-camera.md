@@ -73,7 +73,7 @@ static writer of +20 was found either (the value presumably arrives with the pro
 - `camera/shot_data.rs`: a tuning layer over the stock shots, applied when a shot is loaded (also inside blend trees).
 - Pause menu (`graphics_menu.rs`): **SKATER > Camera angle High / Low** (Left / Right / A), saved at once. Switching
   live is safe: the graph re-evaluates its priority states on the next tick and blends to the other branch's shot.
-- Default: **High**, the engine's behaviour so far. Retail has no silent default (the boot flow asks), so no shipped
+- Default: **High**, the engine's behavior so far. Retail has no silent default (the boot flow asks), so no shipped
   value exists to copy; the retail constructor's 0 (Low) is overwritten by the player's choice before play.
 
 ### Mod surface (Lua API 2, `sdk.capabilities.camera` = 4)

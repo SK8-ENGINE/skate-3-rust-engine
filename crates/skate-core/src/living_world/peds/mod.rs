@@ -6,6 +6,7 @@ pub mod brain;
 pub mod chase;
 pub mod chase_alert;
 pub mod conversation;
+pub mod head_look;
 pub mod perception;
 pub mod avoid;
 pub mod takedown;

@@ -211,7 +211,7 @@ pub fn lost(line: &ReplayLine, n: u32, pos: Vec3, r: f32) -> bool {
     if !far(c) {
         return false;
     }
-    // Node n's own step, normalised in 3D (`sub_82454648`, b527); the next node's only when n has none.
+    // Node n's own step, normalized in 3D (`sub_82454648`, b527); the next node's only when n has none.
     let next = line.nodes.get(n as usize + 1).unwrap_or(node);
     let dir = if node.step != [0.0; 3] { node.step } else { next.step };
     let len = (dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]).sqrt();

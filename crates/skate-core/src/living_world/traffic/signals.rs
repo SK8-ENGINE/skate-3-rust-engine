@@ -1,4 +1,4 @@
-//! Traffic signals: retail's 4 controllers with car and walk light programmes, ticked at a fixed 1/60 s.
+//! Traffic signals: retail's 4 controllers with car and walk light programs, ticked at a fixed 1/60 s.
 //! Retail mechanism (826B1540, 82E158D8, 826B2C18) and data: docs/hails-additions/26h-living-world-traffic.md#traffic-signals
 
 use super::graph::{RoadNetwork, ENDS};
@@ -9,7 +9,7 @@ pub const CONTROLLERS: usize = 4;
 pub const TICK_SECONDS: f32 = 1.0 / 60.0;
 /// Signal ticks per second of game time: one per 60 Hz world step [trace].
 pub const TICKS_PER_SECOND: f64 = 60.0;
-/// Distance to a signalled junction at which a priority vehicle requests green [code
+/// Distance to a signaled junction at which a priority vehicle requests green [code
 /// `0x8220E13C`, `sub_826B2C18`].
 pub const PRIORITY_DISTANCE: f32 = 50.0;
 
@@ -290,7 +290,7 @@ impl SignalClock {
         for c in &mut self.controllers {
             if c.index & 1 == parity {
                 let g = c.to_green.0;
-                // Retail uses +312 for both lists here (+312 == +316 in both programmes).
+                // Retail uses +312 for both lists here (+312 == +316 in both programs).
                 c.jump(g, g);
             } else {
                 let (car, walk) = c.to_red;
@@ -305,7 +305,7 @@ impl SignalClock {
         self.pending_green = None;
     }
 
-    /// Rebuild the programmes (a mod changed the timings); keeps the tick count.
+    /// Rebuild the programs (a mod changed the timings); keeps the tick count.
     pub fn set_timings(&mut self, timings: SignalTimings) {
         self.timings = timings;
         self.controllers = std::array::from_fn(|i| Controller::new(i as u8, &timings));
@@ -315,7 +315,7 @@ impl SignalClock {
 }
 
 /// The manager's priority test (`sub_826B2C18`): the end whose controller a priority vehicle
-/// should turn green, if it is on a lane within [`PRIORITY_DISTANCE`] of a signalled junction
+/// should turn green, if it is on a lane within [`PRIORITY_DISTANCE`] of a signaled junction
 /// (`segment length - distance <= 50`) or on a connector of one.
 pub fn priority_end(net: &RoadNetwork, place: &super::cursor::Place, distance: f32, chosen_connector: Option<usize>) -> Option<u8> {
     use super::cursor::Place;

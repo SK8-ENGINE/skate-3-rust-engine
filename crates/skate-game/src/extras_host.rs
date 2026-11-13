@@ -133,7 +133,7 @@ impl CreditsMods {
             lines
                 .into_iter()
                 .map(|l| skate_core::credits::Entry {
-                    // A string id goes through GetLine's localisation; anything else is literal text (APT's `#`).
+                    // A string id goes through GetLine's localization; anything else is literal text (APT's `#`).
                     text: if l.text.starts_with('#') { l.text } else { format!("#{}", l.text) },
                     font: 2,
                     size: l.size,

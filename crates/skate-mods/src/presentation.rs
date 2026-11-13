@@ -85,7 +85,7 @@ pub enum CameraAngle {
 }
 
 /// Replacement values for one stock camera shot (`camera_shots` collection), named
-/// after the retail attributes and in their units (metres, degrees, seconds). Unset
+/// after the retail attributes and in their units (meters, degrees, seconds). Unset
 /// fields keep the stock value. Applies to every place the shot is used, including
 /// blend trees that name it as a child.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
@@ -146,7 +146,7 @@ pub struct WaterLookPatch {
     pub ripple_scale: Option<f32>,
     /// Extra environment cube mip levels: a blurrier reflection (retail 0).
     pub reflection_blur: Option<f32>,
-    /// Reflection colour multiplier (retail 1, 1, 1).
+    /// Reflection color multiplier (retail 1, 1, 1).
     pub reflection_tint: Option<[f32; 3]>,
     /// Third, rotated wave sample against visible tiling.
     pub third_wave: Option<bool>,
@@ -167,13 +167,13 @@ pub struct WaterLookPatch {
     pub shallow_splash: Option<f32>,
     /// Calm open-sea swells (`ocean.default`) as a slope amplitude, 0 = none (retail none).
     pub ocean_swell: Option<f32>,
-    /// Wavelength of the longest swell in metres.
+    /// Wavelength of the longest swell in meters.
     pub ocean_swell_length: Option<f32>,
     /// Speed of the longest swell in m/s.
     pub ocean_swell_speed: Option<f32>,
     /// Fountain basins take the large water's waves, scaled down (retail off).
     pub fountain_water: Option<bool>,
-    /// Metres per basin wave tile.
+    /// Meters per basin wave tile.
     pub fountain_tile: Option<f32>,
     /// Least wave strength on small basins, 0..1 (retail 0).
     pub fountain_waves: Option<f32>,
@@ -181,7 +181,7 @@ pub struct WaterLookPatch {
     pub cascade_rate: Option<f32>,
     /// Foam on cascades, 0 = none (retail none).
     pub cascade_foam: Option<f32>,
-    /// Basin body colour under the lighting (linear rgb, 0..1 each).
+    /// Basin body color under the lighting (linear rgb, 0..1 each).
     pub fountain_colour: Option<[f32; 3]>,
     /// Basin reflection strength as a share of the material's own mask, 0..2.
     pub fountain_reflection: Option<f32>,

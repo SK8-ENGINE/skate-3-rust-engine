@@ -1,4 +1,4 @@
-# Muted, minimised frame-time run of a checkout's staged release exe (skill regression-check, frame time section).
+# Muted, minimized frame-time run of a checkout's staged release exe (skill regression-check, frame time section).
 # Prints median / p90 / p99 frame_ms of frames 100+ from the run's trace-all frames.tsv.
 # Usage: frame-time-run.ps1 -Checkout <dir> -Map <map .skate path> [-Seconds 60] [-NoMods] (no mods loaded, like a player
 # without mods; by default the checkout's dev mods load) [-KeepLog <path>]

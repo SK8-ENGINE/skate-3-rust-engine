@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 /// The six wheel bones of the car rig [data, V0].
 pub(crate) const WHEEL_BONES: [&str; 6] = ["LeftFront_wheel", "RightFront_wheel", "LeftRear_wheel_1", "RightRear_wheel_1", "LeftRear_wheel_2", "RightRear_wheel_2"];
-/// Default scale on the tint colours: 1, retail (`vehicle_defaultPS` multiplies the colours as
+/// Default scale on the tint colors: 1, retail (`vehicle_defaultPS` multiplies the colors as
 /// they are). A mod overrides it ([`VehicleOverrides::paint_gain`]).
 pub(crate) const PAINT_GAIN: f32 = 1.0;
 /// Solid ids of car proxies: a tag in the top bits keeps them apart from NPCs and mod bodies.
@@ -207,7 +207,7 @@ pub(crate) fn parse_vehicle_data(vehicles: &[u8], tables: Option<&[u8]>) -> Resu
             // Driver block +36 / +20 (`82C42348`, b74).
             h.enabled_chance = num("Hash_50E084076390A573").unwrap_or(h.enabled_chance);
             h.blocked_long_chance = num("Hash_20E9C6487FDDBDE8").unwrap_or(h.blocked_long_chance);
-            // The manoeuvre decider's driver values (b74: driver block +28 go, +24 least loaded; hashed fields).
+            // The maneuver decider's driver values (b74: driver block +28 go, +24 least loaded; hashed fields).
             let m = &mut params.manoeuvre;
             m.lane_change_chance = num("Hash_52CF2CF346699CA1").unwrap_or(m.lane_change_chance);
             m.least_loaded_chance = num("Hash_7C6B48BD9ADF8E6E").unwrap_or(m.least_loaded_chance);
@@ -302,13 +302,15 @@ pub(crate) struct VehicleOverrides {
     pub params: BTreeMap<String, FollowParams>,
     /// Connector choice (retail: least loaded on every car).
     pub connector_choice: ConnectorChoice,
-    /// Scale on both tint colours; `None` = [`PAINT_GAIN`] (1, retail).
+    /// Scale on both tint colors; `None` = [`PAINT_GAIN`] (1, retail).
     pub paint_gain: Option<f32>,
     /// Material name (`character.livingworld_vehicles`, ...) -> `m_params` rows over the export's.
     pub material_params: BTreeMap<String, Vec<[f32; 4]>>,
     /// Environment cube id -> asset path of a six-face strip over the export's; `""` draws the
     /// material without reflections.
     pub environments: BTreeMap<String, String>,
+    /// A mod's new entity -> the entity it was copied from (its spec and follower values).
+    pub bases: BTreeMap<String, String>,
 }
 
 /// One traffic car.
@@ -470,8 +472,9 @@ pub(crate) fn car_from_record(
     };
     let (chassis_id, chassis_c) = pick(&m.chassis_ids, &m.chassis, *chassis, [0.0, 0.0, 1.0, 1.0]);
     let (secondary_id, secondary_c) = pick(&m.secondary_ids, &m.secondary, *secondary, [1.0, 0.0, 0.0, 1.0]);
-    let spec = data.specs.get(entity).cloned().unwrap_or(VehicleSpec { engine: "default".into(), params: FollowParams::default(), driver: "default".into() });
-    let mut params = overrides.params.get(entity).copied().unwrap_or(spec.params);
+    let base = overrides.bases.get(entity).unwrap_or(entity);
+    let spec = data.specs.get(entity).or_else(|| data.specs.get(base)).cloned().unwrap_or(VehicleSpec { engine: "default".into(), params: FollowParams::default(), driver: "default".into() });
+    let mut params = overrides.params.get(entity).or_else(|| overrides.params.get(base)).copied().unwrap_or(spec.params);
     // Mod horn values per driver record (`traffic_horn`), then the driver bits rolled from the spawn seed.
     for key in ["all", spec.driver.as_str()] {
         if let Some(h) = horn_patches.get(key) {
@@ -562,6 +565,7 @@ pub(crate) fn apply_vehicle_records(
         choose_first(net, &traffic.cars, &mut car, overrides.connector_choice, &mut traffic.rng);
         let t = car_transform(net, &car);
         events.write(TrafficEvent::Spawned { id: s.id, entity: meta.entity.clone(), model: meta.model.clone(), chassis: meta.chassis_id.clone() });
+        debug!("TRAFFIC_SPAWN #{} {} model {} glb {}", s.id.serial, meta.entity, meta.model, meta.glb);
         let e = commands
             .spawn((
                 Name::new(format!("Traffic car {} ({})", s.id.serial, meta.entity)),
@@ -1032,7 +1036,7 @@ impl CarLook {
     }
 }
 
-/// Car materials per (source material, colours, gain), shared by cars with the same pair, and the
+/// Car materials per (source material, colors, gain), shared by cars with the same pair, and the
 /// environment cubes by asset path.
 #[derive(Resource, Default)]
 pub(crate) struct CarMaterials {

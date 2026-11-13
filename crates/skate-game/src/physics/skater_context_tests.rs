@@ -784,7 +784,7 @@ fn a_skater_latches_onto_a_traffic_car_rides_and_lets_go() {
     assert!(states[340..].iter().all(|s| *s != PhysicalStateId::Skitching), "letting go leaves Skitching");
 }
 
-/// A simulated NPC body built on another body's animation source (`NpcSimPool::source`, the load-time optimisation of
+/// A simulated NPC body built on another body's animation source (`NpcSimPool::source`, the load-time optimization of
 /// 2026-10-16: no second disk read of the banks and poses) rides exactly as a body loaded from disk: both ride the same
 /// push for 240 ticks in their own contexts and their decks and skeleton roots match bit for bit every tick.
 #[test]

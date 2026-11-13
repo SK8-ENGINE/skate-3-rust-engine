@@ -389,7 +389,7 @@ impl Seams {
     /// reading the wheel positions of that frame (`+384 + 16·w`), and a hit's w7 stays set until
     /// the next call clears it — one console frame, 6.25 audio blocks, a little longer than the
     /// 32 ms walk, so the program sees every hit once (twice about one time in 24). (The recomp
-    /// renders uncapped, ~345 fps, so its seams differ.) This keeps the console's behaviour at any
+    /// renders uncapped, ~345 fps, so its seams differ.) This keeps the console's behavior at any
     /// real frame rate:
     /// - virtual process calls on a fixed 30 Hz grid of real time, each at the wheel positions
     ///   interpolated along the rendered trajectory (`s.wheel_position` = this frame's rendered

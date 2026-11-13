@@ -100,7 +100,7 @@ impl RetailMenus {
     }
 }
 
-/// The JSON a mod's on_event receives (also the serialised form of an action).
+/// The JSON a mod's on_event receives (also the serialized form of an action).
 pub(crate) fn event_json(event: &MenuEvent, value: Option<SettingValue>) -> Value {
     let entry = event.action.entry();
     let name = match &event.action {
@@ -235,7 +235,7 @@ fn challenge_map(asset_root: &std::path::Path, world_maps: &std::collections::BT
 
 impl RetailMenus {
     /// Every Challenge Map location with a teleport matrix, and every skate.Park world a destination names, gets the
-    /// engine's teleport handler (so it is enabled); every other node keeps its hooks and stays greyed until a handler
+    /// engine's teleport handler (so it is enabled); every other node keeps its hooks and stays grayed until a handler
     /// exists (user, 2026-10-18). `teleports`: (node kind, node id, destination key).
     pub(crate) fn register_teleports(&mut self, teleports: &[(EntryKind, String, String)]) -> usize {
         let locations: Vec<(EntryRef, String)> = self
@@ -294,8 +294,8 @@ impl Plugin for RetailMenusPlugin {
 /// Owner of the stored settings layer.
 const STORED_OWNER: &str = "settings";
 
-/// Rows with a retail rule whose effect the engine does not have yet (user, 2026-10-13: grey them like the other
-/// unported items). They get no stored layer, so they stay greyed and show retail's default; a mod's value layer
+/// Rows with a retail rule whose effect the engine does not have yet (user, 2026-10-13: gray them like the other
+/// unported items). They get no stored layer, so they stay grayed and show retail's default; a mod's value layer
 /// still enables them. Remove an id here when its feature lands (doc 31 "Stored settings").
 const NO_EFFECT_YET: [&str; 8] = [
     "ID_GAMESETTINGS_SUBTITLE_TOGGLE",
@@ -1001,7 +1001,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Rows whose effect is not ported stay greyed (no stored layer) until a mod binds a value.
+    /// Rows whose effect is not ported stay grayed (no stored layer) until a mod binds a value.
     #[test]
     fn rows_without_an_effect_stay_greyed_until_a_mod_binds_them() {
         use skate_core::menus::Setting;

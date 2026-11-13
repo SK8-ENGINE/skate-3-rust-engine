@@ -44,8 +44,8 @@ fn normalize(v: [f32; 2]) -> Option<[f32; 2]> {
 }
 
 impl Heading {
-    /// One update (82665388, b571): moving faster than the minimum, ease towards the travel direction and normalise;
-    /// slower, ease towards the camera's forward (x, z) without normalising.
+    /// One update (82665388, b571): moving faster than the minimum, ease towards the travel direction and normalize;
+    /// slower, ease towards the camera's forward (x, z) without normalizing.
     pub fn step(&mut self, velocity: [f32; 2], camera: [f32; 2], rules: &HeadingRules) {
         let speed = (velocity[0] * velocity[0] + velocity[1] * velocity[1]).sqrt();
         let mix = |a: [f32; 2], b: [f32; 2]| [rules.keep * a[0] + (1.0 - rules.keep) * b[0], rules.keep * a[1] + (1.0 - rules.keep) * b[1]];
@@ -78,10 +78,10 @@ pub const NORTH: [f32; 2] = [0.0, -1.0];
 #[derive(Clone, Debug, PartialEq)]
 pub struct IconRules {
     /// The map matrix the draw receives (82665388 r5, traced in the recomp 2026-10-23, constant all run): pixels per map
-    /// unit (= metre) on x and y, and the disc centre on the 1280 x 720 HUD.
+    /// unit (= meter) on x and y, and the disc center on the 1280 x 720 HUD.
     pub scale: [f32; 2],
     pub centre: [f32; 2],
-    /// Icons farther out are held on this radius, map units (every far icon quad's centre sat at 71.28 in the trace;
+    /// Icons farther out are held on this radius, map units (every far icon quad's center sat at 71.28 in the trace;
     /// 0x821E956C = 71.281).
     pub clamp: f32,
     /// Icon size per unit of its scale (0x821735AC = 32).
@@ -160,7 +160,7 @@ pub fn place(icon: &Icon, player: [f32; 2], heading: &Heading, rules: &IconRules
         at = [at[0] * rules.clamp / r, at[1] * rules.clamp / r];
     }
     let half = rules.size * icon.scale / 2.0;
-    // The icon turns with the map plus its own angle; map units, then the matrix's scale and centre.
+    // The icon turns with the map plus its own angle; map units, then the matrix's scale and center.
     let turn = icon.angle + needle_degrees(heading).to_radians();
     let (s, c) = turn.sin_cos();
     let corner = |x: f32, y: f32| [rules.centre[0] + (at[0] + x * c - y * s) * rules.scale[0], rules.centre[1] + (at[1] + x * s + y * c) * rules.scale[1]];
@@ -185,7 +185,7 @@ mod tests {
         let rules = IconRules::default();
         let north = Heading(NORTH);
         let icon = |x: f32, z: f32| Icon { id: "t".into(), texture: "mini_skater".into(), position: [x, z], angle: 0.0, scale: 1.0, fade: true, max_distance: 0.0, colour: [1.0; 4] };
-        // 20 m ahead: 20 x 0.6293 px straight up from the centre, 32 units = 20.1 px wide.
+        // 20 m ahead: 20 x 0.6293 px straight up from the center, 32 units = 20.1 px wide.
         let (c, a) = place(&icon(0.0, -20.0), [0.0, 0.0], &north, &rules).unwrap();
         let mid = [(c[0][0] + c[2][0]) / 2.0, (c[0][1] + c[2][1]) / 2.0];
         assert!((mid[0] - 1128.0).abs() < 1e-3 && (mid[1] - (110.0 - 20.0 * 0.6293)).abs() < 1e-3);
@@ -215,7 +215,7 @@ mod tests {
             h.step([5.0, 0.0], [0.0, 1.0], &rules);
         }
         assert!((h.0[0] - 1.0).abs() < 1e-3);
-        // Slow: eases towards the camera's forward, not normalised.
+        // Slow: eases towards the camera's forward, not normalized.
         h.step([0.1, 0.0], [0.0, -1.0], &rules);
         assert!((h.0[0] - 0.85).abs() < 1e-3 && (h.0[1] + 0.15).abs() < 1e-3);
         let mut needle = Heading([0.0, -1.0]);

@@ -58,7 +58,7 @@ fn skater_with_no_ground_below_respawns_after_301_air_ticks() {
     // Request on air tick 301, then state 702 and the checkpoint reply follow within a few ticks.
     let elapsed = event.tick - first + 1;
     assert!((301..=320).contains(&elapsed), "respawn {elapsed} ticks after leaving the ground");
-    // Serialisable for a future multiplayer host.
+    // Serializable for a future multiplayer host.
     let json = serde_json::to_string(event).unwrap();
     assert!(json.contains("\"reason\":\"air_timeout\""), "{json}");
 }

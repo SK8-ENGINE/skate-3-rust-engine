@@ -254,7 +254,7 @@ mod windows {
         if result != 0 {
             return None;
         }
-        // SAFETY: zero-initialised storage the successful call filled.
+        // SAFETY: zero-initialized storage the successful call filled.
         let capabilities = unsafe { capabilities.assume_init() };
         (capabilities.vendor_id != 0).then_some((capabilities.vendor_id, capabilities.product_id))
     }
@@ -456,7 +456,7 @@ mod sdl {
         kind: Arc<ControllerKind>,
     }
 
-    /// SDL must be pumped on the thread that initialised it, while Bevy runs
+    /// SDL must be pumped on the thread that initialized it, while Bevy runs
     /// systems on a pool; a dedicated thread owns SDL and publishes snapshots.
     pub(super) fn start() -> Result<&'static Shared, String> {
         let shared: &'static Shared =

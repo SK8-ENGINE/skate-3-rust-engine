@@ -169,14 +169,14 @@ pub(crate) struct GrabEdge {
     /// Local box axis of the face normal (0 or 2) and its sign.
     pub axis: usize,
     pub side: f32,
-    /// Grip position along the edge (local axis `2 - axis`), metres from the centre.
+    /// Grip position along the edge (local axis `2 - axis`), meters from the center.
     pub grip: f32,
 }
 
 /// The held prop's grab frame this tick (world space).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GrabFrame {
-    /// Grip point on the grab face (centre height).
+    /// Grip point on the grab face (center height).
     pub grip: Vector3,
     /// Horizontal unit normal from the skater into the prop.
     pub forward: Vector3,
@@ -201,7 +201,7 @@ fn grab_frame(body: &HeldBody, edge: GrabEdge) -> Option<GrabFrame> {
     let half_along = half[2 - edge.axis] * flat_len(Vector3::new(along[0], 0.0, along[2]));
     // The interim record lies on the face's top edge (NOT RETAIL YET: a
     // prop's authored grab splines, DMO physics definition +136, are not
-    // loaded); the box's vertical half height over its centre.
+    // loaded); the box's vertical half height over its center.
     let top = (0..3).map(|i| (half[i] * body.basis.columns[i][1]).abs()).sum::<f32>();
     let lift = Vector3::new(0.0, top, 0.0);
     let ends = [add(add(face, scale(edge_dir, -half_along)), lift), add(add(face, scale(edge_dir, half_along)), lift)];
@@ -401,7 +401,7 @@ pub(crate) struct PropCarry {
     base: CarryLocomotion,
     /// Move Object tuning in effect (base + mod overrides).
     locomotion: CarryLocomotion,
-    /// Retail controller state of this slot (serialisable plain data).
+    /// Retail controller state of this slot (serializable plain data).
     controller: MoveObjectController,
     /// Interim grab record of the held prop (props without authored grab splines).
     edge: Option<GrabEdge>,

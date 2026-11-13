@@ -17,7 +17,7 @@
 //!   level(1) (level(5) while balancing, (6) with `+308`, (7) with `+760`) / 32767 and pitch =
 //!   pitch(2) / 4096; when the trigger drops the stream stops (`sub_824CEF60`).
 //!
-//! Not modelled: the owner bus (`sub_824CEAF0`'s chain, send level(4)) — the voices mix dry.
+//! Not modeled: the owner bus (`sub_824CEAF0`'s chain, send level(4)); the voices mix dry.
 use super::{AudioState, Outputs};
 
 /// What the component needs from a stream player (the host plays the two recordings).

@@ -24,7 +24,7 @@ fn record(max: u32, cats: &[(&str, f32)]) -> CensusRecord {
     }
 }
 
-/// 2 km x 2 km grid centred on the origin, 4 m cells. Peds: `aletown` (15) everywhere except the
+/// 2 km x 2 km grid centered on the origin, 4 m cells. Peds: `aletown` (15) everywhere except the
 /// strip x > 600 (unpainted); vehicles: `dwntwn` (30) everywhere.
 fn map() -> CensusMap {
     let (w, h) = (500u32, 500u32);
@@ -75,7 +75,7 @@ pub(super) fn roads() -> &'static traffic::RoadNetwork {
     })
 }
 
-/// The dwntwn vehicle categories with one entity each (4.5 x 1.9 m, 10 chassis colours).
+/// The dwntwn vehicle categories with one entity each (4.5 x 1.9 m, 10 chassis colors).
 pub(super) fn catalog() -> &'static VehicleCatalog {
     static CAT: std::sync::OnceLock<VehicleCatalog> = std::sync::OnceLock::new();
     CAT.get_or_init(|| {
@@ -150,7 +150,7 @@ fn ped_circle_lerps_by_speed_like_sub_826b7d60() {
     // Vehicles: equal sets (A.key >= B.key) → set A as is.
     let v = VEHICLES.at(120.0);
     assert_eq!((v.spawn_inner, v.spawn_outer, v.cull), (80.0, 100.0, 110.0));
-    // Speed key from |velocity| x 3.6: 22.2 m/s = 80 km/h; the centre moves 20 m forward.
+    // Speed key from |velocity| x 3.6: 22.2 m/s = 80 km/h; the center moves 20 m forward.
     let (c, centre) = PEDS.around(&Observer { position: [0.0; 3], velocity: [0.0, 0.0, 80.0 / 3.6] });
     assert!((c.spawn_outer - 80.0).abs() < 1e-3);
     assert!((centre[2] - 20.0).abs() < 1e-3 && centre[0].abs() < 1e-6);
@@ -158,7 +158,7 @@ fn ped_circle_lerps_by_speed_like_sub_826b7d60() {
 
 #[test]
 fn census_centre_follows_the_3d_velocity_like_sub_826b7530() {
-    // Down a 3-4-5 slope at 100 km/h: retail normalises the 3-D velocity, so the 20 m offset
+    // Down a 3-4-5 slope at 100 km/h: retail normalizes the 3-D velocity, so the 20 m offset
     // splits 12 m forward and 16 m down (the old horizontal direction put all 20 m forward).
     let s = 100.0 / 3.6;
     let (c, centre) = PEDS.around(&Observer { position: [1.0, 50.0, 2.0], velocity: [0.0, -0.8 * s, 0.6 * s] });
@@ -166,7 +166,7 @@ fn census_centre_follows_the_3d_velocity_like_sub_826b7530() {
     assert!((centre[0] - 1.0).abs() < 1e-4, "{centre:?}");
     assert!((centre[1] - 34.0).abs() < 1e-3, "{centre:?}");
     assert!((centre[2] - 14.0).abs() < 1e-3, "{centre:?}");
-    // Falling straight down still moves the centre (horizontal speed 0).
+    // Falling straight down still moves the center (horizontal speed 0).
     let (_, centre) = PEDS.around(&Observer { position: [0.0; 3], velocity: [0.0, -s, 0.0] });
     assert!((centre[1] + 20.0).abs() < 1e-3, "{centre:?}");
 }
@@ -784,7 +784,7 @@ fn entity_and_lane_rolls_follow_the_code_formulas() {
 #[test]
 fn road_under_needs_the_road_surface() {
     let net = roads();
-    // Eastbound road of the z = 0 line: centre z = 5, 8 m wide.
+    // Eastbound road of the z = 0 line: center z = 5, 8 m wide.
     let (seg, d) = road_under(net, [10.0, 0.0, 6.0]).unwrap();
     assert_eq!(net.segments[seg].id.0, 1000 + 10 * 2);
     assert_eq!(d, 1008.0, "the start of the piece under the point");
@@ -1108,4 +1108,20 @@ fn a_challenge_ai_skater_spawns_through_the_records_and_only_the_challenge_remov
     let again = world.spawn_scripted(line, "reynolds_race", 1, [0.0; 3], 0.0);
     let crate::living_world::Decision::Spawn(r2) = &again else { panic!() };
     assert!(r2.id.serial > id.serial, "serials never repeat");
+}
+
+#[test]
+fn a_mod_spawn_table_replaces_a_category_and_adds_cars_copied_from_existing_ones() {
+    use std::collections::BTreeMap;
+    let stock = catalog();
+    let entities = BTreeMap::from([("my_cab".to_string(), "taxis01".to_string()), ("ghost".to_string(), "nope01".to_string())]);
+    let tables = BTreeMap::from([("taxis".to_string(), vec!["my_cab".to_string(), "taxis01".to_string(), "missing".to_string()]), ("sports".to_string(), vec![])]);
+    let (cat, unknown) = stock.patched(&entities, &tables);
+    assert_eq!(cat.categories["taxis"], ["my_cab", "taxis01"]);
+    assert!(cat.categories["sports"].is_empty(), "an empty table spawns none of that category");
+    assert_eq!(cat.entities["my_cab"], stock.entities["taxis01"], "a new car starts as its base");
+    assert_eq!(cat.categories["sedans"], stock.categories["sedans"], "other categories stay retail");
+    assert_eq!(unknown, ["nope01", "missing"]);
+    let (same, none) = stock.patched(&BTreeMap::new(), &BTreeMap::new());
+    assert_eq!((&same, none.len()), (stock, 0));
 }

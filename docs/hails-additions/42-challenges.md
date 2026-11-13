@@ -49,7 +49,7 @@ Details:
   killed it groups are such rows, so the lookup accepts both.
 - `map_volumes.arena_volumes` / `district_volumes` gained `strict` (default on, so the map `.triggers` export is
   unchanged). The challenge export reads hulls with it off: `ots_indu_02`'s boundary box is about 20 m larger than its
-  stored bounds on two axes (centre matching), so it is kept and flagged `bounds_mismatch`. Which of the two retail
+  stored bounds on two axes (center matching), so it is kept and flagged `bounds_mismatch`. Which of the two retail
   tests (box, bounds or both) is open; the engine port decides from retail code.
 - Kept DLC maps keep their challenge rows across a refresh without the DLC folder (`retained.py`).
 - Result on the disc: 16 own the spots on 3 maps; `ots_ind_01` is left out (no StartLocation, a leftover beside
@@ -127,7 +127,7 @@ D-pad Up press (826660F0 mode 0 -> 82D52D68) signs up with no popup and no sound
 - Ours: with no run going and gameplay up, the nearest challenge whose sphere holds the skater's feet shows the
   prompt: `PopupMods.signup_state` (`sign_up_state`: 5 for own the spot, else 1) and its title (text id) for the
   stage, which sends the overlay `SetScreenState`; teleporters now send their state 2 the same way and keep the overlay when both apply. D-pad Up
-  (not with the session marker modifier) writes `ChallengeSignUp { body, challenge }` (a serialisable message; the
+  (not with the session marker modifier) writes `ChallengeSignUp { body, challenge }` (a serializable message; the
   authority starts the run), which starts it as `SKATE_CHALLENGE` does. Without the stage, a text line shows.
 - Order: the sign-up runs after the teleporter prompt and before the menu stage (`MenuStageSet`), so the stage reads
   one frame's final prompt.
@@ -137,7 +137,7 @@ D-pad Up press (826660F0 mode 0 -> 82D52D68) signs up with no popup and no sound
   holds the player, create-a-spot (eChallengeTypes 35) last in query order and the others before them in reverse
   order (82D29C38). The overlay then shows the Challenge state 1 with `ID_SIGNUP_MULTIPLIESIGNUP_SIGNUPHUD`
   ("Multiple Challenges", 82665DA0), and D-pad Up opens a popup (82D0A8D0): that title, an empty body (`#`), up to 4
-  entries labelled by each challenge's Title id (create-a-spot: `#CreateASpot Needs A Name!`), cancelable; a pick
+  entries labeled by each challenge's Title id (create-a-spot: `#CreateASpot Needs A Name!`), cancelable; a pick
   signs up for that challenge (82D52D68, no second confirm), B starts nothing; no sound on the press path.
 - The prompt's show and the re-press delay (research b854, checked by main in Ghidra): the prompt component's show
   (82665CD0) plays the fe sound `object_r1_options` (hash 0xFD2DC6E9E25D123D) every time the prompt appears, any
@@ -164,14 +164,14 @@ D-pad Up press (826660F0 mode 0 -> 82D52D68) signs up with no popup and no sound
 Retail (research b844 / b845): the HUD component movies only read. Their `HUDComponents.*` natives return fields of
 named HUD elements (`timer`, `dpo`, `objective`) that the graph's HUD2 bindings write; each element sends its movie
 SetState 1 when it shows and 2 when it hides (vtable +0x34 / +0x38), and its update state on refresh.
-- `ChallengeHudState` (a serialisable resource: shown components, timer text and colour flag, two DPO slots,
+- `ChallengeHudState` (a serializable resource: shown components, timer text and color flag, two DPO slots,
   objective rows) is what the elements hold. challenges.rs writes it from the run's commands: `ShowHud`,
   `StartTimerHud` (shows the timer), `UpdateHud` (DPO 0 = score / target titled `ID_COMMON_TARGET`, DPO 1 = score /
   personal best titled `ID_DPO_PERSONALBEST`, objective row 0 = `ID_CHALLENGE_OBJECTIVE_BEAT_OWNSPOT` /
   `_BEAT_KILLSPOT` / `_BEAT_PERSONALSCORE`), and the new personal best central message
   (`ID_LEADERBOARD_NEW_PERSONAL_BEST`, green). The end of a run or a map change clears it.
 - The timer element (82663940): the out-of-bounds countdown's remaining time rounded up, at least 0, `M:SS` from a
-  minute up and bare seconds below; the colour flag drops to 0 (red) under 10 s (0x821963E4); under 10 s each new
+  minute up and bare seconds below; the color flag drops to 0 (red) under 10 s (0x821963E4); under 10 s each new
   second sends SetState 4 (flash) and plays the `timer_end` front-end sound (event 0xAABBE111A2855FF0 =
   hash64("timer_end"), research b848), rising back sends 5.
 - `hud_challenge::Runtime` runs each movie on its own APT VM (like the central HUD) and answers its natives from the
@@ -185,7 +185,7 @@ SetState 1 when it shows and 2 when it hides (vtable +0x34 / +0x38), and its upd
   them each frame and draws a shown movie, and a hidden one for 2 s of outro, between the minimap and the central
   messages.
 - The personal best message is green: `HUD2.eMessageColour` is White 0, Red 1, Green 2 (registered by 8284DC78,
-  research b847), and the colour goes through 82850618 as the style, so style 2 (the movie's celebratory style).
+  research b847), and the color goes through 82850618 as the style, so style 2 (the movie's celebratory style).
 - Leaving the boundary shows the challenge's `CentralMessageHALIDReturnToChallengeArea` (own the spot:
   `ID_CHALLENGE_MODIFIEDCENTRALMESSAGE_OTS_LEFTAREA`, "Deactivating Spot in", with the 5 s timer beside it). Retail
   hashes the id at run time with the language label hash (x33 from 0xFFFFFFFF, 826640F0) and shows it in the
@@ -408,8 +408,8 @@ filters are data.
 ## Change: the race tracker (`crates/skate-core/src/challenges/race.rs`)
 
 The retail race tracker (research b973, b975) [code]: per heat a course of legs, each a polyline from the leg start
-(the race start, then the previous leg's last point) through the centres of its split trigger volumes (`sub_82560BC8`;
-the volume point is the box centre in world space, `sub_82DD8510`, which is our exported `shape.center`). Every tick
+(the race start, then the previous leg's last point) through the centers of its split trigger volumes (`sub_82560BC8`;
+the volume point is the box center in world space, `sub_82DD8510`, which is our exported `shape.center`). Every tick
 (`sub_82560170`) each racer's estimated time to finish = remaining distance / 9 m/s (the image constant 1/9 at
 0x822F9118; no speed input, no smoothing; 0 once finished). The remaining distance (`sub_82560790`): from the racer's
 split count g, the first point t > g whose projection along its incoming segment (`sub_82560A88`) is not behind the
@@ -468,7 +468,7 @@ continue at once, as the end dialog does without its movie). A completed race le
 race_shared's `complete` calls CompleteChallenge with no re-activate flag (`CALL 5 3 1`, two arguments; research
 b998), as films, follow the leader, hall of meat and contests do; only own the spot (true) and tutorials
 (Persistent) pass one. Test: `race_host::tests` (a disc-shaped row loads, run parameters, slot 0,
-course from the split centres).
+course from the split centers).
 
 ### The 3-2-1-GO countdown (2026-11-08, b995 item 4)
 
@@ -548,7 +548,7 @@ course from the split centres).
   `mini_gate`) and the finish (`Map.AddRaceCheckPoint`, `race_spotgate` = `mini_spotracegate`), all in MiniMapManager
   group C (+0x438), at the volume's world (x, z), angle 0, scale 1, no tint; after each gate hit only the next
   `MaxMiniMapIcons` (3) gates show, which is also the group's draw cap. Every career race is skipable, so there is no
-  "next full / after-next grey" styling (that branch is for non-skipable races; corrects b876 / b995).
+  "next full / after-next gray" styling (that branch is for non-skipable races; corrects b876 / b995).
 - Ours: the export's per-leg `gates` (in course order) join the race's trigger volumes; the race host counts the
   furthest gate entered (`gates_passed`, a skipped gate counts as passed) and keeps a `race` minimap group of the
   window `skate_core::challenges::race::visible_gates` (the next `GateIcons::max_icons` gates; the finish once the
@@ -558,7 +558,7 @@ course from the split centres).
   icons naming another record) drew nothing; it now loads every `mini_*` texture of the menu movie set (31).
 - Verified on the desktop: race_dwtn_01, `RACE_MINIMAP gates passed 0 of 13: 3 icons`, then 1 of 13; the screenshot
   shows the gate icons on the minimap rim (the next gates are beyond its 71 m radius).
-- Open: whether 82DD8510 gives the volume's origin or box centre (ours: the box centre); the ribbons (anchor native
+- Open: whether 82DD8510 gives the volume's origin or box center (ours: the box center); the ribbons (anchor native
   `AddTriggerIndicator` not decoded yet).
 
 ### Race gate ribbons (2026-11-09; research `.local/research/race-gate-ribbon-anchor.md`, [code] 82D50418 / 827A9F48 / 827AF330, [graph] race_shared)
@@ -566,7 +566,7 @@ course from the split centres).
 - Retail: at the countdown race_shared calls `VisualIndicators.AddTriggerIndicator(group, gate volume, IndicatorType,
   RibbonInstance)` (82D50418) for every gate of the leg, then for the finish (the last split) with
   `RaceFinalGateRibbon` (red, one leg) or `RaceLegFinishGateRibbon` (green). Entries are keyed by volume id, so a finish
-  listed as a gate replaces the gate's ribbon (last add wins). The ribbon sits in the box frame (centre, axes) and is
+  listed as a gate replaces the gate's ribbon (last add wins). The ribbon sits in the box frame (center, axes) and is
   scaled per axis to the box (2 x half extent / spline size; a flat spline takes the x scale for z, `827AF330`), with no
   indicator offset; the indicator row's Enabled flag is not read; its style is the row's own (`default`). Gates are
   type 2 (RaceNextGate). Passed gates keep their ribbon (it is only removed for gates with a Time_Bonus, 0 on every
@@ -698,7 +698,7 @@ course from the split centres).
   `FadeHost` (whole 60 Hz ticks from the frame time, last alpha, finishes seen); `FadeHandler` registers for FadeIn and
   FadeOut; `Presenter::update` steps the fade, then the manager; `Presenter::fade_alpha` gives the alpha.
 - NOT RETAIL YET: the alpha is not drawn. Who draws it and whether it reads as black is open (b904: the subscriber is
-  a post_fx colour matrix blend whose dumped target is a warm tint). Retail's tick cadence (per 60 Hz tick or per
+  a post_fx color matrix blend whose dumped target is a warm tint). Retail's tick cadence (per 60 Hz tick or per
   frame) is open; ours is frame-rate independent at 60 Hz.
 - Tests: `presentation_fade` (FadeOut linear and held, second FadeOut at once, FadeIn clears held; FadeIn finishes
   six ticks after 0; flash; cancel and reset), `presentation_run` (a FadeOut group finishes when black, a FadeIn
@@ -839,7 +839,7 @@ course from the split centres).
   4 rows, 0 failure rows, 32 hint rows (was 0); its first tip (text, HINT_03) shows -10 + 12 and hides 10 s later.
 - ObjectiveAir.GetTimeToGrind and IsDoingSpecificBoardAdjust (b1013, 2026-11-10) [code]: GetTimeToGrind (82C65E70)
   reads the air output: while +0x1BB is set (82DB6EC0 copies trajectory selector byte 9653, set when a grind is
-  found on the centre trajectory) it returns +0xB4 - +0xB0 (predicted contact time minus time in the air, seconds),
+  found on the center trajectory) it returns +0xB4 - +0xB0 (predicted contact time minus time in the air, seconds),
   else FLT_MAX (DAT_8206D108). Ours: `AirOutputFields` `flag_443`, `collision_time_180`, `time_in_state_176`
   (`skater.player_input.physical.air`), `api::NO_GRIND_TIME`. IsDoingSpecificBoardAdjust(n) (82C65FD0) compares n
   with the board adjust 82BE1AE8 copies from the animation packet (1 left, 2 right, 3 up, 4 down): ours
@@ -887,7 +887,7 @@ course from the split centres).
 - Ours, step 2: ShowTutorialCalloutHUD / HideTutorialCalloutHUD handlers write the presenter's shared `CalloutHost`
   (instruction + panel; `Presenter::update` runs the panel and logs `PRESENTATION callout state <n>`); tutorial
   cleanup hides it (`Presenter::reset_callout`). `hud_challenge::take_callout` moves the states, the text and the
-  resolved gestures into `ChallengeHudState.callout` (serialisable; a running count so no state is sent twice);
+  resolved gestures into `ChallengeHudState.callout` (serializable; a running count so no state is sent twice);
   `Component::Tutorial` (hud2/hudtutorial) sends them as SetState in order and answers GetTutorialHalText (the text
   through the movie's language), GetTutorialGesturesButtons (`[count, gesture, button, connector, ...]`) and
   PlayerStance_IsRegular. Gestures: `TrickGuide::callout_gestures` (scoring_trick record slots, else scoring_tutorial,
@@ -956,7 +956,7 @@ The AI side of a race (b978 port steps 5-6), in progress. Done so far:
   `ch_<race id>` and the racers' looks (ai_characters `look` -> characters_marquee) and shuffles the line-up from the
   session's population seed. The run's commands carry race_shared's AI calls: TeleportToStart places each racer at
   its start slot on the line starting within 4 m (`replay::choose_line_from`, b972 §4; the racers placed before it
-  count as riders, so the branch score's crowding term spreads neighbouring slots over the lines) and pins it (a
+  count as riders, so the branch score's crowding term spreads neighboring slots over the lines) and pins it (a
   racer already out is replaced, RepositionAI). Racers ride only their set: the set's ids are their line filter at
   branches and line ends (`NpcLineFilter`, the challenge path filter of b972 §3; without it a racer took no line at
   its first line end and left, laptop run 2026-11-07). Clock and filter are attached when the racer spawns. Racers
@@ -1031,8 +1031,8 @@ goes back to the run as HudContinue / HudRetry. `end_dialog_host.rs` answers Mis
 GetEndMissionOptionText ("#" + text id) / GetWinState / Results_GetKilledIt / GetTitle and
 HUDComponents.Results_GetNumPlayers (0: our families write no result rows, b925). Logged `SKATE_CHALLENGE end dialog`
 and `RETAIL_MENUS end dialog slot <n>`. Test runs: `SKATE_VERIFY_TUTORIAL_PASS=1` (with `SKATE_VERIFY_TUTORIAL`) completes the objectives once they evaluate, so the dialog and the career's reward chain run unplayed; `SKATE3_RETAIL_MENUS_KEYS` presses through them. Laptop runs 2026-11-07: the dialog draws (endchallenge_small; its movie path must match the exported key's case, the
-stage's lookup is case sensitive), its buttons read the localised option texts (text natives answer `#` + the
-localised text), its title comment comes from the movie's own `Math.random()` pick, and A picks Continue and completes
+stage's lookup is case sensitive), its buttons read the localized option texts (text natives answer `#` + the
+localized text), its title comment comes from the movie's own `Math.random()` pick, and A picks Continue and completes
 the tutorial. NOT RETAIL YET: the stage side is still behind `SKATE_RETAIL_END_SCREENS=1`; without it, or without the
 movies, the run continues at once; Retry after a
 pass skips the rematch confirm popup 217; retry's fade and music restart (b923 §3) and ChangeDifficulty (FE 45) are
@@ -1136,7 +1136,7 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
   before `--teleport` landed, found itself 315 m from its line and walked for 108 s until a bail respawn put it back.
 - Race fixes (2026-11-09, laptop autopilot-races-20261109-0812 and desktop runs): a line switch only picks the
   race's own lines (`switch_line` gets `PopulationState::scripted_lines`); a simulated skater's branch and line-end
-  choice now honours its challenge line filter (`NpcLineFilter`; before, the simulated path used only the per-character
+  choice now honors its challenge line filter (`NpcLineFilter`; before, the simulated path used only the per-character
   lines and chained the autopilot off the course); the autopilot's line clock is held while it waits at its slot (as
   the AI racers' `NpcRaceClock::held`), so at GO its line has not run 30 m ahead. `AUTOPILOT_RESULT` gains
   `outcome=won|lost|time up` (the record's completion is 0 for a lost race too; retail has no lost value). Desktop
@@ -1181,7 +1181,7 @@ popup; the map's Sign Up is not ported yet (retail's arrival path skips the post
 - `tools/prepare_hud.py` (the six challenge movies)
 - `crates/skate-core/src/challenges/` (mod, timers, ots, ots/tests, objectives, predicate), `crates/skate-core/src/lib.rs`
 - `crates/skate-game/src/challenges.rs` (new), `scoring_runtime.rs` (banked sequences), `main.rs`, `app.rs`
-- `crates/skate-game/src/challenge_records.rs` (new), `crates/skate-game/src/hud_challenge.rs` (new), `scoring_hud.rs` (hosting), `hud_central.rs` (colours shared)
+- `crates/skate-game/src/challenge_records.rs` (new), `crates/skate-game/src/hud_challenge.rs` (new), `scoring_hud.rs` (hosting), `hud_central.rs` (colors shared)
 - `crates/skate-game/src/startup_loading.rs`, `app.rs`, `splash.rs` (`SKATE_BACKGROUND_WINDOW`)
 - `crates/skate-game/src/modding/challenges.rs` (new), `modding/mod.rs`, `crates/skate-mods/src/vm.rs`, `api.lua`,
   `tests/engine_api.rs`, `sdk/ENGINE_API.md`; `crates/skate-game/src/living_world/opt_ins.rs` (the opt-in)
@@ -1225,11 +1225,11 @@ Challenge ids are the retail key strings. Mods read, start, abort, hide and re-t
 
 **Change (step 3, the host).** `crates/skate-game/src/contest_host.rs`: `SKATE_CONTEST=<id>` arms the contest on its own map (dropped on a map change) and feeds the run the player's banked sequences (`Challenges::banked_this_frame`, taken once per frame by the challenges system). `ContestRun` emits `TeleportToStart` at setup_round (SoloRun: before each run); the host puts the player at the round's `start_matrix`. Music: the contest's triggers go to `music_zones` `contest_trigger` (the playlist branch of 8248B258 -> 8249E1E8): 0 Countdown stops the music, 1 Start queues the challenge's playlist on the soundtrack graph, 12 StopChallengeMusic gives the music back to the zones, which wait while a contest owns it. Tests: contest_host rows to params, music_zones contest trigger.
 
-**Not retail yet (labelled in the code).** The AI competitors' scores are a data-driven stand-in from the round's AIScoreAdjustment / SoloRun ranges (retail's AI riders land their own tricks); the round results and end options screens are not ported, the host continues at once; every banked sequence counts (no trick-type, boundary or spot volume gates); trigger 6 AlmostOver's 3000 ms fade to level 2 is not played (no stream fades yet).
+**Not retail yet (labeled in the code).** The AI competitors' scores are a data-driven stand-in from the round's AIScoreAdjustment / SoloRun ranges (retail's AI riders land their own tricks); the round results and end options screens are not ported, the host continues at once; every banked sequence counts (no trick-type, boundary or spot volume gates); trigger 6 AlmostOver's 3000 ms fade to level 2 is not played (no stream fades yet).
 
 **Verification (step 3, 2026-11-11).** Desktop dev build, `SKATE_CHALLENGES=1 SKATE_CONTEST=street_dwtn_04` on DownTown (install given the step 3 contests export, restored and hash-checked after, settings too): three 90 s rounds, the player placed at each round's start locator, a 3 s countdown per round, place points 3 / 6 / 9 to all four with an idle player (the stand-in scales the player's 0), end Owned (ties for first win, b1009 §1). With the soundtrack on no contest music plays (retail: Interactive Mode only); in Interactive Mode trigger 1 queues the challenge's playlist and its first song plays. Trigger 0 at an env start is dropped while the saved music mode is still being applied at map load (test start only).
 
-**Change: the HUD timer text and its font pair (ask 600, 2026-11-11).** The time text follows retail's duration formatter 0x8290EB38 with the descriptor 0x82FDE25E, whose digit widths are written at runtime: a recomp watch run read `02 02 02 02 00 ':' ':' '.'` (hours, minutes, seconds, fraction widths, sign, separators), so the text is `01:12`, `33`, `05`, nothing at 0 (hours and minutes only when non-zero or after a printed field, a field after a printed one padded to 2, the HUD call drops the fraction). Ported as `timers::DurationFormat` (data, so a mod can change it); before it showed `1:12` and `5`. The timer movie places only the APT font "Futura Shadow" (the shadow atlas, glyphs in alpha only); retail 825D6B68 draws it black and the paired native font futuraheavy over it in the text colour, looked up in the whole font table even when the movie places no such font. `tools/prepare_hud.py` exported only the fonts a movie places, so hudtimer and hudtutorial drew the shadow atlas alone in the text colour: a pale blur. The HUD export now adds the pair's atlas (as the menu export already did); data-gated test `the_timer_is_opaque_after_its_intro` (opaque after the intro, a black futurashadow pass and a futuraheavy pass in the text colour); desktop frame shows a crisp `01:06`. Takes effect at the next Refresh Game Files.
+**Change: the HUD timer text and its font pair (ask 600, 2026-11-11).** The time text follows retail's duration formatter 0x8290EB38 with the descriptor 0x82FDE25E, whose digit widths are written at runtime: a recomp watch run read `02 02 02 02 00 ':' ':' '.'` (hours, minutes, seconds, fraction widths, sign, separators), so the text is `01:12`, `33`, `05`, nothing at 0 (hours and minutes only when non-zero or after a printed field, a field after a printed one padded to 2, the HUD call drops the fraction). Ported as `timers::DurationFormat` (data, so a mod can change it); before it showed `1:12` and `5`. The timer movie places only the APT font "Futura Shadow" (the shadow atlas, glyphs in alpha only); retail 825D6B68 draws it black and the paired native font futuraheavy over it in the text color, looked up in the whole font table even when the movie places no such font. `tools/prepare_hud.py` exported only the fonts a movie places, so hudtimer and hudtutorial drew the shadow atlas alone in the text color: a pale blur. The HUD export now adds the pair's atlas (as the menu export already did); data-gated test `the_timer_is_opaque_after_its_intro` (opaque after the intro, a black futurashadow pass and a futuraheavy pass in the text color); desktop frame shows a crisp `01:06`. Takes effect at the next Refresh Game Files.
 
 **Change (step 4, the contest HUD).** `contest_host` drives the race HUD movies: the 3-2-1-GO from the countdown state's 3 s HUD countdown (`ContestRun::countdown_hud_ticks`), the round timer from RoundStart to RoundStop, and the leaderboard set up at setup_round (one row per competitor: the player's name, then each competitor's look name id from `skater_profiles` as for races) and refreshed on every score change with the round score and round place (descending, a tie keeps the place above). The layout follows setup_round's UseIntScore (contest_shared `setup_round.stateenter`@742-807, read 2026-11-11): Sequence and its trick-type variants, Air_Spin, Best_Line, Air_Only and Grind_Only use RankNameScore (3, whole points); Grind_Length, Speed, Air_Distance, Air_Grab_Time, Air_Height and Air_Time use RankNameFloatscore (6). eContestType values by the image's string order (b877, inferred; the same order gives eRunType's values the export uses). The export's `variant` is read per round. The leaderboard row clip is the row's place in rank order (tied ranks by row id), so tied rows each get their own clip (a race never ties). NOT RETAIL YET: the float score text (two decimals). Verified on the desktop 2026-11-11 (street_dwtn_04, Sequence rounds): 3-2-1-GO, the round timer, and the leaderboard with the player highlighted and the three pros, all rank 1 at 0.
 
@@ -1284,3 +1284,70 @@ Challenge ids are the retail key strings. Mods read, start, abort, hide and re-t
 **Next.** the trick-type and boundary gates on the player's sequences (b1009 §2); the AlmostOver fade.
 
 **Verification.** Unit tests `contest_run` (place points and ties, best vs cumulative and the AI adjustment, ties for the top total win with the music order, SoloRun best run and AI rolls, TimedRunSingle zero and the failed demo).
+
+### AI riders at a line end (2026-11-12)
+
+**Problem.** In a contest the riders all took the same line and jammed at its trick spot, and at a line end they ran back to a start on foot to ride a line again (asks 614, 621).
+
+**Retail.** A rider's line end uses the same search as any AI skater (b1017): `8246D3C0` -> `8246C7F8` -> `82458968` mode 1 with the round's path filter; with no filtered start within the radius it takes the nearest one at any distance, and the lost test (4.5 m) then hands it to the NavMesh controller, which walks it there. Riders on the same line keep apart only through the avoider (slow down / speed up behind a skater, `82465578`, `82470830`). The contest script adds no line-end handling of its own (b877, b1009: only the out-of-bounds timer's `RepositionAI` to the start location).
+
+**Change (the user's contest rule, not retail's chain).** `PopulationState::contest_riders` lists the running contest's riders (set by `ContestAi::place`, cleared by `remove`). At a line end a contest rider searches only `contest_lines` (`npc_sim.rs`): the round's lines it has not ridden this round and no other rider is on; with none left, the ones it has not ridden; with none of those, any but its own. The usual mode 1 search then takes the nearest start among them, and the rider rides there on the board: the lost walk-back and the mode 7 step-off are off for contest riders (the stuck tracker's resnap / respawn stay). Riders that end up on one line keep apart with the avoider, as in retail. Log line `NPC_CONTEST_LINE` (lines done, lines to choose from).
+
+**Riding over.** From a chain until its body is within the line end's lost radius (4.5 m) of the new line's start node, a contest rider's follower stays on that node: no search, no line end, the line waits (`ChainScratch::riding_over`). Without it the windowed search (`82455BB0`, 4 nodes a tick) crept along the new line towards the body, and street_dwtn_01's round lines end where the riders stood, so they chained again within a second (28 of 121 chains). A rider not there after `RIDE_OVER_TICKS` (12 s) is placed on the line by the stuck respawn.
+
+**Files.** `crates/skate-game/src/living_world/mod.rs`, `living_world/npc_sim.rs`, `contest_ai_host.rs`.
+
+**Verification.** Desktop contest runs street_dwtn_01 (2026-11-12): line changes within 3 s of the last 0 of 61 (was 28 of 121); 45 of 61 rode to their next line, 12 were placed after 12 s; 0 physics errors.
+
+**Arrival further along (2026-11-12, ours).** The placed riders had ridden onto their next line part-way along (on the path, inside the lane, at segment 4 or 5) and never came within the lost radius of its start node, so they were placed after 12 s although they were riding it (run 13:22: 15 placed of 61). A rider the follower has on the path at or past the chain node now counts as arrived. Run 13:36: 48 of 61 reached their next line, 10 placed (was 15), 0 chains within 3 s of the last, 0 physics errors. The 10 left had chained to a line whose start was 25 to 40 m away (the nearest allowed start, as retail, b1017) and did not get there in 12 s.
+
+### Player pinned through the countdown (2026-11-12)
+
+**Retail.** setup_round pins every competitor (PinAI), run_round unpins them and end_round pins them again until the cleanup (b877). For the local player, `AI.PinAI` / `AI.UnpinAI` (8284ADC8 / 8284AF20) post `cMsgPinPlayer` (0x7949DAC1, flag 1 / 0) instead of setting the AI skater's bit; the PlayerUI handler (82899C90) forwards {player id, flag} as record type 7, which sets or clears the same skater bit (+0x770 0x04000000, research b116 §3). While it is set the skater's controller skips its tick input (b121, b78), and the actor's physics setup (82593640) copies the bit every tick into the physics packet's force-brake byte (+0x2A2C, our `force_braking_10796`), which brakes a skater riding on 3+ wheels once it is nearly stopped: a skater placed on a sloped start slot stays there. Readers of the bit (recomp scan, `.local/tools/find-field-bit-readers.ps1 -Offset 1904 -Shift 6`): the AI path controllers, 82593640, 8259FC28 and the actor state hash 82593BA8. Races pin the player in setup_code and again at the finish, and unpin at GO (b982).
+
+**Change.** `Contests::player_pinned` (setup_round through the countdown, and from end_round on) and a race before GO / after the finish feed one `input::player_pinned`. While it is true the published pad actions are neutral (a human player cannot push off early), the player's physics profile requests the force brake (`GamePhysics::set_pinned` -> `AnimationProfile::force_braking`, which existed but was never set), and the autopilot holds (`Autopilot::hold`). Mods still override the actions on top of the pin (`modding::override_actions`), so a mod can drive or free the player.
+
+**Files.** `crates/skate-game/src/input.rs`, `physics.rs`, `autopilot.rs`, `contest_host.rs`.
+
+**Verification.** Desktop run: run 1 started 18:40:06.977, the autopilot pushed off at 18:40:06.993 having moved 0.000 m during the hold. Human pin (dev aid `SKATE_TEST_PRESS=a` pulses push and logs the skater's movement while pinned; `.local/tools/desktop-contest-run.ps1 -Press a`), street_dwtn_01 before the force brake: rounds 1 / 2 moved 0.081 / 0.064 m while pinned and 9.2 / 8.3 m in the 3 s after GO; round 3 (a downhill start slot) rolled 10.3 m during the countdown. With the force brake wired (diagnostic once a second while pinned): rounds 1 / 2 settle below 0.1 m/s on 4 wheels and the brake bit is on; round 3 is still 0.98 m/s on 2 wheels 16 ticks after the arrival, reaches 7.3 m/s, the brake never engages and it rolls 10.3 m. Round 3's slot 0 is the retail locator child 0 (`82910EB0` copies child[slot] as is, b989), facing down a slope of about 20 degrees (1.55 m drop over 4.1 m); the teleport's ground fit (`82598428`) keeps the locator's rotation and only drops the position. The brake rule (state ticks > 5, speed < 0.1, Ground state, 3+ wheels) cannot catch a skater there, so as ported retail would roll too. OPEN: confirm in retail / the recomp whether the player rolls at that start.
+
+### Autopilot push and brake (2026-11-12, ours)
+
+**Problem.** The test autopilot pushed and then braked straight away (ask 612).
+
+**Cause.** Its push aimed at the recorded speed here (or a jump's takeoff speed) while its brake fires above 1.25x the slowest recorded speed in the next 60 frames: it pushed 6.4 -> 8.5 m/s at 7.0 recorded and braked 0.6 s later for 5.4 ahead.
+
+**Change.** `autopilot_brain::push_speed`: the push aims no faster than that slowest speed ahead unless a jump needs more; the brake's margin absorbs a push's overshoot. Test `push_aims_no_faster_than_the_slower_stretch_ahead_unless_a_jump_needs_it`.
+
+**Verification.** Brakes within 2 s of a push: 6 of 38 (was 11 of 21).
+
+**Repeated brakes (2026-11-12, ours).** That run had 52 brakes (all the autopilot's; NPC skaters keep retail's `sub_8246B810` rule), 18 of them a repeat at the same spot under 3 s after the last: a brake released at 1.25x the speed ahead, the downhill sped the skater up again and it braked again (node 39: 2.4 to 2.6 m/s for 1.7 ahead, every 1.5 s). `BrakeRules::release_factor` (1.0): a running brake goes on down to the speed ahead itself.
+
+**New lines in a contest (2026-11-12, ours, ask 613).** The autopilot rode the same few lines back and forth at one spot (round 3: lines 14 and 15 five times in a row). In a contest it now picks its next line like a contest rider (`contest_lines`: lines it has not ridden this round first; the ridden-line lists live while the contest runs). Run 13:46 (`.local/tools/autopilot-line-revisits.ps1`): round 3 12 distinct lines, 0 revisits (was 5 / 8); round 2 7 / 0; round 1 3 revisits from mid-line switches for a jump; 0 physics errors. Test `a_running_brake_holds_down_to_the_speed_ahead`. Desktop autopilot run street_dwtn_01 (5 min, 3 rounds): 40 brakes, 9 repeats (was 52 / 18); 0 physics errors.
+
+**Open.** Mod reach: the rule is on for every contest; a per-contest switch (Lua API 2) is not there yet.
+
+### Films and follow the leader: the shared machine (2026-11-12, groundwork)
+
+**Retail.** Films (ChallengeType 7, 26 rows), anywhere films (0x27, 10) and follow the leader (0x17, 7) run the state graph `objectives_shared`; photos (0x26, 0x25) run `photo_skate2` = it plus a photo state and shot picker (research b875). Follow the leader's own branches: the distance meter at the countdown, the leader reaching `FTLEndVolume` opens a 10 s window (the leader is pinned), the window running out ends the run Abandoned, a wipeout does nothing (`AllowPlayerBail`), the objective's distance failure (`Leader.GetDistanceToNearestAISkater() >= 100` on ftl_univ_02) ends it (b1006).
+
+**Change.** `crates/skate-core/src/challenges/film_run.rs`: the graph as an engine-independent machine in the own the spot / tutorial runner style (deferred state changes, enter on flush): 18 states (initial .. complete), the per-type rule table (`Rules::retail`), `ChallengeResultSelector` (films repair and go on unless every objective is complete or the film timer ran out; follow the leader ends unless a boundary it has was left [inferred, b875 §5]), the timers (countdown delay 1.5 s, PrefilmTime, the film timer with its low-time warning, out of bounds 5 s, owned pending 0.5 s, wipeout 1.5 s, objective failed 1.5 s, AI restart 1 s / 0.2 s, the FTL window 10 s, check_ai poll 0.25 s), the result mapping (Win -> Owned, Kill -> Killed, Lose -> Abandoned). Every row value and graph constant is in `Params` with the family defaults (`Params::retail`), so a mod row can change them.
+
+**Not yet.** Follow the leader is hosted (next section); films and anywhere films are not. SimulPlay and the photo states are left out.
+
+**Verification.** Tests `follow_the_leader_wins_when_the_owned_objective_completes_and_waits_half_a_second_for_a_kill`, `follow_the_leader_ends_abandoned_when_the_ten_second_window_runs_out_and_a_bail_changes_nothing`, `follow_the_leader_too_far_behind_fails_the_objective_and_ends_the_run`, `a_film_runs_out_of_time_and_a_wipeout_rearms_instead_of_ending`, `leaving_a_films_boundary_counts_down_and_coming_back_cancels_it`, `a_kill_beats_a_pending_owned_and_the_retail_values_are_data`.
+
+### Follow the leader in play (2026-11-12)
+
+**Retail.** Follow the leader runs the shared machine above with Kind Follow (b1006): the player starts on slot 0 of the start locator and the leader (competitor 1) on slot 1. Both are held through the countdown, then the leader rides its recorded line. The owned objective completes when the player enters the end volume. The objective's inline failure (`FailureObjectives`, checked after the with-events rows) ends the run when the leader gets too far ahead (`Leader.GetDistanceToNearestAISkater() >= FTLMaxFollowDistance`: 40 / 50 / 100 m by row). When the leader's body reaches the end volume, it is pinned and a 10 s window opens. While it rides, the follower band (b969) changes its speed from 0 at 5 m to plus or minus 12.5 % at 15 m from the player.
+
+**Change.**
+- `tools/asset_pipeline/challenges.py`: `follow()` exports `follow_the_leaders` (6 rows: start with slots, end volume, max follow distance, row params, competitors, owned / killed objective rows). Objective rows now also carry `failures_inline` (condition + failure text).
+- `crates/skate-core/src/challenges/api.rs`: Leader API (`GetDistanceToNearestAISkater`, `GetDistanceToSkater(n)`, `Add/RemoveFollowIndicator`) on `SkaterFacts::competitor_distances`.
+- `crates/skate-core/src/challenges/race_ai.rs`: `FollowerBand` + `follower_band` (data, a mod can change or switch it off).
+- `crates/skate-game/src/challenge_objectives.rs`: inline failures load after the with-events rows of their objective (row index past them, `ObjectiveData::inline_failure`).
+- `crates/skate-game/src/ftl_host.rs`: the host. It handles start via `SKATE_FTL=<id>`, the leader on the contest rider code (`contest_ai_host.rs`, now with a per-rider speed scale), distances, the leader's end-volume entry by its body, the player pin, the 10 s window on the timer HUD, the failure central message, the end dialog and the career result.
+
+**Not yet (NOT RETAIL YET, logged).** The DistanceMeter HUD (no meter movie exported yet), the follow indicator trail, speech rows, the killed objectives, sign-up from the challenge map (start is `SKATE_FTL` only), the band's sign (b969 open, ours: the player behind the leader slows it).
+
+**Verification.** Tests `leader_calls_read_competitor_distances_and_push_the_indicator`, `inline_failures_fire_after_the_with_events_rows`, `the_follower_band_ramps_from_five_to_fifteen_meters_and_slows_a_leader_the_player_trails`, `rows_become_follow_params_with_the_end_volume_and_their_competitors`, plus the film_run tests above.

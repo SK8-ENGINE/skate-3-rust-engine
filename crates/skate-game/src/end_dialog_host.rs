@@ -61,7 +61,7 @@ pub struct EndDialogHost {
 }
 
 impl EndDialogHost {
-    /// Text natives answer the localised text as a literal (`#` + text): the movies show it as is (laptop run
+    /// Text natives answer the localized text as a literal (`#` + text): the movies show it as is (laptop run
     /// 2026-11-07 showed `#` + id as the raw id).
     pub fn call(&self, vm: &mut Vm, language: &BTreeMap<String, String>, object: &str, method: &str, args: &[Value])
         -> Result<Option<Value>, String> {

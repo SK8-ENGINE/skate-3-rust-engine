@@ -23,7 +23,7 @@ pub struct Row {
     pub entry: EntryRef,
     /// The label string id (the host localizes it).
     pub label: String,
-    /// Greyed unless something handles it (ours: the registry's rule; retail's `!vt+0x28` is "not a header").
+    /// Grayed unless something handles it (ours: the registry's rule; retail's `!vt+0x28` is "not a header").
     pub enabled: bool,
     /// A folder row's count, shown as "label (n)" (`sub_8264ACF8` "%s (%d)" when the child's showCount is set,
     /// b255): its real rows, headers left out. None for leaves.
@@ -33,7 +33,7 @@ pub struct Row {
 /// What a select or back press asks the host to do.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
-    /// Nothing (a greyed row, an empty folder, a refresh pending).
+    /// Nothing (a grayed row, an empty folder, a refresh pending).
     None,
     /// The list changed (folder pushed / popped, tab switched): post these states.
     Refresh(Vec<i32>),
@@ -95,7 +95,7 @@ impl ChallengeMapState {
             .map_children(&node)
             .into_iter()
             .filter(|n| registry.visible(&n.entry, ctx))
-            // A map_category header is never greyed (OnMenuGetItemEnabled `82646D18` defaults to enabled, b454); it is
+            // A map_category header is never grayed (OnMenuGetItemEnabled `82646D18` defaults to enabled, b454); it is
             // a header clip the cursor skips.
             .map(|n| Row { entry: n.entry.clone(), label: n.label.clone(),
                 // A spacer folder (empty label) shows nothing, not " (0)" (ours: retail's showCount for it is unread).
@@ -135,7 +135,7 @@ impl ChallengeMapState {
 
     /// The map markers (`82649CD8` -> `8264A2A0`, b256 section 2): in a list of locations, one per location with marker
     /// data, in list order, the highlighted one last (`8268D898` draws it on top); other lists show none. Each is
-    /// (icon texture name, map pixels from the centre, highlighted).
+    /// (icon texture name, map pixels from the center, highlighted).
     pub fn markers(&self, registry: &MenuRegistry, ctx: &MenuContext) -> Vec<(String, [f32; 2], bool)> {
         let rows = self.rows(registry, ctx);
         let markers = &registry.data().map_markers;
@@ -174,7 +174,7 @@ impl ChallengeMapState {
         states
     }
 
-    /// OnMenuSelect (`826475B8`): a folder with something in it is pushed; a leaf is selected; a greyed row or an
+    /// OnMenuSelect (`826475B8`): a folder with something in it is pushed; a leaf is selected; a grayed row or an
     /// empty folder does nothing.
     pub fn select(&mut self, registry: &MenuRegistry, ctx: &MenuContext, index: usize) -> Action {
         let rows = self.rows(registry, ctx);
@@ -294,7 +294,7 @@ mod tests {
         assert_eq!(s.select(&r, &ctx, 0), Action::Refresh(vec![10, 80, 100, 110]));
         assert_eq!(s.title(&r, &ctx), "L_downtown");
         // Downtown's one location: its marker, highlighted (b256 projection: x = 512/2 / 1450 * (600 - 600) * 0.99,
-        // y = 512/2 / 1150 * (-100 - -100) * 0.95 = the map centre).
+        // y = 512/2 / 1150 * (-100 - -100) * 0.95 = the map center).
         assert_eq!(s.markers(&r, &ctx), vec![("mini_teleport".to_owned(), [0.0, 0.0], true)]);
         let off = crate::menus::MapMarker { icon: String::new(), point: [1325.0, 475.0], bounds: [2050, -850, 1050, -1250, 512, 512] };
         let [x, y] = off.projected();
@@ -308,7 +308,7 @@ mod tests {
         s.stack.push(EntryRef::map(EntryKind::MapListing, "uptown"));
         assert!(matches!(s.back(&r, &ctx), Action::Refresh(_)));
         assert_eq!(s.hilight, 2, "back on the Uptown row");
-        // Tabs clamp, no wrap; the challenges tab's challenge has no handler, so it is greyed. Each tab comes back on
+        // Tabs clamp, no wrap; the challenges tab's challenge has no handler, so it is grayed. Each tab comes back on
         // its saved row (`mgr+0x118 + 4*tab`).
         assert_eq!(s.step_tab(&r, &ctx, true), Action::None);
         assert!(matches!(s.step_tab(&r, &ctx, false), Action::Refresh(_)));

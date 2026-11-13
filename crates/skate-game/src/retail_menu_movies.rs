@@ -98,7 +98,7 @@ pub fn bitmap_id(movie: &str, bitmap: i32) -> String {
 }
 const MOD_TEXTURE_PREFIX: &str = "mod:";
 
-/// Linked movies plus their sources; serialisable parts only in `snapshot`.
+/// Linked movies plus their sources; serializable parts only in `snapshot`.
 #[derive(Resource, Default)]
 pub struct RetailMenuMovies {
     /// Retail movie JSON by key, with the shared fields merged in.
@@ -645,7 +645,7 @@ mod tests {
         let key = "source/screens/main/menu";
         let draws = draw(&m, key);
         assert_eq!(draws.len(), 2);
-        // Solid unit: colour only. Textured unit: the library's payload, its UVs, unit colour.
+        // Solid unit: color only. Textured unit: the library's payload, its UVs, unit color.
         assert_eq!((draws[0].fill, draws[0].texture.as_str()), (Fill::Solid, ""));
         assert_eq!(draws[0].multiply, [1., 0., 0., 1.]);
         assert_eq!((draws[1].fill, draws[1].texture.as_str()), (Fill::TextureClamped, "lib/4.rgba"));
@@ -682,19 +682,19 @@ mod tests {
     fn menu_units_follow_the_retail_colour_rule() {
         let mut m = textured_set();
         let lib = m.base.get_mut("source/controls/lib").unwrap();
-        // A line unit (type 0) is never drawn; a unit whose colour alpha ends <= 0 is skipped.
+        // A line unit (type 0) is never drawn; a unit whose color alpha ends <= 0 is skipped.
         let line = serde_json::json!({"render_type": "line", "color": [1.0, 1.0, 1.0, 1.0], "texture": null,
             "triangles": [[{"position": [0.0, 0.0]}, {"position": [1.0, 0.0]}, {"position": [1.0, 1.0]}]]});
         lib["shapes"]["3"].as_array_mut().unwrap().push(line);
         lib["shapes"]["3"][0]["color"] = serde_json::json!([1.0, 0.0, 0.0, 0.0]);
         // The library sprite's placement adds 0.25 red and multiplies alpha by 0.5.
-        lib["characters"][1]["frames"][0]["controls"][0]["flags"] = serde_json::json!(14); // + colour
+        lib["characters"][1]["frames"][0]["controls"][0]["flags"] = serde_json::json!(14); // + color
         lib["characters"][1]["frames"][0]["controls"][0]["color_transform"] =
             serde_json::json!([128, 255, 255, 255, 0, 64, 0, 0]); // [a, r, g, b] multiply, then add
         m.relink();
         let draws = draw(&m, "source/screens/main/menu");
         assert_eq!(draws.len(), 1);
-        // colour = unit colour * multiply + add, folded into one colour (no separate add).
+        // color = unit color * multiply + add, folded into one color (no separate add).
         let d = &draws[0];
         assert_eq!(d.add, [0.; 4]);
         assert!((d.multiply[0] - (1. + 64. / 255.)).abs() < 1e-6, "{:?}", d.multiply);

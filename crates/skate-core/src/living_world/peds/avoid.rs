@@ -120,7 +120,7 @@ pub fn decide(ped: Vec3, facing: [f32; 2], mover: Vec3, velocity: Vec3, rules: &
     let speed = vv.sqrt();
     let kind = if speed > rules.jump_speed && miss < rules.jump_radius { AvoidKind::Jump } else { AvoidKind::Step };
     // The escape vector (ped minus the closest point) flattened; its angle from the facing about up (8296EC98: acos of
-    // the normalised dot, 2 pi minus it when cross(facing, escape) points down).
+    // the normalized dot, 2 pi minus it when cross(facing, escape) points down).
     let escape = [-closest[0], -closest[2]];
     let len = (escape[0] * escape[0] + escape[1] * escape[1]).sqrt();
     let flen = (facing[0] * facing[0] + facing[1] * facing[1]).sqrt();

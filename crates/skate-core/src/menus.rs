@@ -8,11 +8,11 @@
 //!
 //! Hooks per entry: `visible`, `enabled`, `on_select` (an interceptor may ask
 //! for a confirmation first), `on_highlight`, and value get/set for settings
-//! rows. An entry without a handler is shown greyed (retail's own disabled row
+//! rows. An entry without a handler is shown grayed (retail's own disabled row
 //! state): engine features and mods enable an entry by registering a handler.
 //!
 //! Engine-independent: no rendering, file I/O or ECS. Actions and events use
-//! stable string ids so they can be serialised (multiplayer-ready).
+//! stable string ids so they can be serialized (multiplayer-ready).
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -25,7 +25,7 @@ pub enum EntryKind {
     Category,
     Item,
     Setting,
-    /// Challenge Map nodes (FE 17) by vault class; ids are vault keys, greyed until a handler exists (b244, b253).
+    /// Challenge Map nodes (FE 17) by vault class; ids are vault keys, grayed until a handler exists (b244, b253).
     MapListing,
     MapFilter,
     MapCategory,
@@ -119,7 +119,7 @@ pub enum Owner {
 
 /// Facts the host publishes (missing = 0). Retail rules read these.
 pub mod facts {
-    /// Number of SFX packs (retail hides and greys the SFX pack row at <= 1).
+    /// Number of SFX packs (retail hides and grays the SFX pack row at <= 1).
     pub const SFX_PACKS: &str = "sfx_packs";
     /// 1 when Project 10 is unlocked (retail skips the item otherwise).
     pub const PROJECT10_UNLOCKED: &str = "project10_unlocked";
@@ -356,7 +356,7 @@ pub struct MapMarker {
 }
 
 impl MapMarker {
-    /// Map pixels relative to the map centre (`sub_8268DB68`): size b5 x b6 over the bounds b2..b1 (x) and b4..b3
+    /// Map pixels relative to the map center (`sub_8268DB68`): size b5 x b6 over the bounds b2..b1 (x) and b4..b3
     /// (z), shrunk to 99% / 95%.
     pub fn projected(&self) -> [f32; 2] {
         let b = self.bounds.map(|v| v as f32);
@@ -663,7 +663,7 @@ struct Hooks {
 
 // ---------------------------------------------------------------- events
 
-/// A menu action with stable ids (serialisable; the host applies it).
+/// A menu action with stable ids (serializable; the host applies it).
 #[derive(Clone, Debug, PartialEq)]
 pub enum MenuAction {
     Select { entry: EntryRef },
@@ -692,7 +692,7 @@ pub struct MenuEvent {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Outcome {
-    /// Not in the current menu, hidden or greyed: nothing happens.
+    /// Not in the current menu, hidden or grayed: nothing happens.
     Ignored,
     /// Show this popup; answer with `MenuAction::Confirm`.
     Confirm(Popup),
@@ -761,7 +761,7 @@ impl MenuRegistry {
         let career = Rule::Mode(vec!["Career".to_owned()]);
         let rules: Vec<(EntryRef, Option<Rule>, Option<Rule>)> = vec![
             // Settings: GameSettings_GetNumOptions stops at the SFX pack row with <= 1 pack;
-            // IsItemEnabled (sub_8260D648) greys it, Difficulty when online, Skate Feed when unavailable.
+            // IsItemEnabled (sub_8260D648) grays it, Difficulty when online, Skate Feed when unavailable.
             (EntryRef::setting("ID_GAMESETTINGS_SFXPACK"), Some(packs.clone()), Some(packs)),
             (EntryRef::setting("ID_GAMESETTINGS_DIFFICULTY_SETTINGS"), None, Some(not_online)),
             (EntryRef::setting("ID_GAMESETTINGS_SKATEFEED_SETTINGS"), None, Some(Rule::fact(SKATE_FEED_AVAILABLE, Cmp::Ne, 0.0))),
@@ -912,7 +912,7 @@ impl MenuRegistry {
         self.hooks.get(entry).is_some_and(|h| h.handlers.iter().any(|h| h.select) || !h.values.is_empty())
     }
 
-    /// Greyed unless a handler (or value binding) exists and the top enabled rule holds.
+    /// Grayed unless a handler (or value binding) exists and the top enabled rule holds.
     /// A settings link is enabled when its screen has an enabled row.
     pub fn enabled(&self, entry: &EntryRef, ctx: &MenuContext) -> bool {
         self.enabled_at(entry, ctx, 0)

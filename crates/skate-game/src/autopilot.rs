@@ -104,15 +104,18 @@ pub(crate) fn engage(
     input: Option<Res<crate::input::PublishedTickInput>>,
     races: Option<ResMut<crate::race_host::Races>>,
     mut possessed: Query<(Has<Possessed>, &mut crate::living_world::npc_skaters::NpcReplay)>,
+    contests: Option<Res<crate::contest_host::Contests>>,
+    ftl: Option<Res<crate::ftl_host::FollowTheLeader>>,
 ) {
     let (Some(mut autopilot), Some(mut population), Some(index), Some(physics), Some(mut skater), Some(mut controls), Some(input)) =
         (autopilot, population, index, physics, skater, controls, input) else { return };
     if !autopilot.requested && autopilot.npc.is_none() {
         return;
     }
+    // A contest pins the player from setup_round through the countdown and again from end_round (retail PinAI).
+    autopilot.hold = crate::input::player_pinned(contests.as_deref(), races.as_deref(), ftl.as_deref());
     // Races (ours): the brain restarts at the start slot on every race start, waits for GO, and logs the result.
     if let Some(mut races) = races {
-        autopilot.hold = races.run.is_some() && !races.started;
         if races.placements != autopilot.race_placements {
             autopilot.race_placements = races.placements;
             autopilot.restart_in = RESTART_TICKS;
@@ -347,7 +350,7 @@ pub(crate) fn possess_in(
     if clock.moving == autopilot.hold {
         clock.moving = !autopilot.hold;
     }
-    // Held (a race before GO): its line clock waits too, as the AI racers' does (else at GO the line is metres ahead).
+    // Held (a race before GO): its line clock waits too, as the AI racers' does (else at GO the line is meters ahead).
     if autopilot.hold {
         clock.held += crate::living_world::npc_skaters::FRAMES_PER_TICK;
     }

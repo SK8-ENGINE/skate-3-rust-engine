@@ -1,15 +1,15 @@
-# AEMS patch-program evaluator: behavioural specification (Skate 3 TU3)
+# AEMS patch-program evaluator: behavioral specification (Skate 3 TU3)
 
 Basis for a native Rust re-implementation. Written 2026-10-02 in our own words. Facts (offsets, opcode
 numbers, constants, addresses) come from:
 - the TU3 (title update 3) recomp (`skate3recomp/generated`, read with `tools/recomp-code-search/fn.sh`);
 - the disc banks (our survey script `tools/audio-file-inspect/aems_survey.py`, all 376 `.abk` and 9 `.csi`);
 - the PoC probe (`emitter_probe` in our local PoC worktree, which runs upstream PR #4);
-- PR #4 and sk8Audio (reference only, no licence);
+- PR #4 and sk8Audio (reference only, no license);
 - nfsmw Snd9 (dbalatoni13/nfsmw, CC0; see `rwaudio-prior-work.md`). It is the source of the official names, and it is
   2005-era, so differences are marked.
 
-Licence rule: nothing here is code from PR #4, the recomp or b5-decomp. Describe, don't transliterate.
+License rule: nothing here is code from PR #4, the recomp or b5-decomp. Describe, don't transliterate.
 
 Status tags: **[V]** verified against retail code or data by us; **[P]** taken from PR #4's reading of
 retail code and spot-checked; **[N]** from nfsmw 2005, consistent with Skate but not re-read in TU3;
@@ -498,7 +498,7 @@ uses the low word, so 32-bit wrapping is exact. Exceptions (op 9 unsigned compar
 Block offsets are from the op's block. "trig" = a trigger input word, where non-zero means true. All ops
 return i32.
 
-| # | Name | Block layout | Behaviour | PR #4 |
+| # | Name | Block layout | Behavior | PR #4 |
 |---|---|---|---|---|
 | 0 | ClassDestructor | the ClassDestructorState: +16 triggered | return triggered, then clear it (one-shot "released" pulse) | ported |
 | 1 | ClassData | ClassDataState: +16 u8 n, +20 values | return values[0]; programs fan the other payload words out with copy pairs | ported |
@@ -697,7 +697,7 @@ So **remaining is source time, not wall time**: at pitch p the real time left is
 [V] for the duration and [N] for elapsed; Skate's status time field is not re-traced [?].
 - Consequence: water_fountain (pitch 0.82–0.94) starts its relay later in wall time than a pitch-1 mock
   predicts.
-- 2005 reports 0 time-left for sustained loops [N]. Skate's loop behaviour is unknown [?]: the PoC mock
+- 2005 reports 0 time-left for sustained loops [N]. Skate's loop behavior is unknown [?]: the PoC mock
   reports 1e6 ms for loops.
 
 ### 5.4 Routing codes at open (ids ≥ 9) [P]
@@ -719,7 +719,7 @@ See §1.6. id 2 is the master level, and dry (8) and send (5) are each multiplie
 
 ---
 
-## 6. Per-bank behaviours to reproduce (measured on the PoC)
+## 6. Per-bank behaviors to reproduce (measured on the PoC)
 
 All with the PoC mock device:
 - a voice is alive while now < open time + sample duration;
@@ -736,7 +736,7 @@ All with the PoC mock device:
 
 ---
 
-## 7. Implementation outline for the native port (behaviour, not code)
+## 7. Implementation outline for the native port (behavior, not code)
 
 - **Load:** parse the csi files into symbol tables. Parse each bank, apply rebases as offsets, resolve
   interface references into handles, and register modules on class records. Reject opcodes ≥ 40 and
@@ -844,7 +844,7 @@ Compare to `Siren_city_4` layer times (+16/+216 ms) and the location-set firings
 | 0x8216DEE0 | −1.0 | DelayTrigger idle |
 | 0x822F890C | 1/4096 | Ramp unit |
 | 0x822F8EA4 | 1024.0 | sine phase scale |
-| 0x82098D0C | 1/65536 | sine normalisation |
+| 0x82098D0C | 1/65536 | sine normalization |
 | 0x82060C50 | 2.0 | triangle gain |
 | 0x8209975C | 0.5 | rounding |
 | 0x82FD36B8 | 257 × u16 | quarter sine (formula §4.4) |

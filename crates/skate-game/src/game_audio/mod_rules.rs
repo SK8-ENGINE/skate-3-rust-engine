@@ -15,7 +15,7 @@
 //!   the next for the later ones (their update, the emitters). It is positional (user decision
 //!   2026-10-04): by default at the owner of the game's sound (the request's source and owner
 //!   travel with it, [`Origin`]; `mod_voices` follows the owner every frame), or where the rule
-//!   says (`play.at`: a fixed world position, or centred); the reach defaults to the owner's
+//!   says (`play.at`: a fixed world position, or centered); the reach defaults to the owner's
 //!   retail one (`mod_voices::locate`).
 //!
 //! The compiled [`RuleSet`] is shared (`Arc`) with the sites; with no rules every site holds
@@ -43,7 +43,7 @@ enum Placement {
     Owner(Vec3, bool),
     /// At a fixed world position.
     World(Vec3),
-    /// Non-positional, centred.
+    /// Non-positional, centered.
     Centre,
 }
 
@@ -86,7 +86,7 @@ impl Origin {
 
 impl Play {
     /// The voice for one request: positioned at its owner (followed), at the rule's fixed
-    /// position, or centred; an owner that cannot be named (no emitter record) plays it centred.
+    /// position, or centered; an owner that cannot be named (no emitter record) plays it centered.
     fn spec(&self, origin: &Origin) -> VoiceSpec {
         let mut v = self.voice.clone();
         let anchor = origin.anchor();
@@ -482,7 +482,7 @@ mod tests {
     /// Where the rules' sounds play (user decision 2026-10-04): at the request's owner by default
     /// (the local skater, a world owner, an NPC skater, an emitter record with its own reach),
     /// followed, plus an offset; at a fixed world position (the owner still gives the default
-    /// reach); centred; a mod's `falloff` replaces the default reach.
+    /// reach); centered; a mod's `falloff` replaces the default reach.
     #[test]
     fn rule_sounds_are_placed_at_their_owner() {
         let tags = Tags { pop: [12, 0, 0, 0, 0, 0], land: 20 };
@@ -513,7 +513,7 @@ mod tests {
         let npc = one(EventRow { kind: EventKind::Post, source: Source::Npc, class: "Class_grind", slot: "grind", id: 0, owner: 9, hit: None }, None);
         assert_eq!(npc.position, Some(Vec3::new(10.0, 0.0, -4.0)));
         assert_eq!(npc.follow, Some(Follow { anchor: Anchor::Npc(9), offset: Vec3::ZERO, track: false, local: false }));
-        // Centred: no position, no follow.
+        // Centered: no position, no follow.
         let land = one(row(EventKind::Splice, Source::Player, bank, "", 20), None);
         assert_eq!((land.position, land.follow, land.reach), (None, None, None));
         // An emitter start: at the record with the record's reach.
@@ -525,12 +525,12 @@ mod tests {
         set.mutes_at_published(&EventRow { kind: EventKind::EmitterStart, source: Source::Emitter, class: "Baby_Cry_1", slot: "", id: 22, owner: 77, hit: None }, Some((at, reach)), Some(77));
         let moving = set.take_plays(&mut 100).remove(0).2;
         assert_eq!(moving.follow, Some(Follow { anchor: Anchor::Emitter(77, at, reach), offset: Vec3::ZERO, track: true, local: false }));
-        // An emitter request without its record cannot be placed: centred.
+        // An emitter request without its record cannot be placed: centered.
         let lost = one(EventRow { kind: EventKind::EmitterStart, source: Source::Emitter, class: "Baby_Cry_1", slot: "", id: 22, owner: 4, hit: None }, None);
         assert_eq!((lost.position, lost.follow), (None, None));
     }
 
-    /// The owners' positions and retail reaches (`mod_voices::locate`): the skater's centre of
+    /// The owners' positions and retail reaches (`mod_voices::locate`): the skater's center of
     /// mass (30 m), a car (40 m) or ped (50 m) by id, an NPC skater (30 m), a fixed record; unknown
     /// ids are not found.
     #[test]

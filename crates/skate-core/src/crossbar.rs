@@ -100,7 +100,7 @@ impl Default for CrossbarRules {
 pub const OPTION_LEVEL: i32 = 1;
 pub const SUB_OPTION_LEVEL: i32 = 2;
 
-/// The crossbar screen's navigation fields. Serialisable plain data (multiplayer, replays).
+/// The crossbar screen's navigation fields. Serializable plain data (multiplayer, replays).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CrossbarState {
     /// +368

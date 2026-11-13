@@ -24,9 +24,9 @@
 //!   distance is below the speech record's `887C1D3324B12C4A` (12 m), [`SLAM_PRO`] with word 2 =
 //!   the model's `SPCH3Type_pro_id_ANN` (`14B23B4527AF919E`; pros only, 0 = no request).
 //! - **The voice** (stream system block `mgr+0x1B898`, refreshed every frame from SFXObj_Announcer
-//!   `sub_824D07B8` by `sub_824A7FA0`'s neighbour): level = the Announcer MixMap object's out2 ×
+//!   `sub_824D07B8` by `sub_824A7FA0`'s neighbor): level = the Announcer MixMap object's out2 ×
 //!   [`AnnouncerLevel::scale`] (truncated to an integer), pitch out1, azimuth out0 (the MixMap
-//!   writes none: centre), high pass out4, low pass out3, the environment send out5; the block's
+//!   writes none: center), high pass out4, low pass out3, the environment send out5; the block's
 //!   voice float 1.0, PEAK gain 1.0 (flat), no echo send (`sub_824A3C28`'s constants).
 //!   `speech_player::announcer_outputs`.
 //! - **The duck.** SFXObj_Announcer (`sub_824CF218`) sets `Announcer.in0` = 32767 while the stream

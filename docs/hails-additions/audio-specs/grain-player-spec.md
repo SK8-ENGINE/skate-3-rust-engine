@@ -1,11 +1,11 @@
-# Skate 3 granular rolling bed (grains.big + GrainPlayer): behavioural spec for the native port
+# Skate 3 granular rolling bed (grains.big + GrainPlayer): behavioral spec for the native port
 
-Written 2026-10-02. This describes **behaviour, formulas and constants in our own words** so the rolling bed can be
+Written 2026-10-02. This describes **behavior, formulas and constants in our own words** so the rolling bed can be
 re-implemented natively in Rust (Phase B of the native-port plan (doc 11, "Native audio port")). It replaces the
 current approximation (each `.grain` cut into 6 looped speed bands, `tools/asset_pipeline/audio_export.py`
 `GRAIN_BANDS`, `crates/skate-game/src/game_audio/cues.rs::grain_for`).
 
-Nothing here is code from PR #4/PR #1 or the recomp (no licence: read for understanding only). Constants, offsets,
+Nothing here is code from PR #4/PR #1 or the recomp (no license: read for understanding only). Constants, offsets,
 addresses and vault hashes are facts and are quoted. Companion specs: `aems-voice-graph-spec.md` (modules, buses, block
 clock), `aems-evaluator-spec.md` (patch programs, global RNG), `aems-reference.md`, `mixmap-spec.md` (MixMap; being
 written in parallel; the MixMap output ids used here are listed in §2.9 so the two can be joined).
@@ -242,7 +242,7 @@ duration, pos = record position.
    with the time base; shared by ~100 call sites) and take candidate ⌊r × 2⁻³¹ × 0.5 × count⌋ (uniform). Insert it into
    the sorted list; return its start.
 
-Behaviour this produces [G, `grain_vectors.tsv`]: a **shuffle bag without replacement** over the 3–4 windows of the
+Behavior this produces [G, `grain_vectors.tsv`]: a **shuffle bag without replacement** over the 3–4 windows of the
 current region (A: 0.4-s windows in a 1.6-s region → 3–4; B: 0.5 in 1.5 → 3; rocket 0.6 in 2.4 → 3–4); when the bag is
 empty it refills but never repeats the window just played. The grid is anchored to windows already played, so small
 position changes keep reusing aligned windows. A bind resets the list (sentinel only), so the first pick after a bind is
@@ -281,7 +281,7 @@ So this is **per audio block, not per 32-ms evaluator tick and not per game fram
 
 The hold flag (+36) is cleared on bind and never set by any caller we know of (UNCERTAIN; treat as always clear).
 
-**Resulting rhythm at pitch p** (blocks quantise each phase up to the next 5.33 ms):
+**Resulting rhythm at pitch p** (blocks quantize each phase up to the next 5.33 ms):
 
 | player | grain period (start to start) | overlap (release ∥ next attack) | sounding per grain | source used per grain |
 |---|---|---|---|---|
@@ -291,7 +291,7 @@ The hold flag (+36) is cleared on bind and never set by any caller we know of (U
 
 Retail evidence [V, our trace from recomp session `20261001_211347`, `grain_trace_stats.py`]: 8,484 grain voice
 starts in 10.5 min. Rocket starts cluster at **475–525 ms** apart (163 of 557), surface-grain starts of one member
-never exceed ~350 ms apart while rolling (period 0.3 s + quantisation + pitch < 1), the modal rate is **6 starts/s**
+never exceed ~350 ms apart while rolling (period 0.3 s + quantization + pitch < 1), the modal rate is **6 starts/s**
 (= 2 players × 1/0.3 s, one sounding truck), with bursts up to 42/s (drift restarts, both trucks, other skaters). This
 matches the timing above.
 
@@ -431,7 +431,7 @@ graph 2 (order 5): SubMix → Send(→ manager+116 target, level 0) → Send(→
 Quirks to keep [T]: the graph-1 level ramp has no branch below 52 km/h, so it **keeps its last value** when speed
 drops (it only returns towards 1 while between 52 and 74 km/h); the graph-1 → graph-3 send is posted only when it
 changes. The "last posted" wobble value is shared between the two trucks, so after truck 0 posts, truck 1
-always compares equal and its wobble is never posted (retail behaviour).
+always compares equal and its wobble is never posted (retail behavior).
 
 ### 3.3 Interplay with the other board sounds [T]
 
@@ -453,7 +453,7 @@ always compares equal and its wobble is never posted (retail behaviour).
 
 ---
 
-## 4. Native port outline (behaviour, not code)
+## 4. Native port outline (behavior, not code)
 
 1. Setup: decode the 14 members to PCM at native rate (we already decode them; keep whole files, drop the 6 bands);
    validate header/seek table; load the vault tuning (§1.5) and AudioSurfaceMap.
@@ -511,7 +511,7 @@ Use short scripted background recomp runs (never ask the user to replay): on one
 push to ~10, 20, 30, 45 km/h and coast 5 s each; a straight roll vs a carve; a manual; an ollie and a 1-s air; a grind;
 a crossing between two materials. Acceptance: start intervals, state timers and pick regions exact given logged RNG
 words; record gain/pitch/position per frame within 1 ulp of our model fed with the logged inputs; per-player pick
-distribution χ² consistent with uniform; airborne behaviour settled (§2.10).
+distribution χ² consistent with uniform; airborne behavior settled (§2.10).
 
 ---
 
@@ -532,7 +532,7 @@ distribution χ² consistent with uniform; airborne behaviour settled (§2.10).
 
 ## 7. Sources & credits
 
-| source | author / owner | link | licence | contribution |
+| source | author / owner | link | license | contribution |
 |---|---|---|---|---|
 | Upstream PR #4 (`skate-audio-core/src/grain/*`, `skate-audio-formats/src/grain.rs`, `skate-data/src/audio/grains.rs`, `skate-game/.../board.rs`, `speed.rs`, `examples/grain_repro.rs`, docs `player-audio-retail-drivers.md` §3/§11, `wheel-audio-handoff-2026-09-17.md`, `engine-defects.md`) | andrewnakas (Andrew Nakas) | github.com/SK8-ENGINE/skate-3-rust-engine/pull/4 (fork github.com/andrewnakas/skate-3-rust-engine, commit 368a433; read from a local clone and a PoC worktree) | none, read only | Discovered that the bed is a granular player; recovered the GrainPlayer object, pick, scheduler, voice graph, bus chains, FSS module, board records, vault mapping, push envelopes, retail capture comparisons and transfer functions. Almost everything tagged [T]/[C] here is their finding, re-described. |
 | Upstream PR #1 (`mx/audio-engine-vehicles`) | andrewnakas | github.com/SK8-ENGINE/skate-3-rust-engine/pull/1 | none, read only | Earlier version of the same grain port and docs. |

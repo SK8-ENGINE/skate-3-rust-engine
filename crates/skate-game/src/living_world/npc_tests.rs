@@ -1440,7 +1440,7 @@ fn npc_skaters_react_to_the_players_wipeout_near_them() {
 }
 
 /// Debug text without the fields added after the goldens (`trick_since`, `tree`, `respawn`, `hold_at_end`; the digests
-/// cover behaviour, not the layout).
+/// cover behavior, not the layout).
 fn without_trick_since(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;

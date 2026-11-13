@@ -59,7 +59,7 @@ const EDGES: [f32; 22] = [
     1e-18,
     1e30,
     -1e30,
-    f32::from_bits(0x7FA0_0001), // signalling NaN with a payload
+    f32::from_bits(0x7FA0_0001), // signaling NaN with a payload
     f32::from_bits(0xFFC1_2345), // negative quiet NaN with a payload
     std::f32::consts::PI,
 ];
@@ -272,7 +272,7 @@ fn choice_honours_the_override() {
     assert_eq!(choose(Some(" 0 ")), Path::PLAIN);
     let auto = Path::fma().unwrap_or(Path::PLAIN);
     assert_eq!(choose(None), auto);
-    // "1" asks for FMA: honoured only when the CPU has it.
+    // "1" asks for FMA: honored only when the CPU has it.
     assert_eq!(choose(Some("1")), auto);
     assert_eq!(choose(Some("yes")), auto);
     // The cached path is one of the two and stays put.

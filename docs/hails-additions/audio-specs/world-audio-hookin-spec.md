@@ -20,10 +20,10 @@ Code read: `crates/skate-audio/src/world/*`, `game_audio/{world_sources,npc_skat
 | Upstream `crates/skate-dynamics` (Rapier island: bodies, kinematic proxies, joints) and `mods/Skyline_Drive_Mod` (a Lua-composed, player-driven car with its own WAV engine sound through `sdk.audio`) | Player-driven vehicles only, built in Lua. No traffic. | Traffic cars would likely be kinematic proxies on skate-dynamics. A mod car *could* publish as a traffic vehicle (optional, not retail: question Q5). |
 | Upstream PR #15 (laaledesiempre, open) "Dynamic props" | DMO props as live instances with rigid bodies | Adjacent only: DMO impacts are a different audio path (not in this spec). |
 | Upstream PR #1 "Mx/audio engine vehicles" (andrewnakas, open) | The diff holds only `skate-audio-core` (a player audio engine). No vehicle files despite the title. | None. |
-| Fork `andrewnakas/skate-3-rust-engine` `mx/vehicle` (unmerged, 23 behind) | A **Vehicle SDK**: crate `skate-vehicles` (Rapier 0.35.3), `skate-game/src/modding/vehicles/{mod,audio,engine_sound,network}.rs`, `docs/vehicle-sdk.md`. Lua `sdk.vehicle.spawn/enter/control/tune/read/exit/reset/remove`. Keys belong to the calling mod; at most 8 vehicles per mod, 32 in all; vehicles are removed on mod disable / reload. `read` returns position, rotation, heading, signed speed, phase. Its engine sound "follows speed/throttle" with its own samples. | **Shape to copy for the Lua angle**: keys owned per mod, per-mod / global limits, removal on disable. A drivable vehicle publishes exactly what `VehicleState` needs (position, heading, speed, throttle → `load`). No licence upstream or in the fork: describe, don't copy. |
+| Fork `andrewnakas/skate-3-rust-engine` `mx/vehicle` (unmerged, 23 behind) | A **Vehicle SDK**: crate `skate-vehicles` (Rapier 0.35.3), `skate-game/src/modding/vehicles/{mod,audio,engine_sound,network}.rs`, `docs/vehicle-sdk.md`. Lua `sdk.vehicle.spawn/enter/control/tune/read/exit/reset/remove`. Keys belong to the calling mod; at most 8 vehicles per mod, 32 in all; vehicles are removed on mod disable / reload. `read` returns position, rotation, heading, signed speed, phase. Its engine sound "follows speed/throttle" with its own samples. | **Shape to copy for the Lua angle**: keys owned per mod, per-mod / global limits, removal on disable. A drivable vehicle publishes exactly what `VehicleState` needs (position, heading, speed, throttle → `load`). No license upstream or in the fork: describe, don't copy. |
 | Other forks (michaelmoskie, patchedsoul, Vorobey1234, jdpc-dev, samwhosung, d4tect, …) | Only `main` / `macos` / `audio-integration` / `skyline-driving-update` / `rtx-path-tracing` branches | Nothing. |
 | `chasmlol/skate3clone` (Rust/Bevy), `chasmlol/2010-rust-rewrite-mashup` | No ped / traffic / NPC files in the tree | Nothing. |
-| `mchughalex/skate3recomp` (+ ports) | The retail code we read (no licence: run / read only) | Our oracle: recorded recomp sessions. |
+| `mchughalex/skate3recomp` (+ ports) | The retail code we read (no license: run / read only) | Our oracle: recorded recomp sessions. |
 | Our own (the world / NPC audio plan, the PR #32 readiness plan, doc 11, the notes above) | Foundation built (inert hosts). The readiness plan already lists this work: engine API, complete sources, map-change fix, dev publisher, "hooking up world audio" doc. | This spec. |
 
 **Conclusion:** there is no engine-side representation to fit. The API should be ECS-native (components on the
@@ -38,7 +38,7 @@ Legend: **done** = ported and harness-tested headless; **partial**; **missing**.
 |---|---|---|---|
 | Traffic engine | SFXObj_TrafficEngine (4.0), `TRAFFIC_CAR`, `C00`–`C08` by patch | **done**: RPM model (gears, wobble, slew, rise / fall), the patch override, the front / rear split, Doppler through MixMap B0–B2 | **settled 2026-10-03 (§7.3 G1), to port:** the model → record table (entity → vehicle spec → `aud_traffic_engine`), `+112` = heading, `+144` = acceleration m/s², the `TrafficCarPhysics.in0` writer (slewed relative speed / 35, opens the A11 gate). Still open: the 3DObjPos 4.1 / 4.2 / 4.3 binding (front / rear points at ±1 m found, R+80 / R+96) |
 | Horns | SFXObj_TrafficHorn, `TRAFFIC_HORN` | **done**: posted once, variant `rand()%9`, kind = horn state 1–5, patch 0 never honks | the AI's honk decision (engine side: blocked lane, the player in the way; `IsBeingHonkedAt` ped+5896) |
-| Car alarms | TrafficHorn state 6, `c_car_alarm` (`car_alarms`) | **done** | the trigger (car hit) and the 8 s stop (vehicle +3716) are AI behaviour → the bridge offers an `Alarm` event with retail's 8 s (§3.4) |
+| Car alarms | TrafficHorn state 6, `c_car_alarm` (`car_alarms`) | **done** | the trigger (car hit) and the 8 s stop (vehicle +3716) are AI behavior → the bridge offers an `Alarm` event with retail's 8 s (§3.4) |
 | Skids | SFXObj_TrafficSkids, `TRAFFIC_SKID` | **done**: plays on the skid flag | the AI's skid flag (hard braking / swerve) |
 | Woosh | SFXObj_TrafficWoosh (4.3) | n/a: no MixMap E record writes its outputs, so retail leaves it unused | nothing |
 | Doppler / drive-by | MixMap Traffic B lookups | **done** (ObjPos rates) | velocity must be continuous: a teleporting proxy needs `AudioVelocity` (§3.2) |
@@ -217,8 +217,8 @@ manager's (ported). What retail posts for a car contact (its material / class) i
 ### 3.5 NPC skater state: a reusable builder
 `skate_events::audio_state(&GamePhysics, &SkaterRuntime, AudioFrame)` is the only correct way to fill an
 `AudioState` (retail bridge semantics: air time, grind family / material latch, the deck and region rings, the step
-code, push plant). Refactor (behaviour-identical for the local player; prove it with the existing state-log
-replays, per the regression check's identical-behaviour proof) into:
+code, push plant). Refactor (behavior-identical for the local player; prove it with the existing state-log
+replays, per the regression check's identical-behavior proof) into:
 
 ```rust
 pub struct SkaterAudioMemory { /* the per-skater part of `Seen`: air_time, grind_family, grind_material,
@@ -260,7 +260,7 @@ Do that move only with a headless before / after render showing the expected one
 ### 3.9 Lua SDK (mods publishing objects): superseded by §8
 The user's requirement (2026-10-03): the audio engine is moddable together with the rest of the engine, so
 every feature is built with that in mind. §8 is the full mod-facing surface. The sketch below is only its object
-part. Mods are first-class publishers (P1, not P4). The sketch is modelled on the fork's vehicle SDK conventions
+part. Mods are first-class publishers (P1, not P4). The sketch is modeled on the fork's vehicle SDK conventions
 (keys owned per mod, limits, removal on disable).
 New `Command` kinds in `skate-mods` (JSON-validated like `audio_*`):
 
@@ -281,7 +281,7 @@ The host spawns an entity per key with the components above (transform from the 
 surface at once: the mod commands become the same components. One part stays in Rust: the **ghost skater**,
 because a full `AudioState` cannot come from Lua. The mod asks for it with
 `sdk.world_audio.spawn('ghost', 'skater', {source='record'|'state_log:<name>'})`, and the host records or replays
-the local player's `AudioState`. The behaviour below is the same whichever side runs it.
+the local player's `AudioState`. The behavior below is the same whichever side runs it.
 
 - **Cars:** four lanes around the spawn locator (or the player position at enable). Each is a closed loop of
   straights at 8–15 m/s with accelerate / brake phases (`load` ±, skid on hard braking), models cycling through
@@ -296,7 +296,7 @@ the local player's `AudioState`. The behaviour below is the same whichever side 
   `VecDeque`, about 1,200 frames), then replay it as an NPC skater offset 5 m to the side. It loops, and walks out
   past 30 m and back, so the claim / release shows. That gives full-fidelity board sounds with no AI. Alternative,
   when the map has `routes`: a rolling-only skater on the first route.
-- Gizmos (Bevy gizmos): a box per car, a capsule per ped, a ring for the skater, coloured by `WorldAudioInstance`
+- Gizmos (Bevy gizmos): a box per car, a capsule per ped, a ring for the skater, colored by `WorldAudioInstance`
   (holder or not), plus a 30 m circle around the camera.
 - Logs: `AUDIO_WORLD` / `AUDIO_NPC` lines, as today, plus `world_bridge` counts once a second.
 
@@ -325,7 +325,7 @@ the local player's `AudioState`. The behaviour below is the same whichever side 
 - **P0: map-change fix.** The epoch reset in `WorldHost` / `NpcHost`, `saturating_sub` on ticks, and the regression
   test. Small and isolated.
 - **P1: engine-facing API.** `world_audio.rs` (components, events, resources), `game_audio/world_bridge.rs`,
-  `WorldAudioInstance` read-back, `SkaterAudioMemory` + `skater_audio_state` refactor (behaviour-identical proof),
+  `WorldAudioInstance` read-back, `SkaterAudioMemory` + `skater_audio_state` refactor (behavior-identical proof),
   `AudioState::rolling`. Doc: "Hooking up world audio" (docs/hails-additions, doc 11 subsection, plus module docs)
   with the per-field table: retail offset, meaning, who should fill it, default.
 - **P2: dev test publisher** (§3.10) and gizmos. The user listens.
@@ -351,7 +351,7 @@ scripted runs in §7.3 are optional and only fill the listed gaps.
 
 ## 5. Things the API deliberately leaves to the engine
 Honk and alarm decisions, skid detection, foot plants (animation), speech values (state graphs), the AI skater's
-physics, census / culling. The audio side never invents behaviour (retail parity): where retail's rule is not traced
+physics, census / culling. The audio side never invents behavior (retail parity): where retail's rule is not traced
 (the footsteps-on gate, the near / far pair, the instance managers) the bridge uses a **flagged provisional rule**,
 documented as such, until it is traced.
 
@@ -408,7 +408,7 @@ object, Treatment and Class_Seams, which no new run would give more cheaply.
 | Engine RPM / Doppler / levels | 164620 VEHSTATE (position + forward, ≤ 4/s → speed) + WPPOS + PLAY / GAIN / SEND for the `C0n` voices | GAIN × SEND against distance (the ~45 m front-layer cut-off, the B7 4–90 m layer); pitch against speed (gear steps at 7 / 14 / 21 / 28 m/s) and the approach / recede shift. Trace-replay: publish the VEHSTATE path headless and compare the per-voice level curves. |
 | Front / rear split, heading `+112` | same | the w1 / w2 level ratio against dot(forward, pos − listener): if VEHSTATE's forward explains it, `+112` = heading |
 | 3DObjPos 4.1–4.3 binding | same | per-layer level against distance to the body / front / rear points (whichever fits best) |
-| Horns / alarms / skids | 164620 (115 / 12 / 139 starts) + VEHSTATE (`+3716` alarm, manoeuvre `+4396`, target speed) | alarm: starts when `+3716` arms and stops 8 s later, variants spread over 4; horn: variants spread over 9, none from heavy01 (patch 0); skid starts against VEHSTATE decelerations |
+| Horns / alarms / skids | 164620 (115 / 12 / 139 starts) + VEHSTATE (`+3716` alarm, maneuver `+4396`, target speed) | alarm: starts when `+3716` arms and stops 8 s later, variants spread over 4; horn: variants spread over 9, none from heavy01 (patch 0); skid starts against VEHSTATE decelerations |
 | Instance assignment (4 / 15) | 164620 / 163809: concurrent `C0n` voices and footstep owners against WPPOS distances | at most 4 engines at once, and whether they are the nearest 4. This settles nearest-N or shows that another rule is needed. |
 | Ped footsteps | 164620 (4,949 `fstep_livingworld` + `sk8_foley` starts) + PEDXYZ (→ speed) + WPPOS | sk8_foley ids 62 / 63 / 64 against ped speed (2.5 / 7.5 m/s); steps per second against speed; GAIN × SEND against distance (p50 0.000 / p90 0.024); the sample groups per class (2, 4, 5 seen); the 151 unexplained starts against MOODOUT times (the jump / collision words) |
 | Ped speech: reactions, lines, takes | 163809, 164620 (READ + MOODOUT) + the `speech_*.txt` extracts | event per reaction, start 0.03 s after MOODOUT; the take history (57 / 57 already); `_n` / `_f` against the speaker's distance. The MOODOUT ped address = the PEDXYZ address, measured against WPPOS, which is the join `speech_nearfar.py` lacked. **`+148` / `+156` is likely a distance and its threshold**, fit from the data. |
@@ -449,7 +449,7 @@ Hook line formats:
   `[G+0x2F0A0]` (G = `*(0x83083C38)`), matched by entry +12 == `[[R+40]+64]`: entry +0 → R+144, +4 → R+148 (speed),
   +8 → R+152, `+16 >> 28` (signed) → R+156 horn state, bit 27 of +16 → R+160 skid, +24 (u64) → R+168 record key.
   When no entry matches, the record is not touched (see "stale" below).
-- **R+112 = the heading:** row 2 (forward) of the vehicle's world matrix (the same matrix VEHSTATE reads), normalised.
+- **R+112 = the heading:** row 2 (forward) of the vehicle's world matrix (the same matrix VEHSTATE reads), normalized.
   Trace: |R+112| = 1.0000 ± 0.0001; R+112 · VEHSTATE forward p05 0.9986 / p50 1.0000 (328 joins); R+112 · direction of
   travel (moving > 2 m/s) p50 1.000 (445 pairs). So `TrafficAudio` takes the heading from the transform (no velocity
   override needed).
@@ -489,7 +489,7 @@ Hook line formats:
   provisional for the choice; the manager itself is still not read).
 - **Stale records:** when a held vehicle leaves the 40 m list, its record keeps its last values (position, speed 10.65,
   R+144 3.02 …) while the instance stays held, so retail keeps sounding the frozen car until the instance is reassigned.
-  Recorded as behaviour, not ported unless a listening check asks for it.
+  Recorded as behavior, not ported unless a listening check asks for it.
 - **Horns:** one horn in the run: kind 1 together with skid 1, at the start of a c01 car's hard stop (−15.64 m/s²) 18 m
   from the listener. **Horn kinds per model: still open** (only kind 1 seen; the kind is packed by the traffic AI into the
   top nibble of entry +16, writer not found). They are the AI's choice, so the API keeps `HornState::Honk(1..=5)` as an
@@ -593,7 +593,7 @@ The engine-facing surface (§3) is ECS components. The mod-facing surface is **A
 (`skate-game/src/modding/`) turns those commands into the same components / events. There is one path into the
 audio, and mods and engine systems are equal publishers. General rules come from the existing mod rules: keys belong
 to the calling mod; per-mod and global limits; validation before allocation; commands from a failed callback are
-dropped; disabling or reloading a mod removes everything it published or overrode, and the retail behaviour comes
+dropped; disabling or reloading a mod removes everything it published or overrode, and the retail behavior comes
 back deterministically. The existing `audio_preload / play / update / stop / stop_all` keep working unchanged.
 
 ### 8.1 World objects and their one-shots (Phase 1–2)
@@ -745,7 +745,7 @@ only 58's and 59's noise bursts (0 … 40 ms and 270 … 300 ms after 58's onset
 (white-noise bursts) of the record, which the port already plays in the same shape. Nothing ported; open with the
 user (doc 15 "Follow-up: the static noise on Go To Marker"). Tools: local, not published.
 
-**Far return (2026-10-04, investigating).** The user: (1) on console it lasts about a second, and only after travelling farther away from where
+**Far return (2026-10-04, investigating).** The user: (1) on console it lasts about a second, and only after traveling farther away from where
 the marker was set; (2) yes, the go-to sound (the sound when you return to the marker) has it; (3) maybe. The hold is 0.2 s up to 100 m, `d / 1125 + 1/9` s to 1000 m, 1 s beyond (the static
 ramps over it). The request goes to `sub_82709740` → `sub_82706F50`, which asks `sub_82864C40` whether the destination is
 streamed in (radius 30 / 50 m): if not, the loading state (`0x82707508`, event 7) runs a loading screen. The user's

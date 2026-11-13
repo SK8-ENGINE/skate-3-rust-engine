@@ -60,7 +60,7 @@ not converted). LODs: one per car (z_pipeline_lw_vih, a pipeline test car, has t
 `{"version": 1, "models", "entities", "census", "recipes", "specs", "drivers"}`:
 - `models.<livingworld_models record>` (vehicle category 3 with a recipe): `recipe`, `glb`, `chassis_colours` /
   `secondary_colours` (RGBA lists), `palette_ids` (`<model>/chassis/<i>`, `<model>/secondary/<i>`: stable ids a mod or
-  a network peer names a colour by), `size_hint` (`Hash_F983F2518B335286`), `wheel_hint` (`Hash_FD7A66142F16B9CC`),
+  a network peer names a color by), `size_hint` (`Hash_F983F2518B335286`), `wheel_hint` (`Hash_FD7A66142F16B9CC`),
   `mesh_bounds` and `wheel_bones` measured from the arena.
 - `entities.<entity>`: `model`, `recipe`, `spec`, `driver`, `scoring`, `ai_graph` (group records like `sedan` keep
   the inherited values).
@@ -74,7 +74,7 @@ entries. Then fixed-size records in that order:
 - district (32): name[16], first segment, segment count, first junction, junction count;
 - segment (72): u64 id, u64 `to_node`, u64 `from_node`, u32 `to_end`, u32 `from_end`, f32 length, width a, width b,
   speed limit (m/s), u32 lanes, `word_56`, first piece, piece count, flags (bit 0: pieces complete), district;
-- piece (224): u32 segment, u32 index, f32 distance at the piece end (along the segment), f32 length, centre-line
+- piece (224): u32 segment, u32 index, f32 distance at the piece end (along the segment), f32 length, center-line
   Hermite curve (start, end, start tangent, end tangent), road edges (left / right at start and end), 4 edge tangents,
   16-sample arc-length table;
 - junction (132 + 8 x 40): u64 node, u32 district, f32 speed, u32 `flag_04`, u32 inner / outer quad tag, inner and
@@ -105,7 +105,7 @@ segment: there are **76** segments, not 77), junction table, lane-run table and 
 - **Lane run** (0xA0; one per segment per tile, two where a segment leaves and re-enters a tile): u64 id, start and
   end records, u32 piece count, piece offset, f32 speed limit, u32 lane count (= the segment's `word_52` on all 241
   runs), f32 width, f32 run length, f32 distance at the run end, u32 index of the first piece, u64 segment id.
-- **Piece** (0xE0, about 4 m): centre-line Hermite curve, edges and their tangents, cumulative length within the run.
+- **Piece** (0xE0, about 4 m): center-line Hermite curve, edges and their tangents, cumulative length within the run.
 - **Direction**: pieces run from the segment's `node_b` to its `node_a`: the run's end record names the node and end
   of `node_a` / `end_a` on all 76 junction-side runs, and the last piece ends on that junction's outer box. So
   `node_a` is the destination (`to_node`); segments come in pairs, one per travel direction.
@@ -124,20 +124,20 @@ the only per-junction candidate: set on 14 of 19 DownTown and all 10 Industrial 
 University dead ends); the binding is V1 work (`sub_82E14EE0`, `sub_82E11E90`).
 
 ## Drivers (the visible people in cars)
-The driver is **part of the body mesh**: a low-poly dark figure (head, shoulders, an arm to the wheel) modelled into
+The driver is **part of the body mesh**: a low-poly dark figure (head, shoulders, an arm to the wheel) modeled into
 each car's `Accessory` part, in the left front seat (+X, left-hand drive), using a dark area of the body atlas. There
 is no driver model, recipe part, ped reference or texture of its own (all 73 vehicle textures are referenced by the
-recipes), and the window material is a flat 32 x 32 grey (nothing painted on the glass). Rendered with the windows
+recipes), and the window material is a flat 32 x 32 gray (nothing painted on the glass). Rendered with the windows
 left out (local renders of the taxi side, sports car side and
 taxi front). So drivers come for free with the car mesh; no driver system is needed (the user
 sees drivers in the cars).
 
 ## Values and findings
 - [data] Palettes: the base records (`vehicles`, `vehicle_sedan` ...) hold chassis (0, 0, 1) and secondary (1, 0, 0);
-  the body atlas paints the car body pure blue, so the chassis colour most likely replaces the blue mask channel in
-  the `vehicle_chassis` shader (hypothesis until the shader is read in V3). Chassis lists hold 2-10 colours (taxi:
+  the body atlas paints the car body pure blue, so the chassis color most likely replaces the blue mask channel in
+  the `vehicle_chassis` shader (hypothesis until the shader is read in V3). Chassis lists hold 2-10 colors (taxi:
   yellow and red), secondary lists 1 (10 for `mongo_patrol01`).
-- [data] `wheel_hint` (`FD7A66142F16B9CC`) equals the wheel bone height (wheel radius) to the millimetre on most cars
+- [data] `wheel_hint` (`FD7A66142F16B9CC`) equals the wheel bone height (wheel radius) to the millimeter on most cars
   (hatchback 0.317, sedan02 0.299, pickup02 0.43); `size_hint` (`F983F2518B335286`) is a per-class value (1.9 x 1.7 x
   4.0 for every sedan and sports car), not the mesh size: meaning open.
 - [data] The `vehicle_suv` group record points at a recipe `trafsuva_kit00_lod` that is not on the disc; no entity

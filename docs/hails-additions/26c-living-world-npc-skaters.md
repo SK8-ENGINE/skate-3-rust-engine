@@ -30,7 +30,7 @@ Change:
   2 x (population tick - spawn tick) recording frames, so an NPC's state follows from its spawn record, the tick and
   its branch records. Its position goes back into the population (culls, the 5 m rule). Collision: a kinematic
   capsule and board box join the skater solve through the network proxies (like a mod's solid), so the player bumps
-  into NPCs. Look: the character's native roster GLB (the customiser's and online players' files), a mod override
+  into NPCs. Look: the character's native roster GLB (the customizer's and online players' files), a mod override
   (`NpcSkaterLooks`), else the stock skater; bound to the stock skeleton like a remote player. Puppet animation: one
   stock clip per phase from the player's evaluator; the root takes the recorded position and skater orientation.
   The clip time is the time since the phase began; a looping clip (`_CYC` in its name) wraps by its length,
@@ -49,9 +49,9 @@ Change:
 
 Replay-tier simplifications until the simulated tier (documented, not retail): positions and timing come from the
 recording, not from steering (`AIPhysicsInput`); the branch is evaluated once when the node is reached; the
-obstacle-list rejection is not modelled; NPCs do not react to the player (the proxy is infinite mass, no bails);
+obstacle-list rejection is not modeled; NPCs do not react to the player (the proxy is infinite mass, no bails);
 tricks show one clip per phase (a grind, slide or manual is one 50-50 clip; the recording does not say which), the
-stock graphs do not run; the end of a line with no branch taken despawns the NPC (retail behaviour not decoded).
+stock graphs do not run; the end of a line with no branch taken despawns the NPC (retail behavior not decoded).
 
 Files: `crates/skate-core/src/living_world/{replay,replay_tests,mod,clock,population}.rs`,
 `crates/skate-data/src/living_world.rs`, `crates/skate-data/tests/living_world_data.rs`,
@@ -461,7 +461,7 @@ hold. The cap stays a plain `max_voices` field.
   still refuse at the cap; finished ones make room).
 - `cargo test -p skate-audio --locked`: all pass. `cargo test -p skate-game --bin skate3rust --locked -- game_audio
   living_world`: 124 passed.
-- Behaviour identity for the player: the e2e bench (`tools/audio-e2e/scenarios.py`, 12 scenarios, `E2E_FPS=60`)
+- Behavior identity for the player: the e2e bench (`tools/audio-e2e/scenarios.py`, 12 scenarios, `E2E_FPS=60`)
   rendered before and after the change: all 48 outputs (audio, voices, body, deck) byte-identical.
 
 **Open.** Confirm in the user's next session that `block_voices` stays flat and `voices_refused` stays absent. "No
@@ -520,7 +520,7 @@ replay -> physics, 26 / 43 bails; 35 of 39 switches hitched over 150 ms.
   (b674): the upcoming-trick test (pc+796 / +797), retail's line-end
   test (A >= count-2 with t > 0.8), raising lost in the same tick, the skitch / bit 26 / online gates on the target.
   Done the same day: the stuck tracker measures from the animation root; on the board the projected point is the
-  deck rigid body's position (`Reckoning+144`, its centre of mass), not the deck part's origin.
+  deck rigid body's position (`Reckoning+144`, its center of mass), not the deck part's origin.
 - A bail still hides the skater for 5 s (retail respawn delay); what the user sees as "vanishing".
 
 ## NPC Skater Physics: bails (2026-10-13 night)
@@ -534,7 +534,7 @@ DownTown baseline (radius 150 m, 150 s, player idle): 17 bails, 79 on/off-path s
   seeds the flag word with `pc+922 << 25` and clears bits 31..26, and only builds the steering target
   (`sub_8246DE38`) when the skater is on the path and past the start nodes (`pc+920`, `pc+937`), or always without
   on-board steering. Ours wrote the steering target every tick, pulling a skater that had left its line back toward a
-  point metres away. Now `ai_record::steers` / `ai_record::without_steering`: off the path the skater coasts on its
+  point meters away. Now `ai_record::steers` / `ai_record::without_steering`: off the path the skater coasts on its
   own physics until the rejoin commit. 17 -> 4 bails.
 - **Respawn counted twice:** the placing teleport is queued until the next physics step, so the old wipeout bit was
   still set on the next tick and started a second 5 s bail (2 of those 4). `NpcSim::placed` ignores it until the bit
@@ -582,7 +582,7 @@ DownTown baseline (radius 150 m, 150 s, player idle): 17 bails, 79 on/off-path s
   became "finished" and never retried at first).
 - **Line-end fallback** (research b122, `sub_82458968` mode 1): with no
   line start within 4 m, retail takes the nearest free start at any distance (a valid one over a nearer invalid one
-  below 36 m^2; per-character validity is not modelled, so every line counts as valid). Ours ended the line, and the
+  below 36 m^2; per-character validity is not modeled, so every line counts as valid). Ours ended the line, and the
   skater rode off, got lost, bailed and was respawned at the line end again: two skaters made 70 of 72 bails in a
   300 s run that way (each placement there launched them at 25 to 100 m/s, cause not found; trace
   `NPC_SKATER_PLACED` at debug level). Now `ChainConfig::fallback` (on for the physics tier only; the replay tier
@@ -766,7 +766,7 @@ riding mode. `824660A0` writes `pc+922` every call (not a one-way latch).
   (`GamePhysics::load_skater_in_context(.., source)`, `SkaterRuntime::load_for_world` also takes the source's banks
   for the metadata). `SkaterAnimation::load` is `from_source` over a fresh `AnimationSource::load`, the source is
   immutable (no interior mutability in `animation_pose.rs`), so a shared body is the same runtime.
-- **Verification (optimisation rule: identical behaviour first):** data-gated
+- **Verification (optimization rule: identical behavior first):** data-gated
   `a_body_on_a_shared_animation_source_rides_like_a_fresh_load` (DownTown): a fresh and a shared body ride the same
   push for 240 ticks, deck transform, skeleton root and physical state equal every tick (bit for bit, `Debug`
   strings); load 161-166 ms from disk vs 64-66 ms on the shared source (2 runs). The bump test still gives NPC wipeout
@@ -795,7 +795,7 @@ riding mode. `824660A0` writes `pc+922` every call (not a one-way latch).
 - **Problem:** laptop session 2026-10-18 22:01, an NPC skater hit the user and bailed (in
   Aletown, near the end). The log had no line for a skater touching another skater, so the bail could not be tied to
   the contact.
-- **Change (log only, behaviour unchanged):** after each simulated NPC's step, `npc_sim::log_skater_contact` reads its
+- **Change (log only, behavior unchanged):** after each simulated NPC's step, `npc_sim::log_skater_contact` reads its
   skeleton's skater contact (`collision_feedback.other_skater` / `maximum_skater_force`, the values its wipeout check
   reads) and logs `NPC_SKATER_CONTACT #<serial> <character> with=<player|#serial> force speed team wiped at` once per
   contact (the same skater again after half a second apart counts as new). `team` = hit by the local player, which is
@@ -837,7 +837,7 @@ NPC skaters, replay tier (doc 26, milestone 3): turns the population's skater sp
 - **Entity** per spawn record: [`NpcSkater`] (stable `LivingWorldId`, character key, slot, seed, voice) + [`NpcReplay`] (the `skate_core::living_world::replay` cursor) + `Transform`. The id map [`NpcSkaterIndex`] finds it again for the despawn.
 - **Motion** (`FixedUpdate`, after the population step): each cursor is kept at `population tick - spawn tick` recording frames (the 60 Hz lines at the retail 60 Hz world tick, `skate_core::living_world::clock`), so the state is a function of the spawn record and the tick; branch decisions use the retail score with the players and the other NPCs and are kept as records a client would mirror. The NPC's position goes back into the population (culls, the 5 m rule). At the end of a line it continues on an unused line starting within 4 m, picked by the same retail score (`replay::choose_next_line`, `sub_8246C7F8`; fix 9), so it keeps riding until the population's 120 m cull removes it. A new NPC fades in over its first second; only at a dead end (no line starts near the end) does it fade out and leave once its opacity is below 0.2 (`skate_core::living_world::leave_fade`; [`NpcFade`]).
 - **Collision**: a kinematic proxy (capsule for the body, box for the board, infinite mass, the cursor's velocity) joins `physics::network::Proxies` like a mod's solid, so the player bumps into it. NPCs never react (replay tier).
-- **Look**: the character's native roster GLB (`CustomModels::online_native_path`, the same files the customiser and online players use), or a mod's GLB from [`NpcSkaterLooks`], else the stock skater. Bound to the stock skeleton like a remote player (`AnimationStatus`).
+- **Look**: the character's native roster GLB (`CustomModels::online_native_path`, the same files the customizer and online players use), or a mod's GLB from [`NpcSkaterLooks`], else the stock skater. Bound to the stock skeleton like a remote player (`AnimationStatus`).
 - **Puppet animation** (`Update`): one stock clip per [`ReplayPhase`] ([`puppet_clip`]), evaluated with the player's evaluator; root = the recorded position and skater orientation. The stock graphs are not run (simplification until the simulated tier). The clip time is the time since the phase began; a looping clip (`_CYC` in its name) wraps by its length like the player's `ClipClock`, others hold their last frame. Each NPC carries [`NpcPuppetClip`] (the clip and time in effect). A mod may override the clip per phase id or `<phase>.<style>` (`LivingWorldSettings::skater_clips`, `sdk.world.set_tuning('living_world', {skater_clips})`); an override that does not evaluate falls back to the shipped pick. A phase change (also one a branch or line chain brings) crossfades from the previous phase's clip, which keeps playing, with the player's graph transition curve (`playback_transition::transition_weight`, Blend82B96058: smoothstep over the transition time) over [`RETAIL_BLEND_SECONDS`] (the stock graph's default transition time); mods set it per phase (`skater_blend_seconds`). The weight is a function of the cursor's phase frames, so a client derives the same pose. Render (fix 14): drawn from the cursor one tick back ([`NpcReplay::previous`]) towards the current one by the fixed-step fraction, like the player, with the recorded branches (`LineCursor::render_sample`); clip and blend times include the sub-frame; after a branch or chain the root blends onto the new line (`replay::LineSwitch`, `skater_line_chain.blend_seconds`). Fix 21: the crossfade nests like a retail transition (Blend82B96058 keeps the running transition as the outgoing tree): the cursor remembers the last `replay::PHASE_HISTORY` phases and the pose is built from every phase whose blend still runs ([`puppet_layers`]), so a phase change during a blend (half of all changes on the shipped lines) no longer restarts from one clip. A recorded trick slot (`EScorableID`) plays its stock trick animation on body and board (the board is the rig's `Skateboard_Root`): `<anim>_G` on the ground, `<anim>_A` once airborne, like `T_Trick.xml` ([`retail_trick_anim`]; mods: `skater_clips["trick.<id name>"]`).
 - **Fade** (`Update`, [`present_fade`]): while [`NpcFade::alpha`] is below 1 every mesh under the NPC (body and board) draws with a per-NPC blended copy of its material; at 1 the shared materials come back and the copies are freed, so a solid NPC costs what it did before.
 - **Audio**: `NpcSkaterAudio` with a lite state from the cursor (position, velocity, air, ground trick as a grind) and the character's voice; #32's host picks the one audible NPC by retail's rule.
@@ -859,12 +859,12 @@ The clip a remembered phase shows and its transition time (`older` = the phase b
 
 ### Failed tick leaves queries
 Problem (2026-10-29 session, DownTown): after one NPC's physics tick failed (an unsupported stock motion graph condition, `IsArmChannelPlaying`, in the off-board graph), every NPC skater flipped between the physics and replay tiers each tick and jittered (`physics error, back to replay: Wheel queries were started twice without result publication`, 623 times). The failed tick had started its wheel and probe query batches before the animation tick, and a failed body goes back to the pool for reuse; the new-actor reset kept the unpublished batches, so every skater handed that body failed at its first step and returned it to the pool again.
-Change: `GamePhysics::abandon_context_queries` (riding outputs `abandon_queries`, probes `abandon`) runs when a pooled body becomes a new NPC (`npc_sim::spawn_sim`), so a failed tick stays confined to the NPC it happened to. The two conditions the stock motion graph still lacked are ported as well (both in the drop-in: `TryToLeave` and `OutOfDropIn`; the player hit the first on foot 2026-10-29 and the game ended): `IsArmChannelPlaying` (`82BA84F0`) is true while a GestureBoth, GestureLeft, GestureRight or Shove channel exists (keys `830BE040` / `830BE084` / `830BFCC0` / `830BE010`, names read from their static initialisers and the image strings); `IsDropInWithoutTransition` (`82BA4268`) reads grinds bundle byte 325, the tipslide state byte 98 that `82D420A0` sets when it places the skater straight into the drop-in (FillOut `82D42788`). Test `stock_motion_graph_has_no_unsupported_operations` (data-gated) keeps the stock graph free of unsupported operations. Open: retail's gesture hand selection (`82BAB258`) checks only the Shove and WipeoutPushOff channels; ours also checks RetrieveBoard.
+Change: `GamePhysics::abandon_context_queries` (riding outputs `abandon_queries`, probes `abandon`) runs when a pooled body becomes a new NPC (`npc_sim::spawn_sim`), so a failed tick stays confined to the NPC it happened to. The two conditions the stock motion graph still lacked are ported as well (both in the drop-in: `TryToLeave` and `OutOfDropIn`; the player hit the first on foot 2026-10-29 and the game ended): `IsArmChannelPlaying` (`82BA84F0`) is true while a GestureBoth, GestureLeft, GestureRight or Shove channel exists (keys `830BE040` / `830BE084` / `830BFCC0` / `830BE010`, names read from their static initializers and the image strings); `IsDropInWithoutTransition` (`82BA4268`) reads grinds bundle byte 325, the tipslide state byte 98 that `82D420A0` sets when it places the skater straight into the drop-in (FillOut `82D42788`). Test `stock_motion_graph_has_no_unsupported_operations` (data-gated) keeps the stock graph free of unsupported operations. Open: retail's gesture hand selection (`82BAB258`) checks only the Shove and WipeoutPushOff channels; ours also checks RetrieveBoard.
 
 ### Score clips
 
 `graph_host::motion::stock_score_clips`: each `ScoringGrabs` (`grabName` and its `up` / `left` / `down` / `right`
-names, with that direction) or `ScoringTrick` (`trick`) behaviour of the loaded motion graph, keyed by the lower-case
+names, with that direction) or `ScoringTrick` (`trick`) behavior of the loaded motion graph, keyed by the lower-case
 name, gives the trees of the state that owns it: the state's own `PlayAnimation` (grinds, slides); when that state is
 a `Cyc` / `Cycle`, the `Into` / `Out` siblings too (air grabs, board adjust grabs); a state without its own tree uses
 its `<X>Into` / `<X>Cyc` / `<X>Out` children (ground grabs). First in graph order wins, except that a transition state
@@ -882,15 +882,15 @@ blend -> nearest child by its clip's attribute value; sub-tree children by rank)
 
 Problem: the grabs port step 3 played every grind and slide on its LOW clip (the board at the bottom of the `DISTTOCOG` range, a deep crouch). Retail rests on the HI clips.
 
-Retail [data + our port of the TU3 behaviour, research b700, values checked 2026-10-30]: `Grinds/Grinds.xml` runs `ControlGrindCrouch` every tick, which eases `disttocog` toward `min(bound(1 - Crouch, min, max), bound(1 - physical grind crouch, min, max))` at `grind_disttocog_speed` (`skate-core/src/animation/grind_control.rs` `crouch`). `anim_motion/grind_height` in the setup data: `min_grind_disttocog` 0.6, `max_grind_disttocog` 0.85, speed 0.6 /s. The AI posts no Crouch during a trick (`ai_signals.rs`, `in_trick` gate), so with no crouch the value rests at 0.85: `G_5050_FS_HI_0_CYC` (clip DISTTOCOG 0.859; LOW is 0.684).
+Retail [data + our port of the TU3 behavior, research b700, values checked 2026-10-30]: `Grinds/Grinds.xml` runs `ControlGrindCrouch` every tick, which eases `disttocog` toward `min(bound(1 - Crouch, min, max), bound(1 - physical grind crouch, min, max))` at `grind_disttocog_speed` (`skate-core/src/animation/grind_control.rs` `crouch`). `anim_motion/grind_height` in the setup data: `min_grind_disttocog` 0.6, `max_grind_disttocog` 0.85, speed 0.6 /s. The AI posts no Crouch during a trick (`ai_signals.rs`, `in_trick` gate), so with no crouch the value rests at 0.85: `G_5050_FS_HI_0_CYC` (clip DISTTOCOG 0.859; LOW is 0.684).
 
-Ours: `scored_trick_clip` picks the grind tree's child at the rest height, read from the loaded grind settings (`MotionHost::grind_rest_disttocog`, the setup data's `max_grind_disttocog`), so a data change moves both tiers. Mod key `living_world.npc_grind_disttocog` (0..1; unset = the data value), reset on mod disable. The entry ease from the landing height is not modelled (the puppet has no landing height; the clip starts at the rest). Twist stays 0 (ours: retail takes the physical body angle at entry, which a replay puppet does not have).
+Ours: `scored_trick_clip` picks the grind tree's child at the rest height, read from the loaded grind settings (`MotionHost::grind_rest_disttocog`, the setup data's `max_grind_disttocog`), so a data change moves both tiers. Mod key `living_world.npc_grind_disttocog` (0..1; unset = the data value), reset on mod disable. The entry ease from the landing height is not modeled (the puppet has no landing height; the clip starts at the rest). Twist stays 0 (ours: retail takes the physical body angle at entry, which a replay puppet does not have).
 
 Open: the AI's physical grind crouch (`crouch_132`) is assumed 0; whether any grind schedule posts Crouch or GrindBalanceX is not checked.
 
 Test: `npc_tests::living_world_npc_grab_and_grind_slots_play_their_scored_trees` (data-gated): fs_50_50 -> `G_5050_FS_HI_0_CYC`; `world_tuning` valid_patch checks for the key.
 
-Research b703 (scoring data of the disc and all 10 DLC vaults): no grind schedule posts Crouch, GrindBalanceX or PhysGrindStabilityNudge (12 of the 54 grind records post only PhysGrindUpDown and Left / RightGroundGrab for the whole slot), so the intent side rests at the max and the twist keeps its entry value. The physical side (`physics/grind/advance.rs`: |deck z . grind normal| x 0.4) only lowers it with more than about 22 degrees of deck tilt; the puppet has no deck, so that part is not modelled.
+Research b703 (scoring data of the disc and all 10 DLC vaults): no grind schedule posts Crouch, GrindBalanceX or PhysGrindStabilityNudge (12 of the 54 grind records post only PhysGrindUpDown and Left / RightGroundGrab for the whole slot), so the intent side rests at the max and the twist keeps its entry value. The physical side (`physics/grind/advance.rs`: |deck z . grind normal| x 0.4) only lowers it with more than about 22 degrees of deck tilt; the puppet has no deck, so that part is not modeled.
 
 ### NPC manuals
 
@@ -898,7 +898,7 @@ Problem: an NPC manual (category 8, recorded as a GroundTrick phase) had no scor
 
 Retail [data, stock graph; research b703]: `ground.xml` Manual -> `Manual/NoseManual.xml`: `B_NOSE_MANUAL_INTO` (0.1 s), then rolling forwards (`PhysicsSpeedCompare alongSkateZ greater 0.5`) `B_NOSE_MANUAL` (0.3 s) with `SetManualAngle`; `Manual/TailManual.xml`: `B_TAIL_MANUAL` with `SetManualAngle` only rolling backwards (`less -0.5`), else `B_TAIL_MANUAL_LOW` (0.3 s). The AI holds `Manual` = +/- 0.5 (`ai_signals` `manual_value`, + nose, - tail); `anim_motion/manual` `manual_balance` maps 0.5 to 0, so `MANUAL_ANGLE` rests at 0. `B_NOSE_MANUAL` blends over `MANUAL_ANGLE`; `B_NOSE_MANUAL_INTO` and `B_TAIL_MANUAL_LOW` over `DISTTOCOG`, which riding's Crouching keeps at its top with no crouch.
 
-Ours: `scored_trick_clip` category 8: nosemanual -> Into + cycle as a sequence (blend 0.1 s), tailmanual -> `B_TAIL_MANUAL_LOW` (0.3 s), each through the leaf picker with `MANUAL_ANGLE` from the loaded balance graph (`MotionHost::manual_rest_angle`, so a data change reaches NPCs) and `DISTTOCOG` at the top. Rolling forwards is assumed (an NPC riding fakie would take the other branch: not modelled); the manual deck-pitch crouch (`MaxCrouchFromDeckAngle`) is not modelled; the manual's OUT is left to the next phase's blend.
+Ours: `scored_trick_clip` category 8: nosemanual -> Into + cycle as a sequence (blend 0.1 s), tailmanual -> `B_TAIL_MANUAL_LOW` (0.3 s), each through the leaf picker with `MANUAL_ANGLE` from the loaded balance graph (`MotionHost::manual_rest_angle`, so a data change reaches NPCs) and `DISTTOCOG` at the top. Rolling forwards is assumed (an NPC riding fakie would take the other branch: not modeled); the manual deck-pitch crouch (`MaxCrouchFromDeckAngle`) is not modeled; the manual's OUT is left to the next phase's blend.
 
 Test: the same data-gated test: nosemanual -> `M_NOSEIDLE_N_0_INTO+...`, tailmanual a single clip, neither a 50-50.
 
@@ -1000,7 +1000,7 @@ Retail runs every NPC skater as a full skater steered along a recorded human lin
 - the lowest score wins, the first on ties; when every candidate is rejected or the stay wins, nothing changes. No random draw is involved. The branch record's f32 is not read there.
 - a taken branch starts at the target node nearest to the skater among `target - 3 ..= target` (`sub_82455BB0`).
 
-Replay-tier simplifications (documented in doc 26; the simulated tier replaces them): positions, orientation and timing come straight from the recording instead of the steering (`AIPhysicsInput`); the branch is evaluated once when the cursor reaches the group's node (retail evaluates while the controller sits on it); the obstacle-list rejection of `sub_8246C4F8` is not modelled (no obstacles yet).
+Replay-tier simplifications (documented in doc 26; the simulated tier replaces them): positions, orientation and timing come straight from the recording instead of the steering (`AIPhysicsInput`); the branch is evaluated once when the cursor reaches the group's node (retail evaluates while the controller sits on it); the obstacle-list rejection of `sub_8246C4F8` is not modeled (no obstacles yet).
 
 **Line end** ([code] `sub_8246D3C0` -> `sub_8246C7F8` -> `sub_82458968`, fix 9): no line on the disc has a branch group on its last node; instead, when the controller reaches the last node, retail looks for unused lines whose start node is within 4 m of the end ([data] `ai_skater` tunable) and picks one with the branch chooser ([`choose_next_line`]), so an ambient skater keeps riding from line to line until the population's distance cull (120 m from the player, `sub_8245D520`) removes it. [data] 742 of the 760 DownTown lines have another line's start within 4 m of their end. Only when none is near (retail would steer the full skater to the nearest start at any distance) does the replay tier report [`CursorEvent::Finished`].
 
@@ -1041,7 +1041,7 @@ The next line at the end of `current` (retail [code] `sub_8246D3C0`: once the co
 - one candidate is taken as it is; several go through the branch chooser `sub_8246C1C8` (score `sub_8246C230` at node 0, see [`branch_score`]): lowest score wins, the first on ties, and the first candidate when every one is rejected (the chooser starts at index 0);
 - the new line starts at node 0.
 
-`None` = no start node within the radius. Retail then falls back to the nearest start node at any distance and the full skater steers to it (`sub_82458968`, the 6 m valid/invalid rule); the replay tier cannot ride that gap, so the caller ends the line (and the NPC fades out). Line validity per character (`sub_82456970`) is not modelled here, like in [`choose_branch`].
+`None` = no start node within the radius. Retail then falls back to the nearest start node at any distance and the full skater steers to it (`sub_82458968`, the 6 m valid/invalid rule); the replay tier cannot ride that gap, so the caller ends the line (and the NPC fades out). Line validity per character (`sub_82456970`) is not modeled here, like in [`choose_branch`].
 
 ### Latched flip
 
@@ -1180,7 +1180,7 @@ Detail moved out of the code comments of `crates/skate-game/src/skater_ghost.rs`
 
 Skater fade-in after every placement ("ghost"), retail sub_82594488 / sub_825926F8 (`skate_core::player::ghost`).
 
-- **Placement** (`FixedUpdate`, after the physics tick): every completed teleport of the simulated skater (checkpoint respawn, menu / map / mod teleports, session marker return; all finish in the one reset at `physics/frame.rs`, counter `respawn::Runtime::placements`) and a newly loaded skater (spawn, map change) become a [`SkaterPlaced`] message keyed by the stable player id. Serialisable, so a networked host could send the same events; no networking here.
+- **Placement** (`FixedUpdate`, after the physics tick): every completed teleport of the simulated skater (checkpoint respawn, menu / map / mod teleports, session marker return; all finish in the one reset at `physics/frame.rs`, counter `respawn::Runtime::placements`) and a newly loaded skater (spawn, map change) become a [`SkaterPlaced`] message keyed by the stable player id. Serializable, so a networked host could send the same events; no networking here.
 - **Fade** (`FixedUpdate`): [`SkaterGhosts`] holds one [`GhostFade`] per player id; a placement restarts it, then each fixed tick publishes the opacity and advances the timer by the fixed dt (time-based, any tick rate gives the same curve).
 - **Draw** (`Update`): while the local player's opacity is below 1 every mesh under [`PlayerRoot`] (body, hair, clothes, board parts) draws a blended copy of its material with the alpha scaled; at 1.0 the original material handle goes back, so solid frames draw exactly the materials they drew before this feature.
 - **Mods**: world tuning domain `ghost` {enabled, fade_in_seconds, hold_alpha} writes [`GhostTuning`] (retail defaults, reset on mod stop).
@@ -1202,7 +1202,7 @@ Retail keeps a fade-in timer in seconds per skater placement component (owner +1
 
 **Default off.** The skater must be fully faded in when the screen shows it. Our respawns and same-map teleports have no screen cover to hide the 1 s ramp, so `GhostSettings::default()` has `enabled: false` and a placed skater draws solid at once. This follows the user's account of retail play; it differs from the earlier reading that the ramp is partly visible in retail (the trace and the RPCS3 video in [09-water.md](09-water.md)). A mod can turn the ramp on with `ghost.enabled`.
 
-Generalised for mods: opacity = clamp(timer / fade_in_seconds, 0, 1) and the hold compares the opacity with `hold_alpha` (retail 1.0 s and 0.68, where both forms are the same). Time-based, so the curve is the same at any tick rate.
+Generalized for mods: opacity = clamp(timer / fade_in_seconds, 0, 1) and the hold compares the opacity with `hold_alpha` (retail 1.0 s and 0.68, where both forms are the same). Time-based, so the curve is the same at any tick rate.
 
 NOT RETAIL YET: who sets state byte 71 (the 0.68 hold) is undecoded; hosts pass `hold = false`.
 
@@ -1212,7 +1212,7 @@ Test descriptions moved out of the code comments of `crates/skate-game/src/livin
 
 ### Test fix 23 facing rules
 
-Fix 23 (NPC skaters riding backwards), headless: every line chains onto the line starting at its end (line i -> i + 6), and lines 6..11, 18..23, ... were recorded fakie for their first 50 nodes (skater and board frame facing -x while travelling +x), so every chain joins a line the other way round from the one it left; the other lines hold a switch-stance stretch (nodes 150..250: skater frame turned round, board forward). Retail rule (fix 23 corrected, `FacingRule::RidingEntry`, mod option until the stance mirror lands): the recorded skater frame, turned only while the flip latched at a riding entry is set (clear here: every spawn node's skater frame agrees with its path frame), held across switches. With it no NPC is drawn against its travel outside a recorded fakie or switch-stance stretch once the switch blend is over; the switch-stance stretch is drawn as recorded, body against travel (the puppet has no stance mirror: NOT RETAIL YET), and `NPC_SKATER_BACKWARDS` reports the recorded fakie stretches as such. The fix 23 rule (`per_node`, the default, NOT RETAIL YET) draws the switch stance forward; the fix 16 mod option (`keep_facing`) reproduces the reported bug: forward-recorded lines ridden backwards.
+Fix 23 (NPC skaters riding backwards), headless: every line chains onto the line starting at its end (line i -> i + 6), and lines 6..11, 18..23, ... were recorded fakie for their first 50 nodes (skater and board frame facing -x while traveling +x), so every chain joins a line the other way round from the one it left; the other lines hold a switch-stance stretch (nodes 150..250: skater frame turned round, board forward). Retail rule (fix 23 corrected, `FacingRule::RidingEntry`, mod option until the stance mirror lands): the recorded skater frame, turned only while the flip latched at a riding entry is set (clear here: every spawn node's skater frame agrees with its path frame), held across switches. With it no NPC is drawn against its travel outside a recorded fakie or switch-stance stretch once the switch blend is over; the switch-stance stretch is drawn as recorded, body against travel (the puppet has no stance mirror: NOT RETAIL YET), and `NPC_SKATER_BACKWARDS` reports the recorded fakie stretches as such. The fix 23 rule (`per_node`, the default, NOT RETAIL YET) draws the switch stance forward; the fix 16 mod option (`keep_facing`) reproduces the reported bug: forward-recorded lines ridden backwards.
 
 ### Test nested blends
 

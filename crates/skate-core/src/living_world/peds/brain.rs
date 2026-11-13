@@ -1,4 +1,4 @@
-//! A pedestrian's behaviour brain: the host the stock ped AI graph runs on (wants, timers, flags, outputs).
+//! A pedestrian's behavior brain: the host the stock ped AI graph runs on (wants, timers, flags, outputs).
 //! Details: docs/hails-additions/26g-living-world-ped-interactions.md#ped-brain
 
 use super::super::Vec3;
@@ -21,7 +21,7 @@ pub struct BrainSettings {
     /// WatchWantTargetWithoutInterruptingLocomotion keeps walking while the target is within this
     /// angle of the facing, radians (`0x821DBCF4`, 55 deg).
     pub watch_cone: f32,
-    /// StandAndWatchSkater's first watch point, metres ahead (`0x82257308`, 4.0).
+    /// StandAndWatchSkater's first watch point, meters ahead (`0x82257308`, 4.0).
     pub watch_ahead: f32,
     /// ChannelWarnWantTarget's speech value (`8269F7B0` sends 53, or 54 when the ped's `+2000`
     /// component answers non-zero; that query is open, so 53).
@@ -63,6 +63,11 @@ pub struct BrainSettings {
     /// ChannelGreetWantTarget: the greet time (timer 36, `0x82063AB8` 3.5 s), speeches 56 / 63
     /// (`8269FC30`).
     pub greet_seconds: f32,
+    /// The recognizer list's hard cap (`sub_82E1C538`, 16; b88 §5).
+    pub max_recognizers: usize,
+    /// CanRecognizePlayer's answer for every ped type. OPEN: retail asks a per-type table (`*(0x83085494)` vfunc +4,
+    /// b88 §6 / b1018) not decoded yet; true keeps the actortracker_spectate plugin reachable.
+    pub can_recognize_player: bool,
     /// A conversation turn, s (ConversationSpeak timer 30, 3.0).
     pub conversation_turn_seconds: f32,
     /// A conversation's gather timer, s (`D+1136`, 30.0; `conversation.rs`).
@@ -111,7 +116,7 @@ impl Default for ZombieFollowSettings {
 
 impl Default for BrainSettings {
     fn default() -> Self {
-        Self { wander_speed: 2.0, warn_seconds: 3.5, know_about_seconds: 30.0, mood_want_memory_seconds: 30.0, watch_cone: 0.959_931, watch_ahead: 4.0, warn_speech: 53, tazer_draw_seconds: 0.133, tazer_hit_seconds: 0.3, taze_speech: 66, end_taze_speech: 67, tazer_clip_blend: 0.2, gesture_blend: 0.2, tazer_clip_end: 0.2, greet_seconds: 3.5, conversation_turn_seconds: 3.0, conversation_gather_seconds: 30.0, greet_speech: 56, return_greet_speech: 63, chases_enabled: true, aggressive_capture_distance: 2.0, unreachable_radius: 5.0, reach_check_seconds: 10.0 / 30.0, reach_snap_window: 0.65, scatter_seconds: 180.0, scatter_arrival_radius: 3.0, scatter_channel_fade: 0.2, start_chase_speech: 55, new_chasee_speech: 15, hand_prop: Default::default(), zombie_follow: Default::default(), trip_kind: super::skater_contact::ReactionKind::Knockdown, trip_direction: super::skater_contact::ReactionDirection::FromBack, avoid: super::avoid::AvoidRules::RETAIL }
+        Self { wander_speed: 2.0, warn_seconds: 3.5, know_about_seconds: 30.0, mood_want_memory_seconds: 30.0, watch_cone: 0.959_931, watch_ahead: 4.0, warn_speech: 53, tazer_draw_seconds: 0.133, tazer_hit_seconds: 0.3, taze_speech: 66, end_taze_speech: 67, tazer_clip_blend: 0.2, gesture_blend: 0.2, tazer_clip_end: 0.2, greet_seconds: 3.5, conversation_turn_seconds: 3.0, conversation_gather_seconds: 30.0, greet_speech: 56, return_greet_speech: 63, chases_enabled: true, aggressive_capture_distance: 2.0, unreachable_radius: 5.0, reach_check_seconds: 10.0 / 30.0, reach_snap_window: 0.65, scatter_seconds: 180.0, scatter_arrival_radius: 3.0, scatter_channel_fade: 0.2, start_chase_speech: 55, new_chasee_speech: 15, hand_prop: Default::default(), zombie_follow: Default::default(), trip_kind: super::skater_contact::ReactionKind::Knockdown, trip_direction: super::skater_contact::ReactionDirection::FromBack, avoid: super::avoid::AvoidRules::RETAIL, max_recognizers: 16, can_recognize_player: true }
     }
 }
 
@@ -129,6 +134,11 @@ pub mod timers {
     pub const WARN: i32 = 36;
     /// SetSitTimer's timer (`SitTimer`).
     pub const SIT: i32 = 24;
+    /// LookAt (`LookAtTimer`), Spectate's boredom, cheer and wait-after-cheer timers (b88).
+    pub const LOOK_AT: i32 = 6;
+    pub const SPECTATOR_BOREDOM: i32 = 9;
+    pub const SPECTATOR_CHEER: i32 = 10;
+    pub const WAIT_AFTER_CHEER: i32 = 23;
     /// The graph's timer names by index (`sub_82E42B08` compares in this order).
     pub const NAMES: [&str; 48] = [
         "NextWarnTimer",
@@ -211,7 +221,7 @@ pub enum PedOp {
     /// `8269E758` / `8269E790`: the collision component's "needs to begin" / "is colliding".
     NeedsToBeginColliding,
     IsColliding,
-    /// The Colliding state's behaviour. Begin `8269DA00`: posts the collision mood event (`sub_8269D8A8`, the
+    /// The Colliding state's behavior. Begin `8269DA00`: posts the collision mood event (`sub_8269D8A8`, the
     /// collision broadcast: `collision` for the hit ped, `nearbycollision` for bystanders) and plays the contact
     /// reaction; End `8269E610`: clears the component's needs-to-begin / colliding bytes (+8, +9, +10).
     PedestrianColliding,
@@ -240,7 +250,7 @@ pub enum PedOp {
     /// `826AD558`: distance to the want's target compared with the threshold (squared by the
     /// factory `826D0038`).
     DistanceToWantTarget { want: String, greater: Option<f32>, less: Option<f32> },
-    // Behaviours.
+    // Behaviors.
     /// `8269F380` Begin: clear the honker, motion intent 6; `8269F410` Update: speed 2.0.
     Wander,
     /// `826A2FB8` Begin: ped `+5936` bit 0x80, motion intent 6 (a second virtual call with 1,
@@ -286,6 +296,25 @@ pub enum PedOp {
     /// `826A9E60`: the flat direction to the skater within `FOVAngle` (a half angle, radians: `dot >
     /// cos(fov)`, `sub_82473930`) and, when `Distance` is not 0, nearer than it (flat).
     IsFacingSkater { fov: f32, distance: f32 },
+    /// Spectate (factory `826C9068`, Begin `826A0140`, Update `826A0158`, End `826A0500`; b88 §2): stands still,
+    /// cheers at the skater's trick score (short above `short`, long above `long`) and boos a bail; the boredom timer
+    /// runs out without either.
+    Spectate { boredom: f32, min_cheer: f32, max_cheer: f32, wait_after_cheer: f32, short: i32, long: i32 },
+    /// `826ABB78`: the spectator boredom timer (9) ran out.
+    SpectatorIsBored,
+    /// LookAt (`8269EEA8` / `8269EF10`): looks at the plugin prop for `duration` s (timer 6) while the graph wanders.
+    LookAt { duration: f32 },
+    /// `826AB448`: the look-at timer (6) ran out.
+    LookAtTimeOut,
+    /// RegisterRecognizer (`826A2E00` / `826A2E40`): the ped joins the world's recognizer list while the op runs.
+    RegisterRecognizer,
+    /// `826AC070`: more than `max` peds recognize the player and this ped type may recognize.
+    MaxRecognizersExceeded { max: u32 },
+    /// `826ABFC8`: the ped type may recognize the player (`*(0x83085494)` vfunc +4 on the ped's type key).
+    CanRecognizePlayer,
+    /// PlayerRecognition (`826A1188` / `8269FDC0`): a recognition line (speech 42 or 45, 50 / 50), the greet gesture,
+    /// and the head on the player.
+    PlayerRecognition,
     /// `826A3508` Begin: store `speechvalue` on the ped (`ped+2468` through ped vfunc +204,
     /// `82E22798`); the audio side speaks when the value changes. `speechevent` is a label only.
     SendSpeech { value: i32 },
@@ -376,7 +405,7 @@ pub enum PedOp {
     /// player, else 19.
     TakeDownTargetableSuccess,
     /// `826A5068` Begin: the failed attempt. The ped trips (stores Knockdown / FromBack) when the target refused, or when
-    /// the chosen takedown entry may trip and a 1..=100 roll is at most `trip_chance` x 100 (`tripChance`, behaviour
+    /// the chosen takedown entry may trip and a 1..=100 roll is at most `trip_chance` x 100 (`tripChance`, behavior
     /// +0x1C, default `8208EA6C` 0.35); otherwise a reaction stored during the attempt stays stored (b326).
     TakeDownTargetableFailure { trip_chance: f32 },
     /// `826A5230` End: forget the takedown target (inferred from the name).
@@ -525,13 +554,13 @@ pub enum PedOp {
     /// OverrideAnimData (factory `826CA578`): the ped plays another entity type's animation set while the state runs
     /// (`overrideEntityName`; stock: `zombie`). Clearing it on End is [inferred] (no vtable found).
     OverrideAnimData { entity: String },
-    /// `826A7900` Begin / `826A7918` End: `brain+3279` bit 0x10 for the behaviour's life (b25 §3).
+    /// `826A7900` Begin / `826A7918` End: `brain+3279` bit 0x10 for the behavior's life (b25 §3).
     DisallowHandPropActions,
     SetWaitingToReactFlagOnBegin,
     ClearWaitingToReactFlagOnBegin,
     SetIsReactingToMoodEventFlagOnBegin,
     UnsetIsReactingToMoodEventFlagOnEnd,
-    /// Marker behaviours with no effect of their own (`AllowPedestrianJumping`: all no-op slots).
+    /// Marker behaviors with no effect of their own (`AllowPedestrianJumping`: all no-op slots).
     Marker { name: String },
     /// Not ported yet.
     Pending { name: String },
@@ -574,6 +603,26 @@ impl PedOp {
             "TurnToFaceSkater" => PedOp::TurnToFaceSkater,
             "StandAndWatchSkater" => PedOp::StandAndWatchSkater { max_angle: float("maxAngle").unwrap_or(0.4), predict_time: float("predictTime").unwrap_or(2.0) },
             "IsFacingSkater" => PedOp::IsFacingSkater { fov: float("FOVAngle").unwrap_or(0.8), distance: float("Distance").unwrap_or(0.0) },
+            // Defaults: the Spectate ctor's (b88 §2); the thresholds default to the getter's previous value, the graphs
+            // always pass 50 / 400.
+            "Spectate" => {
+                let wait = float("waitTimeAfterCheer").unwrap_or(2.0);
+                PedOp::Spectate {
+                    boredom: float("boredomTime").unwrap_or(60.0),
+                    min_cheer: float("minCheerTime").unwrap_or(3.0),
+                    max_cheer: float("maxCheerTime").unwrap_or(7.0),
+                    wait_after_cheer: wait,
+                    short: float("shortCheerThreshold").unwrap_or(wait) as i32,
+                    long: float("longCheerThreshold").unwrap_or(wait) as i32,
+                }
+            }
+            "SpectatorIsBored" => PedOp::SpectatorIsBored,
+            "LookAt" => PedOp::LookAt { duration: float("duration").unwrap_or(30.0) },
+            "LookAtTimeOut" => PedOp::LookAtTimeOut,
+            "RegisterRecognizer" => PedOp::RegisterRecognizer,
+            "MaxRecognizersExceeded" => PedOp::MaxRecognizersExceeded { max: float("maxrecognizers").map_or(5, |m| m as u32) },
+            "CanRecognizePlayer" => PedOp::CanRecognizePlayer,
+            "PlayerRecognition" => PedOp::PlayerRecognition,
             // The factory reads the float and truncates it (`fctiwz`), default 0.0.
             // Both factories read `timerName` with the default "TimedRangeRandom" (`0x82307E4C`).
             "SetSimpleTimer" => PedOp::SetSimpleTimer { timer: timer(), length: float("length").unwrap_or(0.0) },
@@ -889,7 +938,7 @@ impl PedBrain {
     }
 }
 
-/// What a ped's brain knows and decided (host-owned, serialisable plain data).
+/// What a ped's brain knows and decided (host-owned, serializable plain data).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PedBrain {
     /// The ped's own rolls (host-seeded; `None` = seed 0) and its type's sit values.
@@ -939,7 +988,7 @@ pub struct PedBrain {
     /// `ped+5916`: the plugin prop is ignored by the ped's collision (DisableCollisionsWithBehaviourSource).
     pub ignore_source_collision: bool,
     /// `brain+3277` bit 0x20, ped `+5936` bit 0x40 cleared, `brain+3278` bit 0x08 (with each DisableAllMoods
-    /// behaviour's saved value), `brain+3200` / `+3201`.
+    /// behavior's saved value), `brain+3200` / `+3201`.
     pub heavy_collision_disabled: bool,
     pub collision_sliding_disabled: bool,
     /// DisableNavigation: ped `+5936` bit 0x80 cleared (no navigation).
@@ -975,7 +1024,15 @@ pub struct PedBrain {
     pub locked_at: Option<Vec3>,
     /// ConversationListenToSpeaker: the speaker the ped looks at (no head tracking consumer yet).
     pub listen_to: Option<u64>,
-    pub look_at: Vec<u64>,
+    pub look_at: Vec<LookTarget>,
+    /// Spectate's run state (b88 §2: pending cheer delay, cheer time, flags).
+    pub spectate: Option<SpectateRun>,
+    /// The skater's score / bail this frame (`ped+2512`, posted by the ped manager pass `82E245F0`, b157); host-set.
+    pub skater_feed: Option<SkaterFeed>,
+    /// In the world's recognizer list (RegisterRecognizer); the host keeps the list.
+    pub recognizer: bool,
+    /// An upper-body gesture clip still plays (host-set; retail's motion state not 7): a long cheer lasts until it ends.
+    pub gesture_busy: bool,
     /// The tazer: draw state (`brain+3264`: 1 drawing, 2 drawn, 3 putting away, 0 put away; b153), draw requested
     /// (`+3280` 0x40), hit delivered (0x20), line of sight (0x10, host-written), the want it aims at
     /// (`+3268`) and whether it is registered (`ped+2492`).
@@ -1045,7 +1102,7 @@ pub struct PedBrain {
     pub chase_resting: bool,
     /// Nav modifiers the graph set (`None` / absent = the ped's own setting).
     pub nav_modifiers: BTreeMap<u8, bool>,
-    /// What each ChangeNavModifierSetting behaviour saved at Begin, by behaviour id.
+    /// What each ChangeNavModifierSetting behavior saved at Begin, by behavior id.
     pub nav_saved: BTreeMap<usize, Option<bool>>,
 }
 
@@ -1154,7 +1211,7 @@ pub struct ChaseView<'a> {
     pub me: u64,
     pub record: Option<&'a super::chase::ChaseRecord>,
     pub groups: Option<&'a dyn Fn(u64) -> Option<super::chase::ChaseGroupInfo>>,
-    /// The ped's conversation: complete, the speaker, its centre and its free waypoints.
+    /// The ped's conversation: complete, the speaker, its center and its free waypoints.
     pub conversation: Option<ConversationInfo<'a>>,
     /// A secondary chaser's block rule and formation point against its chasee (host-computed).
     pub block: Option<&'a dyn Fn(u64) -> Option<(bool, Vec3)>>,
@@ -1166,6 +1223,10 @@ pub struct ChaseView<'a> {
     /// Whether a chasee is wiping out (the chase group's vfn +88: the skater's phys-out byte 59, `825948B0`; a ped's
     /// brain `+3277` bit 0x04) [code, b106].
     pub wiping: Option<&'a dyn Fn(u64) -> bool>,
+    /// Peds in the world's recognizer list now (`mgr+248`, b88 §5), this one included once registered.
+    pub recognizers: usize,
+    /// This ped's type may recognize the player (CanRecognizePlayer; host data, default false).
+    pub can_recognize: bool,
 }
 
 impl ChaseView<'_> {
@@ -1258,7 +1319,50 @@ impl PedBrain {
     }
 }
 
-/// One tick's view of a ped for the graph: the program's operations by behaviour / condition id,
+/// One entry of the attention stack (`ped+5900`, at most 3; resolved each frame by `82E274B8`, b1018): what the
+/// head looks at. Retail kinds: 1 / 2 entity, 3 straight ahead, 5 prop, 7 the local player.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LookTarget {
+    Entity(u64),
+    Ahead,
+    Prop(Vec3),
+    Player,
+}
+
+/// The attention stack's depth.
+pub const LOOK_AT_DEPTH: usize = 3;
+
+/// The skater event a spectator reads (b157): the current trick sequence's points (HUD units) and a bail.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SkaterFeed {
+    pub score: i32,
+    pub bail: bool,
+}
+
+/// Spectate's per-run state (`826A0028`'s block: +8 delay, +12 cheer time, +16 kind, +20 flags).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct SpectateRun {
+    pub delay: f32,
+    pub cheer_time: f32,
+    pub pending: bool,
+    pub cheering: bool,
+    pub long: bool,
+}
+
+/// Spectate's speech values (b88 §2; names from `speech.rs`).
+pub mod spectate_speech {
+    pub const WANDERING: i32 = 1;
+    pub const LONG_CHEER: i32 = 23;
+    pub const SHORT_CHEER: i32 = 24;
+    pub const STOP_CHEER: i32 = 25;
+    pub const BORED: i32 = 26;
+    pub const RECOGNIZE: [i32; 2] = [45, 42];
+}
+
+/// Spectate's cheer gesture channel (`0x82307DAC`).
+pub const SPECTATE_CHEER_CHANNEL: &str = "SpectateCheerPositive";
+
+/// One tick's view of a ped for the graph: the program's operations by behavior / condition id,
 /// the brain, and where targets are.
 pub struct BrainHost<'a> {
     pub behaviors: &'a [PedOp],
@@ -1403,6 +1507,10 @@ impl BrainHost<'_> {
                     f[0] * d[0] + f[1] * d[1] > fov.cos()
                 })
             }),
+            PedOp::SpectatorIsBored => b.timer(timers::SPECTATOR_BOREDOM) <= 0.0,
+            PedOp::LookAtTimeOut => b.timer(timers::LOOK_AT) <= 0.0,
+            PedOp::CanRecognizePlayer => self.chase.can_recognize,
+            PedOp::MaxRecognizersExceeded { max } => self.chase.can_recognize && self.chase.recognizers > *max as usize,
             PedOp::DistanceToWantTarget { want, greater, less } => match self.want_distance_sq(want) {
                 Some(d2) => greater.is_none_or(|g| d2 > g * g) && less.is_none_or(|l| d2 < l * l),
                 None => false,
@@ -1497,9 +1605,30 @@ impl Host for BrainHost<'_> {
             },
             PedOp::AlertToWantTarget { want } => {
                 if let Some(t) = b.wants.get(want).map(|w| w.target) {
-                    if b.look_at.len() < 3 {
-                        b.look_at.push(t);
+                    if b.look_at.len() < LOOK_AT_DEPTH {
+                        b.look_at.push(LookTarget::Entity(t));
                     }
+                }
+            }
+            PedOp::Spectate { boredom, .. } => {
+                b.spectate = Some(SpectateRun::default());
+                b.set_timer(timers::SPECTATOR_BOREDOM, *boredom);
+            }
+            // `8269EEA8`: the plugin prop (kind 5), or straight ahead without one (kind 3).
+            PedOp::LookAt { duration } => {
+                if b.look_at.len() < LOOK_AT_DEPTH {
+                    b.look_at.push(b.plugin_target.map_or(LookTarget::Ahead, LookTarget::Prop));
+                }
+                b.set_timer(timers::LOOK_AT, *duration);
+            }
+            PedOp::RegisterRecognizer => b.recognizer = true,
+            // `826A1188`: n = trunc(rand x 2) picks the line; the greet gesture; the head on the player (kind 7).
+            PedOp::PlayerRecognition => {
+                let n = (b.rng().unit() * 2.0) as usize;
+                b.speech = Some(spectate_speech::RECOGNIZE[n.min(1)]);
+                b.chase_requests.push(ChaseRequest::GestureClip { clip: GREET_CHANNEL });
+                if b.look_at.len() < LOOK_AT_DEPTH {
+                    b.look_at.push(LookTarget::Player);
                 }
             }
             // `8269F7B0`: only with the target found: the gesture, the warn time, the speech; else the want goes when the op
@@ -1850,6 +1979,61 @@ impl Host for BrainHost<'_> {
                 }
             }
             PedOp::StartChase => b.speech = Some(s.start_chase_speech),
+            PedOp::Spectate { min_cheer, max_cheer, wait_after_cheer, short, long, boredom } => {
+                let dt = _frame.dt;
+                let mut run = b.spectate.unwrap_or_default();
+                // `826A0158`, b88 §2 steps 1-7.
+                b.speech = Some(spectate_speech::WANDERING);
+                if run.pending {
+                    run.delay -= dt;
+                    if run.delay <= 0.0 {
+                        b.chase_requests.push(ChaseRequest::GestureClip { clip: SPECTATE_CHEER_CHANNEL });
+                        run.pending = false;
+                        run.cheering = true;
+                        b.set_timer(timers::SPECTATOR_CHEER, run.cheer_time);
+                    }
+                    b.spectate = Some(run);
+                } else {
+                if run.cheering {
+                    let finished = if run.long { !b.gesture_busy } else { b.timer(timers::SPECTATOR_CHEER) <= 0.0 };
+                    if finished {
+                        run.cheering = false;
+                        b.set_timer(timers::WAIT_AFTER_CHEER, *wait_after_cheer);
+                    } else {
+                        b.speech = Some(if run.long { spectate_speech::LONG_CHEER } else { spectate_speech::SHORT_CHEER });
+                    }
+                }
+                b.speed_suggestion = Some(0.0);
+                let feed = if b.timer(timers::WAIT_AFTER_CHEER) <= 0.0 { b.skater_feed } else { None };
+                // Kind 0 bail, 1 nothing, 2 short, 3 long.
+                let kind = feed.map(|f| {
+                    if f.bail {
+                        b.set_timer(timers::SPECTATOR_BOREDOM, *boredom);
+                        b.speech = Some(spectate_speech::STOP_CHEER);
+                        0
+                    } else if f.score > *short {
+                        b.set_timer(timers::SPECTATOR_BOREDOM, *boredom);
+                        if f.score > *long { 3 } else { 2 }
+                    } else {
+                        1
+                    }
+                });
+                match kind {
+                    Some(k @ (2 | 3)) if !run.cheering && !run.pending => {
+                        run.long = k == 3;
+                        run.cheer_time = if run.long { 0.0 } else { min_cheer + b.rng().unit() * (max_cheer - min_cheer) };
+                        run.delay = b.rng().unit() * 0.5;
+                        run.pending = true;
+                    }
+                    Some(0) if run.cheering => {
+                        b.speech = Some(spectate_speech::STOP_CHEER);
+                        b.set_timer(timers::SPECTATOR_CHEER, 0.0);
+                    }
+                    _ => {}
+                }
+                b.spectate = Some(run);
+                }
+            }
             PedOp::ChaserEvaluateWhoToTakeDown => b.takedown_target = b.chasee,
             PedOp::TargetWaypoint { speed, slide_distance, slide_speed } => {
                 if let Some(w) = b.waypoint {
@@ -2018,7 +2202,7 @@ impl Host for BrainHost<'_> {
                 b.own_plugin_object = false;
                 b.ignore_source_collision = false;
             }
-            // `826A2770`: the Create behaviour's End removes its packet.
+            // `826A2770`: the Create behavior's End removes its packet.
             PedOp::CreateSimpleMonitoredIntent { intent, .. } => {
                 b.monitored.remove(intent);
             }
@@ -2063,9 +2247,18 @@ impl Host for BrainHost<'_> {
                 b.explicit_turn = None;
             }
             PedOp::ConversationListenToSpeaker => b.listen_to = None,
-            PedOp::AlertToWantTarget { .. } => {
+            PedOp::AlertToWantTarget { .. } | PedOp::LookAt { .. } | PedOp::PlayerRecognition => {
                 b.look_at.pop();
             }
+            // `826A0500`: pops the attention stack; bored (timer 9 out) -> speech 26.
+            PedOp::Spectate { .. } => {
+                b.look_at.pop();
+                if b.timer(timers::SPECTATOR_BOREDOM) <= 0.0 {
+                    b.speech = Some(spectate_speech::BORED);
+                }
+                b.spectate = None;
+            }
+            PedOp::RegisterRecognizer => b.recognizer = false,
             PedOp::UnregisterTazerOnEnd => b.tazer_registered = false,
             PedOp::LockToCurrentPosition => {
                 b.position_locked = false;

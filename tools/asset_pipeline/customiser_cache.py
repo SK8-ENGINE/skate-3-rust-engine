@@ -105,7 +105,7 @@ def stage(directory, previous, name, version, source, action, assets, report):
         paths.extend(path.rglob('*') if path.is_dir() else [path])
     files = receipt(directory, paths)
     if not files:raise RuntimeError('Character stage produced no output: '+name)
-    # Size and time per file: a refresh hashes only a file whose time moved (doc 08 "Customiser check cost").
+    # Size and time per file: a refresh hashes only a file whose time moved (doc 08 "Customizer check cost").
     for relative, item in files.items():
         item['mtime_ns'] = (directory.resolve()/relative).stat().st_mtime_ns
     atomic_json(marker, dict(version=version, source=source, files=files))

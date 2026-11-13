@@ -34,9 +34,9 @@ pub struct ConversationParams {
     pub locate_tolerance: f32,
     /// Highest area cost a waypoint may stand on (`82926640`: max of the area byte's nibbles; pavement 1).
     pub max_area_cost: f32,
-    /// Farthest a waypoint may be from the dropped centre, m (`0x8211F0F8` = 9.0 squared).
+    /// Farthest a waypoint may be from the dropped center, m (`0x8211F0F8` = 9.0 squared).
     pub max_distance: f32,
-    /// The centre is dropped onto the world with a ray this far above and below it, m (`82E166C0`, `0x822F8B84`).
+    /// The center is dropped onto the world with a ray this far above and below it, m (`82E166C0`, `0x822F8B84`).
     pub drop_height: f32,
     /// Most members (descriptor `maxNumberOfParticipants`, 3; vf4).
     pub max_members: usize,
@@ -467,7 +467,7 @@ mod tests {
     #[test]
     fn waypoints_keep_off_roads_all_or_nothing() {
         // `82E1D620` (b134): pavement 0x11 keeps all three at the navmesh height; one road (0xA1) or off-mesh
-        // waypoint clears the set; a missed centre drop gives none.
+        // waypoint clears the set; a missed center drop gives none.
         let p = ConversationParams::default();
         let mut half = || 0.5f32;
         let pavement = |w: Vec3| Some(([w[0], 0.25, w[2]], 0x11u8));

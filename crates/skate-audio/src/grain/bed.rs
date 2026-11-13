@@ -371,7 +371,7 @@ impl GrainBed {
         }
         self.rocket.tick(BLOCK_DELTA, &mut self.rng);
         self.rocket.render(&mut self.rocket_bus);
-        // The rocket binds to the default bus directly: mono → the centre channel.
+        // The rocket binds to the default bus directly: mono → the center channel.
         let mono = self.rocket_bus[0];
         self.rocket_send.process(&[&mono[..]], to_six(1), mix, Mode::Normal);
         self.rocket_bus = [[0.0; BLOCK]; 6];
@@ -435,7 +435,7 @@ mod tests {
         assert!(out.iter().all(|c| c.iter().all(|&s| s == 0.0)));
     }
 
-    /// 382 Hz tone bed (A only), `blocks` blocks with the chain values, the centre channel.
+    /// 382 Hz tone bed (A only), `blocks` blocks with the chain values, the center channel.
     fn render_a(values: ChainValues, tuning: ChainTuning, blocks: usize) -> (Vec<f32>, Vec<f32>) {
         let mut bed = GrainBed::new();
         bed.chain_tuning = tuning;
@@ -500,7 +500,7 @@ mod tests {
         let (dry, _) = render_a(ChainValues { pan_degrees: 0.0, ..ChainValues::default() }, ChainTuning::default(), 200);
         let leak = centre[BLOCK..].iter().fold(0.0f32, |m, v| m.max(v.abs()));
         assert!(leak < 1e-6, "panned hard left: nothing in the centre ({leak})");
-        // The env tap is the pre-pan mono × 0.5: half the centre-panned dry signal, sample for sample.
+        // The env tap is the pre-pan mono × 0.5: half the center-panned dry signal, sample for sample.
         for (k, (&e, &d)) in env.iter().zip(&dry).enumerate().skip(BLOCK) {
             assert!((e - 0.5 * d).abs() <= 1e-6 * d.abs().max(1e-3), "{k}: {e} vs {d}");
         }

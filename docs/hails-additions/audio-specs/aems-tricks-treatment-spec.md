@@ -42,7 +42,7 @@ Object fields [R] (`sub_824CBD98`): +16/+28 owner refs (+72 local byte), +32 aud
 **Class_Flips words** (`sub_824AFAD8`, payload 28 = bank's): w0 0, w1 32767, w2 0, w3 0, w4 4096, w5 25000,
 w6 0, w7 At spin 0..1000, w8 Up spin, w9 Ri spin, w10 time-scale word 0..1000, w11 trick id 0..40,
 w12–w15 0, w16 (+224 == 0), w17 27646, w18 14848, w19 6656, w20 0, w21 10000, w22 0, w23 bool class
-`0x11A631878B239355` (not modelled: 0), w24 local && +64 == 0, w25 local, w26 local ? level(6) : 0, w27 eEQ 6.
+`0x11A631878B239355` (not modeled: 0), w24 local && +64 == 0, w25 local, w26 local ? level(6) : 0, w27 eEQ 6.
 **cloth_trick** (`sub_824B71C0`, 11 words, handle 0x8302EED8 = object 22): w2 4096, w4 25000, w8 1,
 w9 id 0..40, w10 eEQ 0, rest 0.
 

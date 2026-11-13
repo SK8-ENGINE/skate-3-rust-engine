@@ -350,6 +350,109 @@ fn refresh_for(findings: Vec<crate::asset_check::Finding>, refresh: impl FnOnce(
     Ok(true)
 }
 
+/// How a setup run ended.
+#[derive(Debug, PartialEq)]
+enum SetupEnd {
+    Done,
+    /// The player clicked Cancel on the splash: setup was stopped, the current installation stays.
+    Cancelled,
+}
+
+/// One line of setup's progress file (`tools/asset_pipeline/setup_progress.py`, design b172) as a splash change.
+#[derive(Debug, PartialEq)]
+enum ProgressLine {
+    Start(Vec<String>),
+    Step(String),
+    Item(String, Option<f32>),
+    NeedsWindow(String),
+    Error(String),
+    Done,
+}
+
+fn progress_line(line: &str) -> Option<ProgressLine> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    let text = || v["text"].as_str().unwrap_or_default().to_owned();
+    Some(match v["kind"].as_str()? {
+        "start" => ProgressLine::Start(v["groups"].as_array().map(|g| g.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect()).unwrap_or_default()),
+        "step" => ProgressLine::Step(text()),
+        "item" => ProgressLine::Item(text(), match (v["done"].as_f64(), v["total"].as_f64()) {
+            (Some(d), Some(t)) if t > 0.0 => Some((d / t) as f32),
+            _ => None,
+        }),
+        "needs_window" => ProgressLine::NeedsWindow(v["reason"].as_str().unwrap_or_default().to_owned()),
+        "error" => ProgressLine::Error(text()),
+        "done" => ProgressLine::Done,
+        _ => return None,
+    })
+}
+
+/// New complete lines of the progress file since `read` (bytes), shown on the splash and in the log.
+fn follow_progress(path: &Path, read: &mut usize) {
+    let Ok(bytes) = std::fs::read(path) else { return };
+    let Some(end) = bytes[(*read).min(bytes.len())..].iter().rposition(|&b| b == b'\n').map(|i| *read + i + 1) else { return };
+    for line in String::from_utf8_lossy(&bytes[*read..end]).lines() {
+        eprintln!("SETUP: {line}");
+        match progress_line(line) {
+            Some(ProgressLine::Start(groups)) => crate::splash::refresh_mode(&groups),
+            Some(ProgressLine::Step(text)) => crate::splash::stage(&text),
+            Some(ProgressLine::Item(text, fraction)) => {
+                crate::splash::detail(text);
+                crate::splash::progress(fraction);
+            }
+            Some(ProgressLine::NeedsWindow(_)) => crate::splash::stage("Setup needs you: see the setup window"),
+            Some(ProgressLine::Error(text)) => crate::splash::fail(&text),
+            Some(ProgressLine::Done) => crate::splash::progress(Some(1.0)),
+            None => {}
+        }
+    }
+    *read = end;
+}
+
+/// Runs setup: with the splash up a refresh shows there (`--no-window`) with a Cancel button, every run writes the
+/// progress file the splash and the log read.
+fn run_setup(mut command: Command, base: &Path, refresh: bool) -> Result<SetupEnd, String> {
+    let on_splash = refresh && crate::splash::active();
+    let progress = base.join("setup-progress.jsonl");
+    let _ = std::fs::remove_file(&progress);
+    command.arg("--progress-file").arg(&progress);
+    if on_splash {
+        command.arg("--no-window");
+        crate::splash::refresh_mode(&[]);
+        crate::splash::stage("Updating game files");
+    }
+    let mut child = command.spawn().map_err(|e| format!("Could not start setup: {e}"))?;
+    let mut read = 0;
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            break status;
+        }
+        follow_progress(&progress, &mut read);
+        if on_splash && crate::splash::cancel_requested() {
+            // The whole tree: setup's map conversions run as its child processes. The new installation is only
+            // published at the end, so the current one stays as it was.
+            let _ = Command::new("taskkill").args(["/T", "/F", "/PID", &child.id().to_string()]).status();
+            let _ = child.wait();
+            let _ = std::fs::remove_file(&progress);
+            crate::splash::end_refresh();
+            crate::splash::stage("Cancelled: starting on your current game files");
+            eprintln!("SETUP: cancelled from the splash; starting on the current installation");
+            return Ok(SetupEnd::Cancelled);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    };
+    follow_progress(&progress, &mut read);
+    let _ = std::fs::remove_file(&progress);
+    if !status.success() {
+        if on_splash {
+            // Long enough to read before the error report takes over.
+            std::thread::sleep(std::time::Duration::from_secs(5));
+        }
+        return Err("Setup was cancelled or did not complete".into());
+    }
+    crate::splash::end_refresh();
+    Ok(SetupEnd::Done)
+}
+
 /// Runs a release copy's setup helper on `base`: a refresh when an installation exists (`existing`, its assets).
 fn run_release_setup(setup: &Path, base: &Path, exe: &Path, existing: Option<&Path>) -> Result<(), String> {
     let mut command = Command::new(setup);
@@ -364,9 +467,7 @@ fn run_release_setup(setup: &Path, base: &Path, exe: &Path, existing: Option<&Pa
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000);
     }
-    let status = command.status().map_err(|e| format!("Could not start setup: {e}"))?;
-    if !status.success() { return Err("Setup was cancelled or did not complete".into()); }
-    Ok(())
+    run_setup(command, base, existing.is_some()).map(|_| ())
 }
 
 fn stamp_pipelines(
@@ -455,8 +556,9 @@ fn refresh_dev_copy(link: &Path) -> Result<(), String> {
         command.env("SKATE_SETUP_SPEECH", "1");
     }
     eprintln!("SETUP: refreshing the development installation in {}", base.display());
-    let status = command.status().map_err(|e| format!("Could not start setup: {e}"))?;
-    if !status.success() { return Err("Setup was cancelled or did not complete".into()); }
+    if run_setup(command, &base, true)? == SetupEnd::Cancelled {
+        return Ok(());
+    }
     let (assets, _) = installed(&base)?.ok_or("Setup did not publish a complete installation")?;
     repoint_link(link, &assets)
 }
@@ -668,6 +770,32 @@ fn receipt_present(root: &Path, files: &serde_json::Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_progress_lines_become_splash_changes() {
+        assert_eq!(progress_line(r#"{"v":1,"kind":"start","refresh":true,"groups":["maps","hud"]}"#), Some(ProgressLine::Start(vec!["maps".into(), "hud".into()])));
+        assert_eq!(progress_line(r#"{"v":1,"kind":"item","text":"Converted 3/12 maps: The Park","done":3,"total":12}"#), Some(ProgressLine::Item("Converted 3/12 maps: The Park".into(), Some(0.25))));
+        assert_eq!(progress_line(r#"{"v":1,"kind":"step","text":"Extracting your ISO"}"#), Some(ProgressLine::Step("Extracting your ISO".into())));
+        assert_eq!(progress_line(r#"{"v":1,"kind":"error","text":"disc unreadable","log":"x"}"#), Some(ProgressLine::Error("disc unreadable".into())));
+        assert_eq!(progress_line(r#"{"v":1,"kind":"done","warnings":0}"#), Some(ProgressLine::Done));
+        assert_eq!(progress_line(r#"{"v":2,"kind":"future"}"#), None, "unknown kinds are ignored");
+        assert_eq!(progress_line("not json"), None);
+    }
+
+    #[test]
+    fn the_progress_file_is_read_line_by_line_without_half_lines() {
+        let dir = std::env::temp_dir().join(format!("skate-progress-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("p.jsonl");
+        std::fs::write(&path, "{\"v\":1,\"kind\":\"step\",\"text\":\"a\"}\n{\"v\":1,\"kind\":\"st").unwrap();
+        let mut read = 0;
+        follow_progress(&path, &mut read);
+        assert_eq!(read, 33, "only the complete first line");
+        std::fs::write(&path, "{\"v\":1,\"kind\":\"step\",\"text\":\"a\"}\n{\"v\":1,\"kind\":\"step\",\"text\":\"b\"}\n").unwrap();
+        follow_progress(&path, &mut read);
+        assert_eq!(read, 66);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
     /// A development copy's refresh finds the data folder behind its `--assets` junction and re-points the junction
     /// at the installation setup publishes (the Steam launcher's copies had no way to refresh, 2026-10-12).
     #[cfg(windows)]

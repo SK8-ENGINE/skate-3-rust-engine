@@ -1,5 +1,5 @@
 //! The unlock store (research b872; career M1 step 9; doc 43): grants by retail unlock kind and name, the "new" flag
-//! the customiser shows, and the two progression summary lists the reward screens read (big rewards: graphs'
+//! the customizer shows, and the two progression summary lists the reward screens read (big rewards: graphs'
 //! UnlockProgressionReward with TRUE; others: challenge results and FALSE). Everything answers "unlocked" while
 //! `unlock_all` is on, the default until the user turns gating on (USER-ASKS history 93).
 use std::collections::BTreeMap;

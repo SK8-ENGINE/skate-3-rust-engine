@@ -104,7 +104,7 @@ pub struct TrafficAudio {
     pub load: Option<f32>,
     /// `+156`.
     pub horn: HornState,
-    /// `+160`: the tyres skid.
+    /// `+160`: the tires skid.
     pub skidding: bool,
 }
 

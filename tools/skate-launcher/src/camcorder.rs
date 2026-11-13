@@ -1,5 +1,5 @@
 //! The camcorder LCD panel look, ported from SkateLauncher.cs (LcdPanel, LcdCanvas and their helpers; doc 41, 44a 6)
-//! function by function with its coordinates, colours, fonts and timings: a 1240 x 760 unit space for the panel, and
+//! function by function with its coordinates, colors, fonts and timings: a 1240 x 760 unit space for the panel, and
 //! the LCD laid out in a 340-wide space over the dusk skate-spot scene.
 use std::sync::Arc;
 
@@ -483,7 +483,7 @@ fn swing_panel(ctx: &egui::Context, painter: &egui::Painter, hinge_start: egui::
     let shut = std::f32::consts::PI - (2.0 * 2.4f32).atan();
     let a = (1.0 - open.max(0.0)) * shut;
     let (cos, sin) = (a.cos(), a.sin());
-    // One camera for the face, its side and the shade: the eye in front of the panel's centre, `eye_d` back
+    // One camera for the face, its side and the shade: the eye in front of the panel's center, `eye_d` back
     // (mine; the classic's eye sits on the hinge line with a 0.6 depth factor). X right, Z away from you.
     let (eye_x, eye_d) = (panel.center().x, w * 2.4); // eye_d / (w / 2) = 2 x 2.4 sets the shut angle above
     let proj = move |x: f32, y: f32, z: f32| { let k = eye_d / (eye_d + z); pos2(eye_x + (x - eye_x) * k, cy + (y - cy) * k) };
@@ -564,7 +564,7 @@ fn hinge_side(painter: &egui::Painter, grid: &[Vec<(Pos2, Color32)>]) {
 }
 
 
-/// Splits triangles wider than `max_w` so colours and textures follow the perspective (the classic's 48 strips).
+/// Splits triangles wider than `max_w` so colors and textures follow the perspective (the classic's 48 strips).
 fn subdivide(mesh: epaint::Mesh, max_w: f32) -> epaint::Mesh {
     let mut out = epaint::Mesh::with_texture(mesh.texture_id);
     out.vertices = mesh.vertices;

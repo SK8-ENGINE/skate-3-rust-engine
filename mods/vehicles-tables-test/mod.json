@@ -1,0 +1,10 @@
+{
+  "id": "dev-vehicles-tables-test",
+  "api": 2,
+  "name": "Vehicle Tables Test (dev)",
+  "version": "0.1.0",
+  "author": "Hails",
+  "description": "Dev only, for branch world/challenges (doc 26h, Traffic for mods): adds a car type my_cab copied from taxi01 and makes every traffic category spawn only it, then logs VEHICLES_TEST lines. Disabling it puts retail traffic back.",
+  "entry": "main.lua",
+  "enabled_by_default": false
+}

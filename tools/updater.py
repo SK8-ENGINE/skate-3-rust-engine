@@ -440,8 +440,13 @@ def main(request=None):
     import tkinter as tk
     from tkinter import ttk
     win = tk.Tk()
-    win.title('Skate 3 Rust Engine — Updates')
+    win.title('Skate 3 Rust Engine updates')
     win.geometry('660x520')
+    try:
+        import ui_theme  # beside this script (a script run, and PyInstaller's analysis of tools/updater.py)
+    except ImportError:
+        from tools import ui_theme
+    ui_theme.apply(win)
     automatic = request['automatic']
     if automatic:
         win.withdraw()
@@ -450,7 +455,8 @@ def main(request=None):
     channel = tk.StringVar(value=settings.get('channel') if settings.get('channel') in ('Stable', 'Latest', 'Branch') else 'Stable')
     branch = tk.StringVar(value=settings.get('branch') or 'skyline-driving-update')
     status = tk.StringVar(value='Ready to check')
-    ttk.Label(win, text='Updates — Update downloads, then closes and restarts the game.').pack(pady=8)
+    ttk.Label(win, text='UPDATES', style='Title.TLabel').pack(pady=(14, 2))
+    ttk.Label(win, text='Update downloads, then closes and restarts the game.', style='Lead.TLabel').pack(pady=(0, 8))
     choice = ttk.Combobox(win, textvariable=channel, values=('Stable', 'Latest', 'Branch'), state='readonly')
     choice.pack()
     branch_row = ttk.Frame(win)
@@ -462,9 +468,11 @@ def main(request=None):
         win,
         text='Stable: published releases. Latest: rolling Experimental. Branch: published build for a GitHub branch (e.g. skyline-driving-update).',
         wraplength=620,
+        style='Note.TLabel',
     )
     channel_help.pack()
     notes = tk.Text(win, wrap='word', height=19)
+    ui_theme.text_widget(notes)
     notes.pack(fill='both', expand=True, padx=12, pady=8)
     notes.configure(state='disabled')
     ttk.Label(win, textvariable=status, wraplength=620).pack()
@@ -577,7 +585,7 @@ def main(request=None):
 
     check = ttk.Button(win, text='Check now', command=check_now)
     check.pack(side='left', padx=12, pady=12)
-    update = ttk.Button(win, text='Update', command=do_update, state='disabled')
+    update = ttk.Button(win, text='Update', command=do_update, state='disabled', style='Accent.TButton')
     update.pack(side='left', padx=12)
     back = ttk.Button(win, text='Cancel', command=close)
     back.pack(side='right', padx=12)

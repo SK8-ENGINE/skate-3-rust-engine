@@ -350,7 +350,7 @@ pub fn load(entries: &[Collection], root: &str, rules: &LocationRules, unlocks: 
             // Retail folder sort (82647EA0, comparator 82647B80, b451): category order, then label text; ours stable.
             let display = |label: &str| label_text(label).unwrap_or_else(|| label.to_owned());
             leaves.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| collate(&display(&a.2), &display(&b.2), COLLATION)));
-            // A map_category header row before each category run (b454); uncategorised leaves get none (NOT RETAIL YET).
+            // A map_category header row before each category run (b454); uncategorized leaves get none (NOT RETAIL YET).
             let mut kinds: Vec<&str> = leaves.iter().filter_map(|l| l.1.map(|c| c.key.as_str())).collect();
             kinds.dedup();
             let lone = inherited.get(row, FOLDER_LONE_HEADERLESS).is_some_and(|d| d.trim_start_matches('0') != "") && kinds.len() == 1;

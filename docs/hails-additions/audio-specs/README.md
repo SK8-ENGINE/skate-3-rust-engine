@@ -1,6 +1,6 @@
 # Audio specs
 
-Behavioural specifications behind the native audio port ([doc 11](../11-audio.md)) and the world audio
+Behavioral specifications behind the native audio port ([doc 11](../11-audio.md)) and the world audio
 hook-in ([doc 15](../15-world-audio.md)). Code comments in `crates/skate-audio` and
 `crates/skate-game/src/game_audio` cite them as `audio-specs/<name>.md §n`; the section numbers are kept
 stable for that reason.
@@ -14,7 +14,7 @@ stable for that reason.
 - Measured values (levels, rates, timings, counts) come from the recompilation unless a line says otherwise.
   The recompilation is not the console: its frame rate, timing and threading differ, so its program logic is
   the strong evidence and its timings are weaker.
-- Upstream PR #4 and PR #1 (@andrewnakas) and the other prior work were read for behaviour only; see
+- Upstream PR #4 and PR #1 (@andrewnakas) and the other prior work were read for behavior only; see
   [`rwaudio-prior-work.md`](rwaudio-prior-work.md) and the credit tables in the specs.
 - These are working notes. Tags such as **[R]** (our reading of the code), **[IMG]** (image constant),
   **[TR]** / **[T]** (trace-checked), **[I]** (inference) and **UNCERTAIN** say how firm each statement is.
@@ -47,7 +47,7 @@ stable for that reason.
 | [`world-ped-audio.md`](world-ped-audio.md) | Pedestrian audio: retail mechanism, port state, hook points |
 | [`world-speech.md`](world-speech.md) | Pedestrian speech: data, mechanism, port state |
 | [`world-npc-skater-audio.md`](world-npc-skater-audio.md) | NPC (AI) skaters' board sounds |
-| [`rwaudio-prior-work.md`](rwaudio-prior-work.md) | Prior work on RenderWare Audio and Snd9 AEMS, licences, applicability |
+| [`rwaudio-prior-work.md`](rwaudio-prior-work.md) | Prior work on RenderWare Audio and Snd9 AEMS, licenses, applicability |
 
 ## Credits
 
@@ -55,4 +55,4 @@ stable for that reason.
 [rexglue SDK](https://github.com/rexglue/rexglue-sdk) and [Xenia](https://github.com/xenia-project/xenia)'s
 Xbox 360 research; upstream PR #4 and PR #1 by @andrewnakas; sk8Audio (andrewnakas/skate3-audio);
 BurnoutDecomp's b5-decomp and BP-Decomp_Workflow; dbalatoni13/nfsmw; mitsevox/tw2004;
-[vgmstream](https://github.com/vgmstream/vgmstream). Details and licences per source are in each spec.
+[vgmstream](https://github.com/vgmstream/vgmstream). Details and licenses per source are in each spec.

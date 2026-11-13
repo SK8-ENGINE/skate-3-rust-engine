@@ -1,4 +1,4 @@
-# Dev only: colour statistics of a rectangle in a capture (water look matching, doc 09).
+# Dev only: color statistics of a rectangle in a capture (water look matching, doc 09).
 # Usage: python -I crop-stats.py <png> <x0> <y0> <x1> <y1>
 import sys
 

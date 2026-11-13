@@ -11,7 +11,7 @@ pub struct AudioState {
     pub dt: f32,
     /// `+208` board ground speed (m/s, SkateboardMotion+164; signed).
     pub ground_speed: f32,
-    /// `+96` centre-of-mass velocity (SystemReckoning+16); `+212` is its length.
+    /// `+96` center-of-mass velocity (SystemReckoning+16); `+212` is its length.
     pub com_velocity: [f32; 3],
     /// Record `+0` = SystemReckoning+64: the followed point (the skater).
     pub com_position: [f32; 3],

@@ -7,7 +7,7 @@
 struct VehicleParams {
     // xyz: g_vLightDir (towards the light), w: scene exposure (the character lighting's light).
     light: vec4<f32>,
-    // i_colorize_red / i_colorize_blue (secondary / chassis palette colour, times a mod gain).
+    // i_colorize_red / i_colorize_blue (secondary / chassis palette color, times a mod gain).
     red: vec4<f32>,
     blue: vec4<f32>,
     // x: glass program, y: normal map present, z: i_params.x (fade), w: environment cube present.

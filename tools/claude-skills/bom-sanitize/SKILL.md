@@ -1,13 +1,13 @@
 ---
-name: bom-sanitise
-description: Find and strip byte order marks (U+FEFF) and other invisible characters (zero-width spaces / joiners, word joiner, soft hyphen) from files, staged changes, commit message files, PR / issue drafts and recent commit history, and write text without them in the first place. Use before every commit, PR edit or publish step whose text came from PowerShell (Set-Content / Out-File add a BOM), when a commit subject or file starts with an invisible character, or whenever the user asks to sanitise BOM characters.
+name: bom-sanitize
+description: Find and strip byte order marks (U+FEFF) and other invisible characters (zero-width spaces / joiners, word joiner, soft hyphen) from files, staged changes, commit message files, PR / issue drafts and recent commit history, and write text without them in the first place. Use before every commit, PR edit or publish step whose text came from PowerShell (Set-Content / Out-File add a BOM), when a commit subject or file starts with an invisible character, or whenever the user asks to sanitize BOM characters.
 ---
 
-# BOM sanitisation
+# BOM sanitization
 
 Why: PowerShell 5.1 `Set-Content -Encoding utf8` writes a BOM, and `git commit -F` keeps it in the commit subject.
 
-Tool: `python .claude/skills/bom-sanitise/tools/bom_scrub.py` (run it from the repo or worktree concerned; exit code 1
+Tool: `python .claude/skills/bom-sanitize/tools/bom_scrub.py` (run it from the repo or worktree concerned; exit code 1
 when something was found and not fixed).
 
 | Check | Command |

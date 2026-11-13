@@ -83,7 +83,7 @@ fn hermite(times: &[f32], value: impl Fn(usize) -> f32, scale: impl Fn(usize) ->
         return p0 + d * u;
     }
     let dt = times[s + 1] - times[s];
-    // sub_828F0990: neighbour segment n, its delta and duration.
+    // sub_828F0990: neighbor segment n, its delta and duration.
     let tangent = |n: Option<usize>| -> f32 {
         let Some(n) = n.filter(|n| n + 1 < times.len()) else { return d };
         let (dn, dtn) = (value(n + 1) - value(n), times[n + 1] - times[n]);
@@ -148,7 +148,7 @@ mod tests {
         let track = CameraTrack { length: 2.0, keys: vec![key(0.0, 0.0, 1.0), key(2.0, 4.0, 1.0)], ..Default::default() };
         assert_eq!(track.sample(0.0).unwrap().eye[0], 0.0);
         assert!((track.sample(2.0).unwrap().eye[0] - 4.0).abs() < 1e-5);
-        // Both tangents are D with no neighbours: the Hermite is the straight line.
+        // Both tangents are D with no neighbors: the Hermite is the straight line.
         assert!((track.sample(0.5).unwrap().eye[0] - 1.0).abs() < 1e-5);
     }
 

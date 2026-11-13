@@ -89,7 +89,7 @@ impl RaceAi {
 
     /// setup_heat (TeleportToStart): each racer at its start slot on the line that starts nearest it (b972 §4), pinned.
     /// The racers placed before it count as riders on their lines (the branch score's crowding term), so racers on
-    /// neighbouring slots spread over the lines. A racer already out is replaced (RepositionAI). The racers ride only
+    /// neighboring slots spread over the lines. A racer already out is replaced (RepositionAI). The racers ride only
     /// this set (the challenge path filter, b972 §3).
     pub(crate) fn place(&mut self, heat: &Heat, population: &mut PopulationState) {
         crate::living_world::merge_npc_lines(population, &self.lines, true);

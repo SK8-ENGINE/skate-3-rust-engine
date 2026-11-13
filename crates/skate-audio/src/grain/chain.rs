@@ -318,7 +318,7 @@ impl ChainState {
             w.gain1 = g * self.level;
         }
         // Post on change; the compare value is per player, not per chain, so after truck 0 posts
-        // truck 1 always compares equal and never receives a wobble (retail behaviour).
+        // truck 1 always compares equal and never receives a wobble (retail behavior).
         for (truck, applied) in self.applied.iter_mut().enumerate() {
             for (p, w) in self.wobble.iter_mut().enumerate() {
                 if w.gain3 != w.posted {

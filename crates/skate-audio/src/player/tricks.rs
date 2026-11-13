@@ -8,7 +8,7 @@
 //! - process `sub_824CBEB0(dt)`, only for the local player (`[this+28]+72`): `+60 := +352` while
 //!   `+348 ≠ −1`; the flip poster `sub_824CBFB8`; cloth A `sub_824CC590`; cloth B `sub_824CC680`;
 //!   `+48 := +348`; `+68` counts down by dt to 0; the slew `sub_824CD170`; `sub_824CD390` (game
-//!   events 24685…24697 to the trick-event system, no audio: not modelled);
+//!   events 24685…24697 to the trick-event system, no audio: not modeled);
 //! - update `sub_824CBF78`: the flip keep/rewrite `sub_824CC7D8`, cloth A `sub_824CCE48`, cloth B
 //!   `sub_824CCFE8`.
 //!
@@ -177,7 +177,7 @@ impl Tricks {
         w[18] = t.levels[1].clamp(0, 32767);
         w[19] = t.levels[2].clamp(0, 32767);
         w[21] = t.levels[3].clamp(0, 32767);
-        w[23] = 0; // bool class 0x11A631878B239355 (global setting, not modelled)
+        w[23] = 0; // bool class 0x11A631878B239355 (global setting, not modeled)
         w[24] = i32::from(s.local); // local && [[owner+16]+64] == 0
         w[25] = i32::from(s.local);
         w[26] = if s.local { out.level(6).clamp(0, 32767) } else { 0 };

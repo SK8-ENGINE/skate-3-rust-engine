@@ -3,8 +3,8 @@
 //! game thread when a bank's first emitter started: 2.6–5.4 ms warm, up to 36 ms from a cold disk.
 //!
 //! - `emitters::update` asks for the banks of the emitters the listener is within
-//!   [`AHEAD`] metres of (bounding sphere), nearest first, and drops the ones it moved [`EVICT`]
-//!   metres away from before they were used. A map's emitter banks decode to 160–250 MiB in the
+//!   [`AHEAD`] meters of (bounding sphere), nearest first, and drops the ones it moved [`EVICT`]
+//!   meters away from before they were used. A map's emitter banks decode to 160–250 MiB in the
 //!   districts, so only a ring around the listener is held (~20–30 MiB in the users' sessions).
 //! - One worker thread (started on the first request) runs [`BankSource::load`], the same function
 //!   the game thread runs without a prefetch, so the bank and PCM are identical.

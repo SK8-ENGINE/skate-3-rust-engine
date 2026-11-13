@@ -159,7 +159,7 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_new_span(&self, attrs:&Attributes<'_>, id:&Id, ctx:Context<'_,S>) {
-        // A span without fields is labelled by its static name at exit: no allocation here
+        // A span without fields is labeled by its static name at exit: no allocation here
         // (trace-all keeps this layer armed for a whole session).
         if attrs.fields().is_empty() {return;}
         let mut label=TraceLabel(attrs.metadata().name().to_owned());attrs.record(&mut label);
@@ -218,18 +218,173 @@ pub(crate) fn chrome_trace_state() -> &'static str {
     }
 }
 
-/// Wait until the writer thread has written every queued line, at most `limit`.
+/// Wait until the writer thread has written every queued line and the stderr pump has forwarded it, at most `limit`.
 fn drain_log_queue(limit: std::time::Duration) {
-    if LOG_QUEUE.get().is_none() {
-        return;
-    }
     let until = Instant::now() + limit;
-    while LOG_PENDING.load(Ordering::Acquire) != 0 && Instant::now() < until {
-        std::thread::sleep(std::time::Duration::from_millis(2));
+    if LOG_QUEUE.get().is_some() {
+        while LOG_PENDING.load(Ordering::Acquire) != 0 && Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+    #[cfg(any(windows, unix))]
+    stderr_pump::drain(until);
+}
+
+/// The process's stderr as an 8 MB pipe that its own thread forwards to the real stderr (the log file or console).
+/// Every stderr write in the process (`eprintln!`, the log writer, Bevy, native libraries) then costs a copy into
+/// memory, never a disk write: a synchronous write to a slow log file held the game for up to 1.9 s per frame
+/// (desktop 2026-11-12, `crash_context::sample` waiting on stderr inside `Last`). A write blocks only when 8 MB are
+/// already waiting.
+#[cfg(windows)]
+mod stderr_pump {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
+    use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, SetStdHandle};
+    use windows::Win32::System::Pipes::{CreatePipe, PeekNamedPipe};
+
+    const PIPE_BYTES: u32 = 8 << 20;
+    /// The pipe's read end (as an address: `HANDLE` is not `Send`).
+    static READ: OnceLock<usize> = OnceLock::new();
+    /// The pump holds a chunk it has read but not yet written.
+    static FORWARDING: AtomicBool = AtomicBool::new(false);
+
+    pub(super) fn install() -> bool {
+        // SAFETY: plain Win32 handle calls; every handle passed is one these calls returned.
+        unsafe {
+            let Ok(original) = GetStdHandle(STD_ERROR_HANDLE) else { return false };
+            if original.is_invalid() || original.0.is_null() {
+                return false;
+            }
+            let (mut read, mut write) = (HANDLE::default(), HANDLE::default());
+            if CreatePipe(&mut read, &mut write, None, PIPE_BYTES).is_err() {
+                return false;
+            }
+            let (read_at, out_at) = (read.0 as usize, original.0 as usize);
+            let pump = std::thread::Builder::new().name("stderr-pump".into()).spawn(move || {
+                let (read, out) = (HANDLE(read_at as _), HANDLE(out_at as _));
+                let mut buf = vec![0u8; 256 << 10];
+                loop {
+                    let mut n = 0u32;
+                    if ReadFile(read, Some(&mut buf), Some(&mut n), None).is_err() || n == 0 {
+                        return;
+                    }
+                    FORWARDING.store(true, Ordering::Release);
+                    let mut at = 0usize;
+                    while at < n as usize {
+                        let mut wrote = 0u32;
+                        if WriteFile(out, Some(&buf[at..n as usize]), Some(&mut wrote), None).is_err() || wrote == 0 {
+                            break;
+                        }
+                        at += wrote as usize;
+                    }
+                    FORWARDING.store(false, Ordering::Release);
+                }
+            });
+            if pump.is_err() || SetStdHandle(STD_ERROR_HANDLE, write).is_err() {
+                return false;
+            }
+            let _ = READ.set(read_at);
+            true
+        }
+    }
+
+    /// Wait (until `until`) for the pump to forward everything written so far.
+    pub(super) fn drain(until: std::time::Instant) {
+        let Some(&read_at) = READ.get() else { return };
+        loop {
+            let mut waiting = 0u32;
+            // SAFETY: the read end stays open for the process lifetime.
+            let ok = unsafe { PeekNamedPipe(HANDLE(read_at as _), None, 0, None, Some(&mut waiting), None) }.is_ok();
+            if !ok || (waiting == 0 && !FORWARDING.load(Ordering::Acquire)) || std::time::Instant::now() >= until {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
     }
 }
 
-/// Log writer: stderr, or with trace-all a bounded queue on its own thread, drained on panic or exit.
+/// The same pump on Linux and macOS: fd 2 becomes a pipe's write end, a thread forwards the read end to the original
+/// stderr. Linux asks for an 8 MB pipe (`F_SETPIPE_SZ`, falling back to the kernel default when not allowed); macOS keeps
+/// its fixed pipe size.
+#[cfg(unix)]
+mod stderr_pump {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static READ: OnceLock<i32> = OnceLock::new();
+    static FORWARDING: AtomicBool = AtomicBool::new(false);
+
+    pub(super) fn install() -> bool {
+        // SAFETY: plain POSIX descriptor calls on descriptors these calls returned; the buffer outlives every read.
+        unsafe {
+            let original = libc::dup(2);
+            if original < 0 {
+                return false;
+            }
+            let mut fds = [0i32; 2];
+            if libc::pipe(fds.as_mut_ptr()) != 0 {
+                libc::close(original);
+                return false;
+            }
+            #[cfg(target_os = "linux")]
+            if libc::fcntl(fds[1], libc::F_SETPIPE_SZ, 8 << 20) < 0 {
+                libc::fcntl(fds[1], libc::F_SETPIPE_SZ, 1 << 20);
+            }
+            let read = fds[0];
+            let pump = std::thread::Builder::new().name("stderr-pump".into()).spawn(move || {
+                let mut buf = vec![0u8; 256 << 10];
+                loop {
+                    let n = libc::read(read, buf.as_mut_ptr().cast(), buf.len());
+                    if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                        continue;
+                    }
+                    if n <= 0 {
+                        return;
+                    }
+                    FORWARDING.store(true, Ordering::Release);
+                    let mut at = 0usize;
+                    while at < n as usize {
+                        let wrote = libc::write(original, buf[at..].as_ptr().cast(), n as usize - at);
+                        if wrote < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                            continue;
+                        }
+                        if wrote <= 0 {
+                            break;
+                        }
+                        at += wrote as usize;
+                    }
+                    FORWARDING.store(false, Ordering::Release);
+                }
+            });
+            if pump.is_err() || libc::dup2(fds[1], 2) < 0 {
+                return false;
+            }
+            libc::close(fds[1]);
+            let _ = READ.set(read);
+            true
+        }
+    }
+
+    /// Wait (until `until`) for the pump to forward everything written so far.
+    pub(super) fn drain(until: std::time::Instant) {
+        let Some(&read) = READ.get() else { return };
+        loop {
+            let mut waiting: libc::c_int = 0;
+            // SAFETY: the read end stays open for the process lifetime; FIONREAD writes one int.
+            let ok = unsafe { libc::ioctl(read, libc::FIONREAD, &mut waiting) } == 0;
+            if !ok || (waiting == 0 && !FORWARDING.load(Ordering::Acquire)) || std::time::Instant::now() >= until {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+}
+
+/// Log writer: a bounded queue on its own thread, drained on panic or exit, so a slow log disk never stalls a
+/// game thread (desktop 2026-11-12: synchronous stderr writes to an HDD log held systems for 0.3-4 s). Stderr
+/// directly only if the writer thread cannot start.
 #[derive(Clone, Copy)]
 enum LogWriter {
     Stderr,
@@ -238,6 +393,10 @@ enum LogWriter {
 
 impl LogWriter {
     fn install(threaded: bool) -> Self {
+        #[cfg(any(windows, unix))]
+        if !stderr_pump::install() {
+            eprintln!("LOG stderr pump unavailable; stderr writes go straight to the log");
+        }
         if !threaded {
             return Self::Stderr;
         }
@@ -268,6 +427,7 @@ impl LogWriter {
         std::panic::set_hook(Box::new(move |info| {
             drain_log_queue(std::time::Duration::from_millis(500));
             previous(info);
+            drain_log_queue(std::time::Duration::from_millis(500));
         }));
         Self::Queued
     }
@@ -336,7 +496,7 @@ pub(crate) fn init() -> Result<Guard, String> {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(format!("info,wgpu=warn,naga=warn,bevy_render=info{spans}")));
     let stderr = bevy::log::tracing_subscriber::fmt::layer()
-        .with_writer(LogWriter::install(crate::trace_all::on()))
+        .with_writer(LogWriter::install(true))
         .with_target(false);
 
     let Some(options) = options else {

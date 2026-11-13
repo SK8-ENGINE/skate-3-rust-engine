@@ -201,7 +201,7 @@ pub(crate) struct MinimapHeading {
     pub heading: skate_core::minimap::Heading,
     /// The needle's own eased heading (82665848).
     pub needle: skate_core::minimap::Heading,
-    /// The player's ground position (x, z), the map's centre.
+    /// The player's ground position (x, z), the map's center.
     pub player: [f32; 2],
     last: Option<bevy::math::Vec3>,
     carry: f32,

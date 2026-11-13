@@ -87,7 +87,7 @@ pub struct MoveObjectTuning {
     pub blocked_gain: f32,
     /// Blocked bit 0x10 while |blocking|^2 exceeds this (2.5e-5).
     pub blocked_threshold_sq: f32,
-    /// Image 0x8208ED00: centre speed from the turn about the grip.
+    /// Image 0x8208ED00: center speed from the turn about the grip.
     pub lever_coupling: f32,
     /// |yaw target| below this keeps the heading latch (0.1).
     pub turning_threshold: f32,
@@ -287,7 +287,7 @@ pub struct MoveObjectController {
 pub const CONTROLLER_FLOATS: usize = 33;
 
 impl MoveObjectController {
-    /// Flat, ordered form for serialisation (snapshot / replay / network).
+    /// Flat, ordered form for serialization (snapshot / replay / network).
     pub fn to_array(&self) -> [f32; CONTROLLER_FLOATS] {
         let mut out = [0.0; CONTROLLER_FLOATS];
         let mut i = 0;
@@ -344,7 +344,7 @@ pub struct MoveObjectInput {
     pub forward: [f32; 3],
     /// Current grip point on the grab edge (state +256).
     pub grip: [f32; 3],
-    /// Object centre (record +160) and velocity (record +128).
+    /// Object center (record +160) and velocity (record +128).
     pub center: [f32; 3],
     pub velocity: [f32; 3],
     /// Object heading about +Y (rad).
@@ -406,11 +406,11 @@ pub fn command(tuning: &MoveObjectTuning, state: &mut MoveObjectController, inpu
     let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
     let (mz, mx, mr) = (finite(input.move_z), finite(input.move_x), finite(input.move_rotation));
     let side = side_of(input.forward);
-    // 1. Lever arm: lever = dot(-edge_dir (+320), centre (+880) - grip (+256)); edge direction = `side`.
+    // 1. Lever arm: lever = dot(-edge_dir (+320), center (+880) - grip (+256)); edge direction = `side`.
     let offset = [input.center[0] - input.grip[0], 0.0, input.center[2] - input.grip[2]];
     let lever = -dot(side, offset);
     let sign = if lever >= 0.0 { 1.0 } else { -1.0 };
-    // 2. Rotation demand (off-centre pushing turns; at the centre it does not).
+    // 2. Rotation demand (off-center pushing turns; at the center it does not).
     let rotation_demand = (sign * tuning.lever_rotation.evaluate(lever.abs()) * mz + mr).min(1.0);
     // 3. Yaw-rate target [code]: f24 = -(curve BFB3(|lever|) x rot x gain +1160).
     let yaw_target = -(tuning.lever_yaw.evaluate(lever.abs()) * rotation_demand * tuning.yaw_gain(input.yaw_inertia));
@@ -798,11 +798,11 @@ mod tests {
     fn off_centre_push_turns_the_physical_way() {
         let t = MoveObjectTuning::default();
         let mut s = MoveObjectController::default();
-        // Grip 1.6 m right of the centre (centre to the skater's left).
+        // Grip 1.6 m right of the center (center to the skater's left).
         let mut i = input(1.0, 0.0, 0.0);
         i.center = [-1.6, 0.0, 0.5];
         let c = command(&t, &mut s, &i);
-        // lever = dot(-edge, centre - grip) with edge = side_of(forward) = +X.
+        // lever = dot(-edge, center - grip) with edge = side_of(forward) = +X.
         assert!((c.lever - 1.6).abs() < 1e-6);
         assert!(c.rotation_demand > 0.5, "{c:?}");
         // The push at the grip (r = (1.6, 0, -0.5), F along +Z) has torque

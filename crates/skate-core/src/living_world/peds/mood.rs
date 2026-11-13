@@ -24,7 +24,7 @@ pub mod category {
 /// 360); ours posts at this period whatever the engine fps.
 pub const BROADCAST_PERIOD: f32 = 1.0 / 30.0;
 
-/// Presence scan radius, metres (`0x8206D148`).
+/// Presence scan radius, meters (`0x8206D148`).
 pub const PRESENCE_RADIUS: f32 = 35.0;
 /// Retail store size (`sub_82E414D8`).
 pub const MAX_RECORDS: usize = 10;

@@ -37,7 +37,7 @@ pub struct DmoStreamSettings {
     /// Spawns per pass: 49, or 100 in fill mode [code].
     pub budget: usize,
     pub fill_budget: usize,
-    /// Group expansion: neighbours within this distance (`0x820996EC` 20 m) that touch.
+    /// Group expansion: neighbors within this distance (`0x820996EC` 20 m) that touch.
     pub group_radius: f32,
 }
 
@@ -74,7 +74,7 @@ pub struct DmoView {
     pub reference: Vec3,
 }
 
-/// What a pass decided (serialisable; the host applies it to the prop bodies).
+/// What a pass decided (serializable; the host applies it to the prop bodies).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DmoDecision {
     Spawn(u32),

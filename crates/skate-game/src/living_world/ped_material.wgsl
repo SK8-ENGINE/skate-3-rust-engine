@@ -39,11 +39,11 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
     }
     shadow *= select(0.0, 1.0, ndl >= 0.0);
     let key = max(ndl, 0.0) * p.rows[1].rgb * shadow;
-    // The whole shadow side: one constant per material, plus a view rim (power m_params[0].z, colour m_params[6]).
+    // The whole shadow side: one constant per material, plus a view rim (power m_params[0].z, color m_params[6]).
     let nv = saturate(dot(vn, vd));
     let rim = pow(max(1.0 - nv, 1e-6), p.rows[0].z);
     let ambient = p.literals.rgb * p.rows[5].w + rim * p.rows[6].rgb;
-    // Phong highlight of the key light (power m_params[2].w, colour m_params[2].rgb, fresnel power m_params[1].w).
+    // Phong highlight of the key light (power m_params[2].w, color m_params[2].rgb, fresnel power m_params[1].w).
     let kr = p.light.xyz - 2.0 * ndl * vn;
     let spec = pow(saturate(dot(vd, -kr)), p.rows[2].w) * shadow * p.rows[2].rgb * pow(max(1.0 - nv, 1e-6), p.rows[1].w);
     let lit = albedo * (key + ambient) + spec;

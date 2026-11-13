@@ -48,7 +48,7 @@ $Tools = @(
 # build tools are not needed, only Git (the launcher's own updates) and Vulkan.
 if ($env:SKATE_LAUNCHER_RELEASES -eq '1') { foreach ($t in $Tools) { if ($t.Id -in @('vs', 'llvm', 'python', 'rust')) { $t.Req = $false } } }
 function Tool-State($t) { try { $r = & $t.Check; if ($r) { return "$r".Trim() } } catch {}; return $null }
-# The required tools still missing, by name ('' = none). launcher.ps1 greys out the build entries while this says so.
+# The required tools still missing, by name ('' = none). launcher.ps1 grays out the build entries while this says so.
 function Missing-Tools {
     Refresh-Path
     return (@($Tools | Where-Object { $_.Req -and -not (Tool-State $_) } | ForEach-Object { $_.Name }) -join ', ')

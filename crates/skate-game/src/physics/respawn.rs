@@ -66,7 +66,7 @@ impl RespawnReason {
 }
 
 /// One checkpoint respawn of a player, emitted by the owning simulation on its fixed 1/60 s
-/// tick (serialisable, stable ids; no networking).
+/// tick (serializable, stable ids; no networking).
 #[derive(bevy::prelude::Message, Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct PlayerRespawn {
     pub player_id: u32,

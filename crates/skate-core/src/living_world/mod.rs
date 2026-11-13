@@ -34,7 +34,7 @@ pub use population::{CallOutcome, LaneState, LivingWorld, TickInputs};
 pub use rng::Rng;
 pub use skaters::{Companion, SkaterCharacter, SkaterLine, SkaterWorld};
 
-/// World position, metres (engine axes: y up; census grids use x / z).
+/// World position, meters (engine axes: y up; census grids use x / z).
 pub type Vec3 = [f32; 3];
 
 /// The ambient entity kinds the census manages. The discriminants are stable (they go into
@@ -85,7 +85,7 @@ impl LivingWorldId {
 }
 
 /// A point the population is built around: the local skater now, remote players later.
-/// Retail uses the local skater's position (`sub_8245E400`, census circle centre) and its
+/// Retail uses the local skater's position (`sub_8245E400`, census circle center) and its
 /// speed (`|velocity| * 3.6` km/h, `sub_826B7D60`).
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct Observer {
@@ -125,7 +125,7 @@ pub struct SpawnRecord {
     pub position: Vec3,
     /// Yaw in radians about +y.
     pub heading: f32,
-    /// Seed of the entity's own sub-RNG (looks, behaviour); derived from the session seed and id.
+    /// Seed of the entity's own sub-RNG (looks, behavior); derived from the session seed and id.
     pub seed: u64,
     /// True for the initial-populate pass (retail spawn record byte 0).
     pub initial: bool,
@@ -134,7 +134,7 @@ pub struct SpawnRecord {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DespawnReason {
-    /// Beyond the cull radius (census: 3-D distance to the circle centre; skaters: 3-D distance
+    /// Beyond the cull radius (census: 3-D distance to the circle center; skaters: 3-D distance
     /// or height difference to the reference).
     Distance,
     /// More ambient skaters than desired (the cull pass despawns the excess).

@@ -38,7 +38,7 @@ bin\skate3rust.exe --assets assets --test-world --check-assets                  
 
 ## Refresh after a converter change
 - `install(<default.xex>, data, bin\skate3rust.exe, report, refresh=True)` rebuilds only groups whose pipeline
-  fingerprint changed (`versions.changed_groups`), plus the customiser if its fingerprint changed. Check beforehand:
+  fingerprint changed (`versions.changed_groups`), plus the customizer if its fingerprint changed. Check beforehand:
   `changed_groups(installed(data)[1]['pipelines'], fingerprints())`.
 - Close the game first: refresh publishes a NEW `data\installations\<id>` and deletes the old one. Afterwards
   re-point the junction (`rmdir assets`, then `New-Item -ItemType Junction ...` to the new id) and run
@@ -63,7 +63,7 @@ bin\skate3rust.exe --assets assets --test-world --check-assets                  
   Nothing below the spawn height = void; a much lower surface under it = roof/platform; spawn below the street =
   under the map.
 
-## Setup behaviour to expect (newer branches)
+## Setup behavior to expect (newer branches)
 - The environment group also extracts the water/ocean animation table (`ocean_pca.py` -> game
   `--extract-ocean-pca`, needs the current `bin\skate3rust.exe`) and the particle sprites (`particles.py` ->
   `assets/private/particles/*.png`). A change to either refreshes only `environment`; afterwards re-point the
@@ -71,8 +71,8 @@ bin\skate3rust.exe --assets assets --test-world --check-assets                  
 - One `--validate-maps` process validates stock data, each map as it finishes converting, recovered maps and the
   final test world (fallback: `--check-assets` per map). Warnings land in `map-status/<map>-validation.json` and
   `setup-report.json` via `validation_report.summary`.
-- The character customiser runs on a background thread beside the map stage when memory allows
-  (`install.overlap_customiser`); log line "Preparing the character customiser alongside the maps".
+- The character customizer runs on a background thread beside the map stage when memory allows
+  (`install.overlap_customiser`); log line "Preparing the character customizer alongside the maps".
 - Group `audio` (upstream main since PR #32): downloads vgmstream (SHA-256 checked) into `data\tools\vgmstream-cli\` and decodes
   the disc's audio into `assets/private/audio/` (hundreds of MB). Optional: on failure it writes
   `audio-availability.json` and the game runs silent. Dev re-export of just this group: skill `audio-tuning`.
@@ -83,7 +83,7 @@ bin\skate3rust.exe --assets assets --test-world --check-assets                  
 - Symptom: blocked or standing on nothing visible; logs show normal states (no `physics_failed`).
 - `tools/collision-inspect/collision_attrs.py <District>` then query the spawn/area: a surface with surface id 0 and
   unit flags `0x21` (no 0x80) on a 12-triangle box from `cSim_Global.xsf` is a zone/trigger volume, not geometry.
-- `tools/collision-inspect/scan_surfaceless.py` summarises every district. Only fully surfaceless meshes are
+- `tools/collision-inspect/scan_surfaceless.py` summarizes every district. Only fully surfaceless meshes are
   volumes; "mixed" meshes are real geometry: never filter per triangle.
 
 ## Known failures

@@ -442,7 +442,7 @@ def shared_changed(shared):
 def install(iso,base,game_exe,report,game_root=None,refresh=False,finalize=None):
     from .setup_state import setup_lock
     from .setup_budget import lowered_priority
-    # Setup's own work (extraction, the character customiser) also runs below
+    # Setup's own work (extraction, the character customizer) also runs below
     # normal priority; the previous priority returns afterwards.
     with setup_lock(base), lowered_priority():
         return _install(iso,base,game_exe,report,game_root,refresh,finalize)
@@ -682,19 +682,19 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
             # remain queued behind a string of small parks.
             futures={pool.submit(map_job,j):j for j in sorted(jobs,key=lambda j:-j['archive'].stat().st_size)}
             map_run=(pool,futures)
-        # Customiser workers take the map jobs' cores once those end (setup_budget.customiser_limit).
+        # Customizer workers take the map jobs' cores once those end (setup_budget.customiser_limit).
         from .setup_budget import MAPS_DONE
         maps_done=work/'maps-done';os.environ[MAPS_DONE]=str(maps_done)
         if map_run is None:maps_done.touch()
-        customiser=None  # Background customiser beside the other stages
+        customiser=None  # Background customizer beside the other stages
         customiser_process=False  # it runs as its own process (not an in-process thread)
         post,post_result=None,{}  # Background post-map exports
         try:
-            # As its own process (stage_job.py) the customiser needs nothing from the stages below (it reads only stock,
-            # default-skater and disc data and writes only assets/private/customisation): it starts here, with one more
+            # As its own process (stage_job.py) the customizer needs nothing from the stages below (it reads only stock,
+            # default-skater and disc data and writes only assets/private/customization): it starts here, with one more
             # memory slot than beside the maps alone (doc 08 "Export speed pass").
             # customiser_setup.install's finalize is customiser_setup.prepare(game_root, stage/'assets'); not edited
-            # there, since every customis*.py is in the customiser's fingerprint (gotchas "FINGERPRINT TRAP").
+            # there, since every customis*.py is in the customizer's fingerprint (gotchas "FINGERPRINT TRAP").
             if (finalize and getattr(finalize,'__module__','').endswith('customiser_setup')
                     and overlap_customiser(workers+1)):
                 report('Preparing the character customiser alongside the other stages')
@@ -763,8 +763,8 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                 return None
             validate('TEST_WORLD')
             if 'maps' in groups:
-                # The customiser reads only stock, default-skater and disc data (all
-                # prepared above) and writes only assets/private/customisation, so it
+                # The customizer reads only stock, default-skater and disc data (all
+                # prepared above) and writes only assets/private/customization, so it
                 # runs beside the map jobs instead of after them.
                 if finalize and customiser is None and overlap_customiser(workers):
                     report('Preparing the character customiser alongside the maps')
@@ -834,7 +834,7 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                         shutil.rmtree(stage/'assets/private/park-layouts',ignore_errors=True)
                         note(private/'map-status'/'park-layouts-availability.json','skate.Park layouts',error,report=report)
                     return named
-                # Beside the map wait below when no in-process customiser thread runs (park layouts use NumPy; two
+                # Beside the map wait below when no in-process customizer thread runs (park layouts use NumPy; two
                 # threads in NumPy crashed, gotchas 2026-10-24); joined before the map catalog (doc 08 "Export speed pass").
                 if customiser is None or customiser_process:
                     post=Background(lambda:post_result.update(named=post_maps()),'post-maps')
@@ -856,13 +856,16 @@ def _install_stages(iso,base,game_exe,report,game_root=None,refresh=False,finali
                             continue
                         (private/'map-status'/(completed[label]['name']+'-availability.json')).unlink(missing_ok=True)
                         record_validation(private,completed[label],checked,report)
-                        report(f"Converted {len(completed)}/{len(jobs)} maps: {completed[label]['name']}")
+                        # A reporter with .progress (setup_progress.ProgressWriter) gets the count too.
+                        line=f"Converted {len(completed)}/{len(jobs)} maps: {completed[label]['name']}"
+                        if hasattr(report,'progress'):report.progress(len(completed),len(jobs),line)
+                        else:report(line)
                 maps_done.touch()
         except BaseException:
             if map_run is not None:
                 # Stop the queued map jobs and let the running ones end before the stage is cleaned up.
                 map_run[0].shutdown(wait=True,cancel_futures=True)
-            # A customiser process writes into the stage too: let it end first (its own error is secondary here).
+            # A customizer process writes into the stage too: let it end first (its own error is secondary here).
             if customiser is not None:customiser.thread.join()
             if post is not None:post.thread.join()
             raise

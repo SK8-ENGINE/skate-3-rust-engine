@@ -9,7 +9,7 @@ pub const FORMAT: &str = "skate3rust.cac";
 pub const VERSION: u32 = 1;
 pub const SLOTS: usize = 5;
 
-/// Where a look came from: a preset row key, the customiser, or a mod (cleared when that mod stops).
+/// Where a look came from: a preset row key, the customizer, or a mod (cleared when that mod stops).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LookSource {
@@ -21,7 +21,7 @@ pub enum LookSource {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SlotLook {
     pub source: LookSource,
-    /// A customiser profile (`settings/character.json` form). Retail parts the customiser does not apply yet (tint
+    /// A customizer profile (`settings/character.json` form). Retail parts the customizer does not apply yet (tint
     /// records, stamps) ride along as extra keys.
     pub profile: Map<String, Value>,
     #[serde(flatten)]

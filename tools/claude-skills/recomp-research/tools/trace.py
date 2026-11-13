@@ -56,7 +56,7 @@ FIELD_COUNTS = {
     'GEVENT': 3,    # queue event callers   (state event push sub_826DB648)
     'HUBMSG': 3,    # id r5 callers   (message post sub_82B938D8)
     # Trigger query points and challenge hulls (2026-10-04, world; hooks_world.cpp). Summary: a per-entity script of your own.
-    'TRIGQRY': 7,   # group entity A("x y z", overwritten: a unit vector) B=head C=hips centre axis   (sub_82DD80B8)
+    'TRIGQRY': 7,   # group entity A("x y z", overwritten: a unit vector) B=head C=hips center axis   (sub_82DD80B8)
     'TRIGENT': 8,   # entity vtable fn+4 fn+8 fn+12 fn+16 fn+20 words("+4..+28")   (once per entity vtable)
     'TRIGGRP': 3,   # group id item+216   (AddVolume sub_82DD7668)
     'HULLENTER': 4, # manager entry key pos("x y z")   (dynamic hull manager sub_82D519C0 diff)
@@ -73,7 +73,7 @@ FIELD_COUNTS = {
     'TRAFPROG': 7,    # index C n phases("kind:len:word,...") n2 phases2 split300   (once per signal controller)
     'TRAFLIGHT2': 14, # index C phase n kind length remaining phase2 n2 kind2 length2 split300 ticks since_ms   (sub_82E158D8, on change)
     'VEHJUNC': 16,    # vehicle caller J seg segdata g84 w88 w92 w96 lights r4 r7 result out("w0 w1 w2") light("phase kind"|-) pos("x y z")   (sub_82E11E90)
-    'VEHCONN': 15,    # vehicle why("1 jstate 2 seg 4 lane 8 segid 16 first") jstate("old new") seg("old new") lane("old new") segid4144 id4136 target_lane manoeuvre dist3640 speed3412 accel3408 flags("4402 4403") pos fwd
+    'VEHCONN': 15,    # vehicle why("1 jstate 2 seg 4 lane 8 segid 16 first") jstate("old new") seg("old new") lane("old new") segid4144 id4136 target_lane maneuver dist3640 speed3412 accel3408 flags("4402 4403") pos fwd
     'PEDAUD': 21,  # obj S id index count flags("68 69 71 80") feet("73 74") model key(hex) s96 ("88 92 120 124") class132 speech136 mats("140 144") f148 f152 f156 o128 o144 opos("x y z") listener("x y z")   (npc; PedestrianSFX process sub_824D8078)
     # Category aiskater (2026-10-15, hooks_physics.cpp): NPC skater path controller hips-test byte.
     'AIPC922': 5,   # brain pc pc+922 pc+940 brain+168

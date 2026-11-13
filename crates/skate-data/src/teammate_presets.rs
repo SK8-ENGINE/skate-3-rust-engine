@@ -1,6 +1,6 @@
 //! Teammate presets (research b986, b988, b990, b994): the leaf rows of vault class progression_preset_teammate, each
-//! naming `data/cacrecipes/SavedRecipe<id>.bin`, read into a customiser profile at runtime from the installed files
-//! (no setup step). Retail lists the rows sorted by their localised name (`sorted_by`). Details:
+//! naming `data/cacrecipes/SavedRecipe<id>.bin`, read into a customizer profile at runtime from the installed files
+//! (no setup step). Retail lists the rows sorted by their localized name (`sorted_by`). Details:
 //! docs/hails-additions/43-career.md
 use crate::collections::Collections;
 use serde_json::{json, Map, Value};
@@ -46,7 +46,7 @@ pub fn preset_rows(c: &Collections) -> Vec<PresetRow> {
     out
 }
 
-/// Retail's list order: by localised name (8255A698).
+/// Retail's list order: by localized name (8255A698).
 pub fn sorted_by(mut rows: Vec<PresetRow>, localise: impl Fn(&str) -> String) -> Vec<PresetRow> {
     rows.sort_by_cached_key(|r| localise(&r.name_text));
     rows
@@ -89,9 +89,9 @@ impl Reader<'_> {
     }
 }
 
-/// A `SavedRecipe<id>.bin` (the serialised slot record, b988) as a customiser profile: gender, the first asset and
+/// A `SavedRecipe<id>.bin` (the serialized slot record, b988) as a customizer profile: gender, the first asset and
 /// material per slot, truck / wheel, gestures, morphs by name, and the tint and tattoo records kept as
-/// `retail_tints` / `retail_tattoos` (their mapping onto the customiser is open, b990).
+/// `retail_tints` / `retail_tattoos` (their mapping onto the customizer is open, b990).
 pub fn recipe_profile(file: &[u8], morph_names: &[String]) -> Result<Map<String, Value>, String> {
     let outer = Reader { data: file, at: 0 };
     if outer.u32(0)? != 8 {

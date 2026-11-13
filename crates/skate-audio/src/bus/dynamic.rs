@@ -13,7 +13,7 @@ use crate::{BLOCK, MIX_RATE};
 /// The routing codes of graphs A and B.
 pub const CODES: [u16; 2] = [2048, 512];
 
-/// One peaking EQ's parameters (PI20 p0 centre Hz, p1 linear gain, p2 Q).
+/// One peaking EQ's parameters (PI20 p0 center Hz, p1 linear gain, p2 Q).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Peak {
     pub freq: f32,

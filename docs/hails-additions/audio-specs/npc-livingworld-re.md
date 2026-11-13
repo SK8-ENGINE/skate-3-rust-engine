@@ -1,7 +1,7 @@
 # Retail living world (NPCs, traffic, security): how TU3 does it
 
 From the TU3 (title update 3) image, the recompiled code and disc data (reference only; 2026-10-02). Addresses are
-evidence; never copy code or game data into the repo. Describe behaviour in our own words.
+evidence; never copy code or game data into the repo. Describe behavior in our own words.
 Tools: local research scripts (listed at the end). Data: local extracts.
 
 ## 0. Big picture
@@ -13,11 +13,11 @@ Tools: local research scripts (listed at the end). Data: local extracts.
   sub-types: MaleTeen, FemaleTeen, FemaleAdult, MaleAdult, BusinessMan/Woman, Female/MaleSkater,
   Female/MaleTourist, Granny, SecurityGuard, Bum, Jock, Pro. Vehicle types: Car, SportsCar, MuscleCar,
   SUV, Truck.
-- **Behaviour is data-driven**: AI state graphs ship as plain XML plus compiled `.stategraph` files in
+- **Behavior is data-driven**: AI state graphs ship as plain XML plus compiled `.stategraph` files in
   `data/big/miscload.big` (`data/state/livingworldentities/{pedestrian,vehicle,marquee,test_pro}/…`,
   `data/livingworld/PluginDescriptor/*`). 52 ped `aigraph/*.xml`, 18 motion graphs, 13 plugins
   (sit, ATM, vending machine, water fountain, newspaper box, trash bin, look-at, conversation,
-  spectate, actor-tracker spectate). The C++ side supplies named behaviours and conditions.
+  spectate, actor-tracker spectate). The C++ side supplies named behaviors and conditions.
 - **Tuning is in the attribute database** (`skatercollections.vlt` → our skater-collections.json):
   classes `livingworld`, `livingworld_census`, `livingworld_census_ranges`, `livingworld_categorygroups`,
   `livingworld_entitycategories`, `livingworld_entities` (157), `livingworld_models` (145),
@@ -84,7 +84,7 @@ Tools: local research scripts (listed at the end). Data: local extracts.
 - LW census tick **sub_826B71F0** (called from sub_826BDB50 ← sub_82859E70). Per type, in several
   game modes: peds **sub_826B7530** (range record at census+104), vehicles **sub_826B7760** (+112),
   DMOs **sub_826B7980** (+128), props **sub_826B7BA8** (+120, cull only).
-- Peds: cull sub_826BA8B0 (circle centre, cull radius); spawn **sub_826B9940** (ring spawn) and
+- Peds: cull sub_826BA8B0 (circle center, cull radius); spawn **sub_826B9940** (ring spawn) and
   **sub_826B90F8** (larger; uses entity/category data, probably waypoint/plugin-placed peds; unverified).
   - Ring spawn: per tick 2 attempts and at most 1 spawn. Each attempt: random point in the ring
     (sub_82E17508, onto the nav mesh), random heading, then **sub_826B8B88** picks a category from the
@@ -130,17 +130,17 @@ cSim tile streams (RW type ids from the table at 0x830384A0: (id, name) pairs; 0
 - Census layer lookup: sub_82C0EAC0(painter, layer index, pos); index 2 = npc census, 3 = vehicle census
   (via sub_826B8A28); fallback record `default`.
 
-## 3. Behaviour runtime (state graphs)
+## 3. Behavior runtime (state graphs)
 - Loader sub_826BC250 (from LW init sub_826D9040), path table base 0x821DE6BC. Each `.xml` has a
   `.stategraph` beside it = the same tree in binary with includes merged (tag, attr count, name/value
   pairs, children). Which one the runtime reads is unverified (no ".stategraph" literal).
-- Registration: static initialisers 0x82F76000–0x82F7B000 (peds) and 0x82F8C568–0x82F8CC88 (vehicle) call
-  sub_826C3D18(registry, name, factory): name-sorted tree. Registries: behaviours 0x826C1670 (160),
+- Registration: static initializers 0x82F76000–0x82F7B000 (peds) and 0x82F8C568–0x82F8CC88 (vehicle) call
+  sub_826C3D18(registry, name, factory): name-sorted tree. Registries: behaviors 0x826C1670 (160),
   conditions 0x826C1730 (127), plugin-descriptor conditions 0x826C2458 (23), plugins 0x826C2518 (6:
   LookAt, UseWorldProp, PedestrianConversation, GatherBehaviourGeneric, SpectatorWaypointGeneric,
   ActorTrackerSpectate), motion-graph hooks 0x826C25D8. Full list `aireg.txt`
-  (762 incl. vehicle), `ai_registry.txt`. Condition evaluate = vtable slot 12, behaviour update = slot 13.
-- Example behaviour SuggestVelocity: factory 0x826C9488, vtable 0x8230A384, attribute `linear` → +32;
+  (762 incl. vehicle), `ai_registry.txt`. Condition evaluate = vtable slot 12, behavior update = slot 13.
+- Example behavior SuggestVelocity: factory 0x826C9488, vtable 0x8230A384, attribute `linear` → +32;
   begin sub_8269F6A8 sets the mover's suggested speed (mover vtable +168).
 - Managers: LWPedestrianCensusMan created in sub_82E25EE0 (712 B, vtable 0x8232D1C0); ExecutionMan
   sub_82E25CE8; per-frame ped tick probably sub_82E239A8 / sub_82E238C0 (unverified).
@@ -199,7 +199,7 @@ cSim tile streams (RW type ids from the table at 0x830384A0: (id, name) pairs; 0
   (`tools/stream_strings.py`); census groups do list `ped_class_security_street` (weights 0.05–0.1, e.g.
   `district_park01_peds_census`), which would spawn them anywhere in the painted census area. Open: patrol
   zones (`livingworld_entities_patrolzone` 5/10, EntityOfInterestIsInZone sub_826AF310) and where a guard's
-  zone centre comes from (spawn position? waypoint_patrol in another stream type? challenge hulls?).
+  zone center comes from (spawn position? waypoint_patrol in another stream type? challenge hulls?).
   The user offered a hand-played session angering peds/guards (a traced recomp session with the NPC hooks).
 - Scripted "wander" runs (make_wander_script.py) are open-loop and get stuck against walls (user saw it
   stuck in a corner): unsuitable for reaching NPCs. Use the user's passive session instead.
@@ -336,7 +336,7 @@ during the 1.25 s StartChase hold ~0.8 m/s; chase bursts p90 **7–9 m/s** (grap
 Takedowns 4/4 successful (attempt → success 0.10–0.13 s). Chases were short (player stayed close).
 
 ## 6. Traffic driving (beyond the graph)
-- Manoeuvre decider sub_82C41CD0 (from 82C3D830) → vehicle+4396 (1 lane change on a timer, 2 overtake a
+- Maneuver decider sub_82C41CD0 (from 82C3D830) → vehicle+4396 (1 lane change on a timer, 2 overtake a
   slow/stopped car, 3 pull over), target lane +4380. Impatience: stopped (≤0.1 m/s) + gap test.
 - Speed planner sub_82C3FA08 → target speed +3408 (lane speed + driver offset); look-ahead braking over
   20 m, 5 m stop/reverse distance. Car alarm stops after 8 s (+3716).
@@ -368,7 +368,7 @@ Tool: `py -3.13 tools/recomp-trace/veh_trace.py <trace> [--vehicle ADDR]` (saved
   car) → that car stops; standing in the lane in front of it (112 s) → it stays stopped and **traffic queues
   behind** (yellow cab, red car): 3 cars stop/go in step 84–107 s (2–4 s stops), then all held 14–20 s at
   108–123 s while the skater blocked the lane. Several later stops 125–140 s.
-- Manoeuvre (+4396) / target lane (+4380) changed only twice (→ 0 at 30.05 / 44.81 s): no lane changes or
+- Maneuver (+4396) / target lane (+4380) changed only twice (→ 0 at 30.05 / 44.81 s): no lane changes or
   overtakes around a blocking skater in this session; cars wait.
 - **+3408 is not a plain target speed:** it ranges −76…+5 (negative while stopped/queued). Treat as a speed
   delta / planner output (?) until decoded.
@@ -388,7 +388,7 @@ Tool: `py -3.13 tools/recomp-trace/veh_trace.py <trace> [--vehicle ADDR]` (saved
 - When 0xC0 clears (skater lets go): +3408 → −7.25 and the car **brakes to a stop**: 16.8 → 0.9 m/s in
   ~2.6 s (≈6.2 m/s²), then waits.
 - Before the skitch (472–477 s) the car crept/stopped (skater near it). Other +4403 bits: 0x10 toggles
-  often (braking/yield, 353 samples), 0x20 with manoeuvre 3 (pull over, 166), 0x08 on +3424 (28).
+  often (braking/yield, 353 samples), 0x20 with maneuver 3 (pull over, 166), 0x08 on +3424 (28).
 - Next: find who sets 0xC0 (store to +4403 with 0xC0 / 0x40 / 0x80 bits) = the skitch attach/detach code,
   and the skater side (skitch state, attach offset).
 
@@ -542,7 +542,7 @@ own code (don't ship the XML).
   `mx/vehicle`, `mx/engine`, PR #1 "Mx/audio engine vehicles": all player-driven. Reusable: traffic car
   bodies as kinematic proxies on skate-dynamics (skater collision), engine-sound work for
   `aud_traffic_engine`. Upstream main is GPLv3 (`GPL-3.0-only`, since 2026-10-03, `4488651`); the
-  unmerged fork branches and PR #1 have no licence of their own: describe, don't copy.
+  unmerged fork branches and PR #1 have no license of their own: describe, don't copy.
 
 
 ## Tools (local research scripts, mostly not published; `veh_trace.py`, `first_pass.py`, `callctx.sh`,

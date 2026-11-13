@@ -1,6 +1,6 @@
 ---
 name: recomp-scripted-runs
-description: Run repeatable, unattended gameplay sessions in a local skate3recomp research build to collect data (audio trace, screenshots) - scripted pad input, a recorded teleport route, coordinate teleports, background mode so the machine stays usable. Use whenever retail behaviour must be measured again (sounds per action, timings), instead of performing and announcing actions by hand.
+description: Run repeatable, unattended gameplay sessions in a local skate3recomp research build to collect data (audio trace, screenshots) - scripted pad input, a recorded teleport route, coordinate teleports, background mode so the machine stays usable. Use whenever retail behavior must be measured again (sounds per action, timings), instead of performing and announcing actions by hand.
 ---
 
 # Scripted recomp runs (unattended data collection)
@@ -9,7 +9,7 @@ Why: hand-marked sessions ("ollie now", "grinding now") are slow, tiring and imp
 about 4 s). A research build of the recomp can play a pad script by itself, write exact `MARK` lines into the trace,
 screenshot its own window, and run in the background without touching the real controller, focus or speakers.
 
-Rules from skill `recomp-audio-trace` apply: your own legal copy of the game, your own recomp build, no licence on
+Rules from skill `recomp-audio-trace` apply: your own legal copy of the game, your own recomp build, no license on
 skate3recomp (local only, never copy its code), credit skate3recomp, rexglue and Xenia. The script player, background
 mode and trace hooks are research additions to the recomp (the `research-hooks` branch linked from
 `tools/recomp-code-search/README.md` in the repo, or your own equivalent); a stock recomp build does not have them.
@@ -36,8 +36,8 @@ bash <skill>/tools/recomp_script_run.sh <ABSOLUTE script.txt> <ABSOLUTE out/trac
 - Boots with `--skate3_demo_path --skate3_demo_path_signed_in` (straight to gameplay with your save).
 - Outputs next to the trace: `<name>.out/.err` (game log), `<name>_shots/shot_<unix ms>.jpg` (every 2 s), the trace,
   and `<name>.f32` (the audio capture). Look at shots to see what really happened.
-- Trace `MARK` lines: `script loaded`, `gameplay active; script autostart...`, `script start`, one per labelled step,
-  `script end`. Analyse windows between MARKs (exact, unlike hand marks).
+- Trace `MARK` lines: `script loaded`, `gameplay active; script autostart...`, `script start`, one per labeled step,
+  `script end`. Analyze windows between MARKs (exact, unlike hand marks).
 - Put hard time limits on every run and wait loop, and check for leftover processes afterwards. Run one district or
   batch per background job, so a killed loop cannot orphan a recomp.
 
@@ -53,7 +53,7 @@ navigating menus.
 zeroed before the demo path's synthetic presses and keystrokes dropped (`xam_input.cpp`), `--audio_mute` (mutes only
 the SDL output; EA's mixer and the hooks still run), 960x540 window, below-normal priority. Screenshots use
 `PrintWindow(PW_RENDERFULLCONTENT)` on the recomp window, so they work while it is behind other windows (not when
-minimised). GPU/CPU load remains: keep runs short and run one game instance at a time.
+minimized). GPU/CPU load remains: keep runs short and run one game instance at a time.
 
 ## Script format (`SKATE3_INPUT_SCRIPT`)
 One step per line: `<ms> [tokens...] [# label]`; `#` lines and blanks ignored; a step without tokens is a neutral
@@ -110,7 +110,7 @@ Yaw is in degrees, forward = (sin yaw, 0, cos yaw), in the same world coordinate
 `TPOVR` in any trace category (lr, menu destination, menu forward x z, override, yaw). Unset = off, no cost.
 - Use a menu location in the right district (`make_location_script.py`, any index) for each pose, so the right
   district streams in. Keep the poses in a file next to the evidence.
-- Give y a few metres above the ground; the skater drops. Read the settled position from `WPPOS`
+- Give y a few meters above the ground; the skater drops. Read the settled position from `WPPOS`
   (`SKATE3_TRACE=audio`; its listener is the camera, about 1.7 m behind the pose).
 - Points outside the playable area (map rims) ghost the skater and freeze them in place (the out-of-bounds re-place
   loop); the camera view is still fine for scenery shots.
@@ -142,7 +142,7 @@ sample bytes against your own extracted bank files.
   (`cas`).
 - While someone is playing on the machine, launch nothing that opens a window or steals focus.
 
-## Summarising a session by sound event
+## Summarizing a session by sound event
 A useful first report for an audio session: events = POST (audio object, named by constructor address) and SPLC
 (bank index -> bank by majority of attached samples; id -> record/container). Attach each sample start to the latest
 compatible event (`.bnk` samples -> an SPLC within 80 ms, other banks -> a POST within 350 ms). Level per voice =
@@ -182,7 +182,7 @@ internally.
   the editor asks "exit the Replay Editor?" with No selected: `down` then `a` to leave. Game logic stops there too.
   Watch lists still log there (skill `recomp-research`).
 
-## Trace line catalogue (field lists: each hook file's header and `recomp-research/tools/trace.py` FIELD_COUNTS)
+## Trace line catalog (field lists: each hook file's header and `recomp-research/tools/trace.py` FIELD_COUNTS)
 - Every hook writes one `HOOKARMED` line on its first call (proof of installation).
 - Audio (`audio`): `POST` (audio object posts), `SPLC` (Splice plays), `PLAY` / `GAIN` / `SEND` (voices; `PLAY`
   "level" is a counter and `SEND` values aren't gains), `CONTACT` (`sub_824B86E0`: impact speed `+208`, wheel classes
@@ -219,8 +219,8 @@ internally.
   `0x82E9747C`), `NAVCUT` (`8292ADE8` from lr `0x82EA126C`), `PATHOK` (path check `82E95FD0` from lr `0x82E975A8`;
   invalid results always, valid ones only after a `STILLOBS`), `PATHREQ` (path request `82E957F8`, any lr, per bot at
   most 4/s with a skipped count), `STILLREL` (`82E939A0`). Teleport to each spot with `SKATE3_TP_OVERRIDE`.
-- Traffic (`traffic`, `skitch`): `VEHSTATE` (per vehicle at most 4/s plus on manoeuvre or lane change: target speed
-  `+3408`, manoeuvre `+4396`, target lane `+4380`, alarm `+3716`, position + forward from the world matrix
+- Traffic (`traffic`, `skitch`): `VEHSTATE` (per vehicle at most 4/s plus on maneuver or lane change: target speed
+  `+3408`, maneuver `+4396`, target lane `+4380`, alarm `+3716`, position + forward from the world matrix
   `*(vehicle+164)+16`), `VEHAUD` (the TrafficEngine update `sub_824D6478`'s vehicle audio record: rpm, acceleration,
   speed, listener distance, horn, skid, relative speed), horns/skids/engine/lights `TRAF*`, junctions `VEHJUNC` /
   `VEHCONN`, skitching `SKITCH*`, `VEHBAIL`. NPC skaters skitch cars unprompted in busy spots (Crystal Towers), so a
@@ -246,7 +246,7 @@ internally.
 - Physics (`physics`): solver iterations `ITERSET` / `ITERTICK`, board/body lines.
 - Wheel contacts (`physics`, on only when `SKATE3_WHLC="x z radius [maxr]"` is set): `WHLC` = every wheel / board
   volume vs world triangle pair that `8277BC58` hands to `8277B720` whose fixup ran (accepted and rejected): body,
-  volume ids / type / radius / centre, triangle (ids, corners, normal, runtime flags, the three decoded edge cosines
+  volume ids / type / radius / center, triangle (ids, corners, normal, runtime flags, the three decoded edge cosines
   and the bytes rebuilt from them), the fixup region (0 face, 1 e0, 2 e1, 3 v1, 4 e2, 5 v0, 6 v2) and result, the
   normal before / after, count, separation, the first point pair and the return value (25 fields). `WHLCARM` once
   (proves it fires), `WHLCSUM` at 1 Hz (lines, dropped, candidates, accepted; capped at 2000/s). Use it to compare

@@ -53,7 +53,7 @@ pub(crate) struct CareerStatsHost {
     path: Option<std::path::PathBuf>,
     last: Option<[f32; 3]>,
     bail_seq: Option<u32>,
-    /// Bail distance not yet added (0x82775018 adds whole metres).
+    /// Bail distance not yet added (0x82775018 adds whole meters).
     bail_metres: f32,
     pushes: PushLatch,
     /// The bail running now (Hall of Meat record), added to the rows when it ends.

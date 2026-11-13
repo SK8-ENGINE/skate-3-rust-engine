@@ -216,7 +216,7 @@ fn signed_degrees(heading: f32, dir: [f32; 2]) -> f32 {
 /// degrees off the facing (90 from 70 up); with no turn and `speed > 0`, the step along `step_dir` (none: Forwards).
 pub fn strafe_input(heading: f32, target: [f32; 3], step_dir: Option<[f32; 2]>, speed: f32, rules: &StrafeRules) -> StrafeInput {
     let [e1, e2, e3, e4] = rules.edges;
-    // `sub_82E2AB18` normalises the target in 3D: the size is acos of the 3D dot with the flat facing, the side from the
+    // `sub_82E2AB18` normalizes the target in 3D: the size is acos of the 3D dot with the flat facing, the side from the
     // flat cross (b695).
     let length = (target[0] * target[0] + target[1] * target[1] + target[2] * target[2]).sqrt();
     let turn = (length > 1e-4 && target[0] * target[0] + target[2] * target[2] > 1e-8).then(|| {
@@ -484,7 +484,7 @@ struct Layer {
     mirror: bool,
 }
 
-/// Root motion of one step, in the ped's frame before the step (x right, z forward, metres;
+/// Root motion of one step, in the ped's frame before the step (x right, z forward, meters;
 /// yaw radians about +y, counter-clockwise seen from above).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RootMotion {
@@ -808,8 +808,8 @@ impl PedAnimPlayer {
         }
     }
 
-    /// Stop the channel with its clip's own blend-out (the Collision state machine's `StopChannel` behaviour,
-    /// `motiongraph_collision.xml`; NOT RETAIL YET: the behaviour's fade is in code not read).
+    /// Stop the channel with its clip's own blend-out (the Collision state machine's `StopChannel` behavior,
+    /// `motiongraph_collision.xml`; NOT RETAIL YET: the behavior's fade is in code not read).
     pub fn channel_stop_own(&mut self) {
         if let Some(c) = self.channel.as_mut() {
             c.stopping = true;

@@ -26,7 +26,7 @@ kill $WATCH 2>/dev/null
 L="$OUT.err"
 echo "panics: $(grep -ci 'panicked' "$L")  slots full: $(grep -c 'name slots used' "$L")"
 grep "LIVING_WORLD tick" "$L" | tail -1 | sed 's/\x1b\[[0-9;]*m//g' | grep -o "skaters [0-9]* peds [0-9]* vehicles [0-9]*"
-py -3.13 "$R/tools/claude-skills/optimisation/tools/frame_log_summary.py" "$OUT.frames.tsv" | sed -n 1,5p
+py -3.13 "$R/tools/claude-skills/optimization/tools/frame_log_summary.py" "$OUT.frames.tsv" | sed -n 1,5p
 grep "LIVING_TIMING" "$L" | tail -n +20 | sed 's/\x1b\[[0-9;]*m//g' | grep -o "| .*" | tr ' ' '\n' | grep = |
   awk -F= '{s[$1]+=$2; n[$1]++} END {for (k in s) printf "  %-17s %.3f ms/frame\n", k, s[k]/n[k]}'
 grep "FIXED_TIMING " "$L" | tail -n +20 | sed 's/\x1b\[[0-9;]*m//g' | grep -o "step_ms=[0-9.]*\|busy_ms=[0-9.]*\|gaps_ms=[0-9.]*" |

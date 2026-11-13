@@ -53,7 +53,7 @@ impl CameraKey {
         }
     }
 
-    /// Retail's camera type (`82508CE8`: 0 Follow, 1 Tripod, 2 Free, 3 Game), the timeline band's colour index.
+    /// Retail's camera type (`82508CE8`: 0 Follow, 1 Tripod, 2 Free, 3 Game), the timeline band's color index.
     pub fn kind(&self) -> u8 {
         match self {
             CameraKey::Follow { .. } => 0,

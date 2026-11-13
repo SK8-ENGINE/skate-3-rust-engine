@@ -213,7 +213,7 @@ fn geometry(width: f32, height: f32, categories: usize) -> Geometry {
     let columns_y_flow = snap(snap(height * 0.13) + 74. * s);
     let view_rows = (((content_bottom - columns_y_flow + row_gap) / pitch) as i32 - 1).clamp(1, MAX_VIEW_ROWS);
     let view_h = view_rows as f32 * pitch - row_gap;
-    // ...then the block is centred vertically, the title 74 px above it.
+    // ...then the block is centered vertically, the title 74 px above it.
     let low = (98. * s).min(columns_y_flow);
     let columns_y = snap(((height - view_h) * 0.5).max(low).min(content_bottom - view_h));
     let title_y = snap(columns_y - 74. * s);
@@ -235,7 +235,7 @@ struct Highlight {
     ring: Entity,
     fill: Entity,
 }
-/// A text in a box that centres it vertically.
+/// A text in a box that centers it vertically.
 #[derive(Clone, Copy)]
 struct Label {
     frame: Entity,
@@ -526,7 +526,7 @@ impl Paint<'_, '_, '_> {
             }
         }
     }
-    /// A vertically centred label filling a rectangle.
+    /// A vertically centered label filling a rectangle.
     fn label(&mut self, l: Label, x: f32, y: f32, w: f32, h: f32, value: &str, color: Color, size: f32) {
         self.rect(l.frame, x, y, w, h);
         self.text(l.text, value, color, em(size));
@@ -812,7 +812,7 @@ pub(super) fn view(
                     paint.rect(circle, snap(cx - chevron_r), snap(cy - chevron_r), 2. * chevron_r, 2. * chevron_r);
                     paint.radius(circle, chevron_r);
                     paint.background(circle, if !can { if focused { CHEV_DISABLED_ON_DARK } else { CHEV_DISABLED } } else if hit { INTERACT_HOVER } else { INTERACT });
-                    // Tip-anchored triangle: the tip reaches 0.42 r from the centre, the back 0.6 of that behind it.
+                    // Tip-anchored triangle: the tip reaches 0.42 r from the center, the back 0.6 of that behind it.
                     let t = chevron_r * 0.42;
                     let back = if side == 0 { chevron_r - t } else { chevron_r - t * 0.6 };
                     paint.rect(tri, back, chevron_r - t, t * 1.6, 2. * t);

@@ -1,7 +1,7 @@
 # Where exact C strings sit in the TU3 image and which functions reference them (registered names, enum labels).
 # usage: find-strings.ps1 [-Out file] <string> [string ...]
 # Project: -ProjectDir (default $env:GHIDRA_PROJECT_DIR), -ProjectName skate3-tu3, -Program default.xexp; needs GHIDRA_INSTALL_DIR.
-# References come from Ghidra's analysis: a string built with lis/addi that the analyser did not resolve has none.
+# References come from Ghidra's analysis: a string built with lis/addi that the analyzer did not resolve has none.
 [CmdletBinding(PositionalBinding = $false)]
 param([string]$Out = (Join-Path $PSScriptRoot "..\..\..\..\.local\research\ghidra\strings.txt"),
       [string]$ProjectDir = $env:GHIDRA_PROJECT_DIR,

@@ -86,7 +86,7 @@ fn carry(hide_board: bool) {
         }
         assert_eq!(skater.skateboard_controller.fields.state_448, 3, "board not hidden");
     }
-    // Nearest map prop end-on in front of the skater (near face 1.5 m, centre beyond the 3.5 m hold), then hold RB.
+    // Nearest map prop end-on in front of the skater (near face 1.5 m, center beyond the 3.5 m hold), then hold RB.
     let (at, forward) = root(&skater);
     let dynamics = physics.prop_dynamics_mut().expect("map props");
     let probe = skate_core::math::Vector3::new(at[0], at[1], at[2]);
@@ -99,7 +99,7 @@ fn carry(hide_board: bool) {
     let basis = skate_core::math::Basis3 {
         columns: if half.x >= half.z { [f, [0.0, 1.0, 0.0], side] } else { [[forward[2], 0.0, -forward[0]], [0.0, 1.0, 0.0], f] },
     };
-    // Template origin relative to the box centre, re-expressed in the new basis.
+    // Template origin relative to the box center, re-expressed in the new basis.
     let rel = [origin.x - centre.x, origin.y - centre.y, origin.z - centre.z];
     let ob = old_basis.columns;
     let local: Vec<f32> = (0..3).map(|i| rel[0] * ob[i][0] + rel[1] * ob[i][1] + rel[2] * ob[i][2]).collect();

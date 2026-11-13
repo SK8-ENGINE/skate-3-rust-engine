@@ -1,9 +1,9 @@
 ---
 name: recomp-research
-description: Reverse-engineer any part of retail Skate 3 (NPCs, traffic, AI and aggression, triggers and teleport volumes, physics, audio, scripting...) by finding the code in the TU3 recompilation, hooking it with guarded trace hooks, driving the game with scripted runs and analysing the trace, then porting the behaviour to the Rust engine. Use whenever the engine needs retail behaviour that isn't documented yet.
+description: Reverse-engineer any part of retail Skate 3 (NPCs, traffic, AI and aggression, triggers and teleport volumes, physics, audio, scripting...) by finding the code in the TU3 recompilation, hooking it with guarded trace hooks, driving the game with scripted runs and analyzing the trace, then porting the behavior to the Rust engine. Use whenever the engine needs retail behavior that isn't documented yet.
 ---
 
-# Recomp research: find -> hook -> run -> analyse -> port
+# Recomp research: find -> hook -> run -> analyze -> port
 
 Related skills: `recomp-audio-trace` (build, layout, title update), `recomp-scripted-runs` (pad scripts, teleports,
 batches, screenshots), `ghidra` (pseudocode of retail functions), `aems-port` (an example of a full port),
@@ -15,8 +15,8 @@ you read code through skill `ghidra`. Credit them in every doc and PR that uses 
 ## Rules
 - **Your own copy, your own build:** you need a legally owned copy of Skate 3 and must build the recomp yourself
   (skill `recomp-audio-trace`). Nothing from the game is shared or committed.
-- **Reference only:** skate3recomp has no licence. Never copy generated or recomp code (or Ghidra pseudocode) into the
-  engine; describe behaviour in your own words (addresses, constants and offsets are facts and fine). Disassembly
+- **Reference only:** skate3recomp has no license. Never copy generated or recomp code (or Ghidra pseudocode) into the
+  engine; describe behavior in your own words (addresses, constants and offsets are facts and fine). Disassembly
   stays local.
 - **Retail code is the source of truth.** The recomp is not the console: its frame rate, threading and timing differ.
   Trust its logic and values; treat its timings with care. Label every ported value with where it came from
@@ -49,7 +49,7 @@ you read code through skill `ghidra`. Credit them in every doc and PR that uses 
 - **Code search tools:**
   - `tools/fn.sh ADDR < /dev/null` (dump a function's asm comments; needs `RECOMP_GENERATED`). Always pass a non-empty
     address and redirect stdin: with an empty address awk reads stdin and hangs.
-  - `tools/fnstrings.py ADDR` (data addresses a function materialises and the string at each; needs `PPC_IMAGE`).
+  - `tools/fnstrings.py ADDR` (data addresses a function materializes and the string at each; needs `PPC_IMAGE`).
   - AI-graph ops: an op's vtable comes from its constructor's `stw rX,0(r31)`, with Begin / Update / End at
     vtable +48 / +52 / +56 (a condition's test is +48); when a factory has no vtable store, follow its `bl` to the real
     constructor.
@@ -83,7 +83,7 @@ you read code through skill `ghidra`. Credit them in every doc and PR that uses 
   `"trace_common.h"` and `using namespace skate3_research;`. Arguments: r3-r10 / f1-f4 on entry; read struct fields
   AFTER calling through for outputs. `CallerChain` names the callers.
 - **Unknown argument meanings: first-pass hooks.** Log raw r3-r8/f1-f2 on entry, r3/f1 after the call and the
-  callers, rate-limited per function: one line `FIRST_PASS_HOOK(addr, "<category>", "<KIND>", "tag\t")`. Summarise
+  callers, rate-limited per function: one line `FIRST_PASS_HOOK(addr, "<category>", "<KIND>", "tag\t")`. Summarize
   with `tools/first_pass.py` (distinct values per field: constant = object/flag, varying = data). Then name the
   fields. Faster than decoding every argument statically. Write C++ with an editor tool, not shell/Python heredocs
   (escapes like `\t` turned into real tabs or literal characters several times).
@@ -145,7 +145,7 @@ you read code through skill `ghidra`. Credit them in every doc and PR that uses 
   audio-thread stalls (voices queued during a stall start together).
 
 ### Getting to a spot: teleport there
-Use coordinate teleports to get close to an issue spot or anything that needs travelling to, instead of menu
+Use coordinate teleports to get close to an issue spot or anything that needs traveling to, instead of menu
 teleports, scripted skating or asking someone to drive.
 - Retail (recomp): `SKATE3_TP_OVERRIDE="x y z yaw[; ...]"` (skill `recomp-scripted-runs`, "Teleport to any
   coordinate"): each Challenge Map menu teleport lands at the next pose. Add about 4 m to an estimated ground y and
@@ -155,7 +155,7 @@ teleports, scripted skating or asking someone to drive.
   captures (skill `build-and-run`), or `--teleport <id>`.
 - Use the same pose in both for matched retail vs engine shots; save the poses next to the evidence.
 
-## 4. Analyse
+## 4. Analyze
 - Parse by kind; window by `MARK at <stop>`; align with screenshots.
 - **Shared reader:** `tools/trace.py`: `Trace(path)` gives lines by kind, `stops()`, `by_stop(kind)`,
   `shot_for(ms)`, `capture(a, b)` (the float32 audio capture); run it directly for a kind and stop summary plus
@@ -167,11 +167,11 @@ teleports, scripted skating or asking someone to drive.
   timers, chase windows, takedowns) with the nearest screenshot.
 - **Filter by local72 before comparing rates:** steady riding gave 0 local body-collision posts; NPC skaters nearby
   post about 0.7 per second; the rider's own come from big-drop landings and bumping objects (cars).
-- **Compare against the engine's own data or behaviour** and report agreement numbers (for example "1,859 of 1,859
+- **Compare against the engine's own data or behavior** and report agreement numbers (for example "1,859 of 1,859
   samples"). Never just eyeball a result.
 
 ## 5. Record and port
-- Notes per topic (addresses, data layouts, behaviour, open questions, hook plan) in your notes folder; a scrubbed
+- Notes per topic (addresses, data layouts, behavior, open questions, hook plan) in your notes folder; a scrubbed
   spec (no private paths, no game data) in the repo docs when code will cite it.
 - Port in your own code, data-driven (retail values as defaults from setup data, overridable by mods), then skill
   `regression-check`, a docs entry with credits, and keep the PR description current.

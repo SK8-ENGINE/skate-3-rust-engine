@@ -232,6 +232,7 @@ pub(crate) fn build(
     crate::challenges::install(&mut app);
     crate::race_host::install(&mut app);
     crate::contest_host::register(&mut app);
+    crate::ftl_host::register(&mut app);
     crate::career::install(&mut app);
     crate::visual_indicators::install(&mut app);
     app.add_plugins(crate::updater::UpdaterPlugin);

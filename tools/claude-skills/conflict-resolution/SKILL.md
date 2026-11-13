@@ -30,7 +30,7 @@ In order of preference:
    `validate()` arms.
 3. **Pick per hunk:** `python .claude/skills/conflict-resolution/tools/pick_hunks.py <file> <choice>...`, one choice
    per conflict hunk in file order: `o` (ours), `t` (theirs), `ot` / `to` (both, in that order; `ot:SEP` joins them
-   with SEP, `\n` escapes allowed). Handles diff3 hunks. Normalise line endings afterwards if the file mixes them.
+   with SEP, `\n` escapes allowed). Handles diff3 hunks. Normalize line endings afterwards if the file mixes them.
 4. **By hand:** keep both sides' intent. Lists/match arms/`mod` lines: keep both. A line both branches edited (for
    example a macro field list or a system chain tuple): merge the fields of both into one line. Two branches adding a
    line at the same spot (for example a progress label and a timing span in one function) is a classic case: keep
@@ -75,7 +75,7 @@ Before committing: `git grep -n -E '^(<<<<<<<|>>>>>>>) '` must be empty; watch f
   then take those files from the reference.
 - Every old head is an ancestor: `git merge-base --is-ancestor <old-head> <result>`.
 - Build and test the result (skill `build-and-run`; know the pre-existing upstream failures), and when audio
-  changed, the e2e bench must stay IDENTICAL (skill `optimisation`).
+  changed, the e2e bench must stay IDENTICAL (skill `optimization`).
 
 ## 4. PRs that conflict with each other
 - Two open PRs touching the same lines cannot both merge cleanly in any order. Either stack them (the later PR

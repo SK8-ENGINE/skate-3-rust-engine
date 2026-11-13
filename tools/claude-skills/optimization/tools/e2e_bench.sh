@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Native-audio optimisation bench (skill `optimisation`): renders the e2e scenarios and real-play
+# Native-audio optimization bench (skill `optimization`): renders the e2e scenarios and real-play
 # replays headless, records per-frame / per-block timing, and hashes every output.
 #
-#   .claude/skills/optimisation/tools/e2e_bench.sh LABEL [MODE...]
+#   .claude/skills/optimization/tools/e2e_bench.sh LABEL [MODE...]
 #
 # MODE: row (one host call per 60 Hz row, the default e2e), fpsN (the game's host at N fps:
 # E2E_FPS=N, console MixMap cadence; e.g. fps30, fps300, fps1000). Default: row fps300.

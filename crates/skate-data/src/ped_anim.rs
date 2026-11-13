@@ -197,6 +197,32 @@ fn remap(v: &Value, unresolved: &mut usize) -> Vec<RemapClip> {
     }
 }
 
+/// One `livingworld_entity_animation_postadjust` record's fields over `s` (b1019: the bone list's slot / limit pairs,
+/// the pitch base and factors, the turn rates; the two 120 deg/s rate fields are equal in every shipped record).
+fn head_look_fields(f: &Value, s: &mut skate_core::living_world::peds::head_look::HeadLookSettings) {
+    let num = |h: &str| f.get(h).and_then(Value::as_f64).map(|v| v as f32);
+    if let Some(list) = f.get("Hash_43A2B449378045FB").and_then(Value::as_array) {
+        for item in list {
+            if let (Some(slot), Some(bits)) = (item["u32_0"].as_u64(), item["u32_4"].as_u64()) {
+                if let Some(limit) = s.bones.get_mut(slot as usize) {
+                    *limit = f32::from_bits(bits as u32);
+                }
+            }
+        }
+    }
+    let set = |v: Option<f32>, out: &mut f32| {
+        if let Some(v) = v.filter(|v| v.is_finite()) {
+            *out = v;
+        }
+    };
+    set(num("Hash_803744CFB614F57C"), &mut s.pitch_limit);
+    set(num("Hash_69B179F1FC89BCFE"), &mut s.up_factor);
+    set(num("Hash_592536A4699594D9"), &mut s.down_factor);
+    set(num("Hash_493D0BAC2404AC73"), &mut s.yaw_speed);
+    set(num("Hash_FCB1908C9C97607C"), &mut s.pitch_speed);
+    set(num("Hash_F23888EC33EAEFB9"), &mut s.overflow_yaw_speed);
+}
+
 impl PedTables {
     pub fn parse(json: &[u8]) -> Result<Self, String> {
         let doc: Value = serde_json::from_slice(json).map_err(|e| e.to_string())?;
@@ -216,7 +242,29 @@ impl PedTables {
             let model = row["fields"]["model"]["key"].as_str().map(String::from);
             // The animation set is the one field referencing that class (its key is a hash).
             let anim_set = fields.and_then(|f| f.values().find(|v| v["class"] == "livingworld_entity_animation")).and_then(|v| v["key"].as_str()).map(String::from);
-            t.catalog.entities.insert(k.clone(), PedEntity { model, anim_set });
+            let refers = |class: &str| fields.and_then(|f| f.values().find(|v| v["class"] == class)).and_then(|v| v["key"].as_str()).map(String::from);
+            let (postadjust, head_tracking) = (refers("livingworld_entity_animation_postadjust"), refers("livingworld_entity_headtracking"));
+            t.catalog.entities.insert(k.clone(), PedEntity { model, anim_set, postadjust, head_tracking });
+        }
+        // The head look-at records (b1019), each over its parent's values.
+        let postadjust = class("livingworld_entity_animation_postadjust");
+        for k in postadjust.into_iter().flatten().map(|(k, _)| k) {
+            let mut chain = Vec::new();
+            let mut at = Some(k.as_str());
+            while let Some(name) = at.filter(|_| chain.len() < 8) {
+                let Some(row) = postadjust.and_then(|c| c.get(name)) else { break };
+                chain.push(row);
+                at = row["parent"].as_str().filter(|p| !p.is_empty());
+            }
+            let mut s = skate_core::living_world::peds::head_look::HeadLookSettings::default();
+            for row in chain.iter().rev() {
+                head_look_fields(&row["fields"], &mut s);
+            }
+            t.catalog.head_look.insert(k.clone(), s);
+        }
+        for (k, row) in class("livingworld_entity_headtracking").into_iter().flatten() {
+            let on = row["fields"].as_object().and_then(|f| f.values().find_map(|v| v.as_u64().or_else(|| v.as_bool().map(u64::from))));
+            t.catalog.head_tracking.insert(k.clone(), on.is_none_or(|v| v != 0));
         }
         for (k, row) in class("livingworld_models").into_iter().flatten() {
             let f = &row["fields"];

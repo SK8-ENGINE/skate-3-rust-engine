@@ -30,7 +30,7 @@ impl fmt::Display for RoadError {
 }
 impl std::error::Error for RoadError {}
 
-/// A cubic Hermite curve (centre line of a piece, or a turn connector) with its arc-length table:
+/// A cubic Hermite curve (center line of a piece, or a turn connector) with its arc-length table:
 /// `arc[k]` = length from the start to parameter `k / 15`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Curve {

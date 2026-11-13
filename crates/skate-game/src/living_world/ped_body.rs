@@ -27,7 +27,7 @@ pub(crate) struct PedBodyPart {
     /// Rig bone names (matched ignoring case).
     pub from: String,
     pub to: String,
-    /// Where the centre sits from `from` (0) to `to` (1); the axis runs from `from` to `to`.
+    /// Where the center sits from `from` (0) to `to` (1); the axis runs from `from` to `to`.
     pub centre: f32,
     pub radius: f32,
     pub half_length: f32,
@@ -69,7 +69,7 @@ pub(crate) struct PedProxy {
     pub slide: bool,
     /// The side test `|up x n| >` this (0x8208E95C).
     pub slide_side: f32,
-    /// sub_82E35160: a posed ped's body A is centred on this bone's position (upright, root rotation; a lying ped's
+    /// sub_82E35160: a posed ped's body A is centered on this bone's position (upright, root rotation; a lying ped's
     /// capsule drops with its spine, research b644); unposed: root + `unposed_height` / 2 + `unposed_lift` up
     /// (sub_82E0E210; the height is inferred).
     pub centre_bone: &'static str,
@@ -106,7 +106,7 @@ pub(crate) fn body_a_volume(position: Vec3, velocity: Vec3, p: &PedProxy) -> ska
     body_a_volume_at(position + Vec3::Y * (0.5 * p.unposed_height + p.unposed_lift), velocity, p)
 }
 
-/// Body A as a prop-step volume: an upright capsule centred at `centre`, moving with the ped.
+/// Body A as a prop-step volume: an upright capsule centered at `centre`, moving with the ped.
 pub(crate) fn body_a_volume_at(centre: Vec3, velocity: Vec3, p: &PedProxy) -> skate_core::physics::board_world::BoardWorldVolume {
     use skate_core::math::Vector3;
     let v = |a: Vec3| Vector3::new(a.x, a.y, a.z);
@@ -158,7 +158,7 @@ pub(crate) fn reaction_part_speed(after: &[(u64, [f32; 2])], serial: u32, s: &Pe
     after.iter().find(|p| p.0 == id).map(|p| p.1)
 }
 
-/// One part's body: a capsule centred between `a` and `b` (world) along `a -> b`, moving at `velocity`.
+/// One part's body: a capsule centered between `a` and `b` (world) along `a -> b`, moving at `velocity`.
 pub(crate) fn part_proxy(serial: u32, index: usize, a: Vec3, b: Vec3, velocity: Vec3, part: &PedBodyPart, look_ahead: f32) -> skate_dynamics::SolidBody {
     use skate_dynamics::rapier3d::prelude::{Pose, Rotation, SharedShape, Vector};
     let axis = (b - a).try_normalize().unwrap_or(Vec3::Y);
@@ -245,7 +245,7 @@ pub(crate) fn push_ped_proxies(
             .map(|(ped, body)| {
                 let id = body_a_id(ped.id.serial);
                 let velocity = carried.iter().find(|c| c.0 == id).map_or(body.velocity, |c| c.1);
-                // Posed: on the centre bone (it follows a knock-down's lying spine); else above the root.
+                // Posed: on the center bone (it follows a knock-down's lying spine); else above the root.
                 let spine = spine_bone
                     .and_then(|i| super::peds::ped_globals(&data.rig, body, &*data, 0.0, &[])?.get(i).map(|g| bone_world(body.position, body.heading, g)));
                 let volume = match spine {

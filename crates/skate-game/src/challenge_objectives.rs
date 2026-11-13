@@ -23,6 +23,10 @@ pub(crate) struct ObjectiveData {
     /// Failure rows in order (FailureObjectivesWithEvents, research b940); an untranslatable row has no condition.
     #[serde(default)]
     pub failures: Vec<FailureData>,
+    /// The inline FailureObjectives (b940): checked after `failures` when none of those fired; the leader distance on
+    /// follow the leader (b1006).
+    #[serde(default)]
+    pub failures_inline: Vec<InlineFailure>,
     #[serde(default)]
     pub failure_first: bool,
     /// Hint rows in order (HintObjectives, research b942), the same row shape as the failures.
@@ -38,6 +42,22 @@ pub(crate) struct FailureData {
     /// The presentation events the row plays when it fires.
     #[serde(default)]
     pub presentation: EventList,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct InlineFailure {
+    #[serde(default)]
+    pub condition: Option<serde_json::Value>,
+    /// The failure text id (None: the challenge type's default).
+    #[serde(default)]
+    pub text: Option<String>,
+}
+
+impl ObjectiveData {
+    /// The inline failure behind a fired failure row: rows past the with-events ones are the inline list.
+    pub(crate) fn inline_failure(&self, row: usize) -> Option<&InlineFailure> {
+        row.checked_sub(self.failures.len()).and_then(|j| self.failures_inline.get(j))
+    }
 }
 
 /// One exported presentation event (`progression.presentation_events`: 16-byte records, research b892 / b943).
@@ -123,6 +143,8 @@ pub(crate) struct DataObjectives {
     pub skater: SkaterFacts,
     /// The last "n of m" counter a condition set (SetFractionValue), for the objective HUD.
     pub fraction: Option<(f32, f32)>,
+    /// Leader.AddFollowIndicator / RemoveFollowIndicator, for the follow the leader host (the trail over the leader).
+    pub follow_indicator: Option<bool>,
     /// Trick group key -> member trick keys (b863), and the tricks announced this frame.
     trick_groups: TrickGroups,
     pub tricks_this_frame: Vec<u64>,
@@ -261,14 +283,23 @@ impl DataObjectives {
             info!("SKATE_CHALLENGE {id} objectives NOT RETAIL YET: unported API {unported:?}");
             return None;
         }
-        let failures = side_rows(id, "failure", rows.iter().map(|r| r.failures.as_slice()), &mut names);
+        let mut failures = side_rows(id, "failure", rows.iter().map(|r| r.failures.as_slice()), &mut names);
+        // The inline rows follow the with-events rows of their objective (b940), loaded on their own so one kind's
+        // unported call does not drop the other; a dropped with-events list keeps its row count (None rows).
+        let inline: Vec<Vec<FailureData>> = rows.iter().map(|r| r.failures_inline.iter().enumerate().map(|(j, f)| FailureData {
+            key: format!("{}/inline{j}", r.key), condition: f.condition.clone(), presentation: EventList::Count(0) }).collect()).collect();
+        let inline = side_rows(id, "inline failure", inline.iter().map(Vec::as_slice), &mut names);
+        for ((list, r), extra) in failures.iter_mut().zip(rows).zip(inline) {
+            list.resize(r.failures.len(), None);
+            list.extend(extra);
+        }
         let hints = side_rows(id, "hint", rows.iter().map(|r| r.hints.as_slice()), &mut names);
         let count = |l: &[Vec<Option<Program>>]| l.iter().map(Vec::len).sum::<usize>();
         let vars = vec![vec![Value::Nil; names.vars.len()]; rows.len()];
         let globals = vec![Value::Nil; names.globals.len()];
         info!("SKATE_CHALLENGE {id} objectives from data: {} rows, {} failure rows, {} hint rows, api {:?}", rows.len(),
             count(&failures), count(&hints), names.api);
-        Some(Self { group, programs, failures, hints, names, vars, globals, volumes, inside: Vec::new(), skater: SkaterFacts::default(), fraction: None,
+        Some(Self { group, programs, failures, hints, names, vars, globals, volumes, inside: Vec::new(), skater: SkaterFacts::default(), fraction: None, follow_indicator: None,
             trick_groups, tricks_this_frame: Vec::new(), tricks_began: Vec::new() })
     }
 
@@ -289,6 +320,7 @@ impl DataObjectives {
                 FlowCommand::Deactivate(i) => self.group.deactivate(i),
                 FlowCommand::Reset(i) => self.group.reset(i, true),
                 FlowCommand::Fraction(n, d) => self.fraction = Some((n, d)),
+                FlowCommand::FollowIndicator(on) => self.follow_indicator = Some(on),
             }
         }
         events
@@ -358,11 +390,11 @@ mod tests {
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.EnteredVolume",
                     "args": [{"lit": "1"}, {"lit": "DIST_DownTown|ots_a_spotvolume_01"}]}}]}),
                 points_valid: Some(serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectivePoints.IsSequenceNewlyCompletePoints", "args": []}}]})),
-                failures: Vec::new(), failure_first: false, hints: Vec::new() },
+                failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new() },
             ObjectiveData { key: "global_points_objective".into(), activation: 0, triggers: points_triggers,
                 condition: serde_json::json!({"locals": 0, "body": [{"return": {"cmp": "ge", "args": [
                     {"api": "GetGroupAccumulatedPoints", "args": []}, {"api": "GetGroupPointsRequirement", "args": []}]}}]}),
-                points_valid: None, failures: Vec::new(), failure_first: false, hints: Vec::new() },
+                points_valid: None, failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new() },
         ]
     }
 
@@ -378,5 +410,30 @@ mod tests {
         assert_eq!(d.bank(1500, true, 1000).completed, false, "a bail");
         d.enter(0x55);
         assert_eq!(d.bank(1500, false, 1000), Banked { completed: true, all_complete: true, points: 1500 });
+    }
+
+    /// Follow the leader's shape (b1006): the end volume to complete, the leader distance as the inline failure after
+    /// one with-events row that never holds; the fired row indexes past the with-events rows.
+    #[test]
+    fn inline_failures_fire_after_the_with_events_rows() {
+        let mut triggers = vec![false; 14];
+        triggers[12] = true;
+        let never = FailureData { key: "never".into(), condition: Some(serde_json::json!({"locals": 0, "body": [{"return": {"lit": false}}]})),
+            presentation: EventList::Count(0) };
+        let row = ObjectiveData { key: "ftl_0".into(), activation: 0, triggers, points_valid: None,
+            condition: serde_json::json!({"locals": 0, "body": [{"return": {"api": "ObjectiveTrigger.IsInVolume",
+                "args": [{"lit": "1"}, {"lit": "DIST_DownTown|ftl_end"}]}}]}),
+            failures: vec![never], failures_inline: vec![InlineFailure { condition: Some(serde_json::json!({"locals": 0, "body": [{"return":
+                {"cmp": "ge", "args": [{"api": "Leader.GetDistanceToNearestAISkater", "args": []}, {"lit": 40.0}]}}]})), text: None }],
+            failure_first: false, hints: Vec::new() };
+        let mut d = DataObjectives::new("ftl", std::slice::from_ref(&row), vec![("ftl_end".into(), 7)], Default::default()).unwrap();
+        d.activate_first();
+        d.skater.competitor_distances = [Some(25.0), None, None, None];
+        assert!(d.handle(Message::Tick { gated: false }).is_empty(), "close enough");
+        d.skater.competitor_distances = [Some(45.0), None, None, None];
+        let events = d.handle(Message::Tick { gated: false });
+        assert!(events.contains(&Event::FailureCondition { objective: 0, row: 1 }), "{events:?}");
+        assert_eq!(row.inline_failure(1), row.failures_inline.first());
+        assert_eq!(row.inline_failure(0), None);
     }
 }

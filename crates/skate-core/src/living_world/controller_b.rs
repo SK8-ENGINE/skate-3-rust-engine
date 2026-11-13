@@ -13,7 +13,7 @@ pub struct ControllerBSettings {
     /// plan acceptance above still rejects a far snap; a mod can cap the search here.
     pub goal_locate_radius: f32,
     /// How far the path service may snap an off-mesh start (the skater) onto the mesh when no polygon is under it
-    /// (retail: unbounded, `829338B0`; b324). A mod can cap it (0.5 = the peds' snap, the pre-2026-10-19 behaviour).
+    /// (retail: unbounded, `829338B0`; b324). A mod can cap it (0.5 = the peds' snap, the pre-2026-10-19 behavior).
     pub start_locate_radius: f32,
     /// Plan acceptance without waypoints: the skater to the node (`0x82257224` 1.5 h, `0x82257220` 3.0 v).
     pub plan_direct_h: f32,
@@ -282,7 +282,7 @@ pub struct BControls {
 
 impl BControls {
     /// The control-map entries (intent name, value) in retail's write order; names from the key globals'
-    /// static initialisers (b79).
+    /// static initializers (b79).
     pub fn intents(&self) -> Vec<(&'static str, f32)> {
         let mut v = Vec::new();
         if self.wipe_out {

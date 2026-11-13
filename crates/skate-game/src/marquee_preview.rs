@@ -19,7 +19,7 @@ pub(crate) struct MarqueeStage {
     /// `stock/data/anim/<bank>` and the clip (b579: loops by its own flag).
     pub bank: String,
     pub clip: String,
-    /// The set around the stage, `private/hud/scene/<set>` (setup's export of DIST_CreateSakter, modelled in place).
+    /// The set around the stage, `private/hud/scene/<set>` (setup's export of DIST_CreateSakter, modeled in place).
     pub set: String,
 }
 

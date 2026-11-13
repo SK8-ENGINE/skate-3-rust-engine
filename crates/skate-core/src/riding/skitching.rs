@@ -189,7 +189,7 @@ impl SkitchSubMode {
         let inside = i.position.abs() <= i.half_length;
         // `82D471A8`: inside the outer band.
         let in_band = i.half_length < i.position.abs() && i.position.abs() <= i.half_length + s.edge_band;
-        // `82D4C180` / `82D4C1F0`: the stick points to the centre / outward.
+        // `82D4C180` / `82D4C1F0`: the stick points to the center / outward.
         let toward = i.stick.abs() > 0.01 && i.stick.signum() != i.position.signum();
         let outward = i.stick.abs() > 0.5 && i.stick.signum() == i.position.signum();
         let next = match self.mode {

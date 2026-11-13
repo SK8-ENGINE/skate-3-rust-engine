@@ -1,6 +1,6 @@
 # 40. Map block decode: exact-size buffers (upstream PR #66)
 
-Part of PR #52 (an optimisation item the user added 2026-10-21, USER-ASKS 180). The change is JohnUzoka's upstream PR
+Part of PR #52 (an optimization item the user added 2026-10-21, USER-ASKS 180). The change is JohnUzoka's upstream PR
 [#66](https://github.com/SK8-ENGINE/skate-3-rust-engine/pull/66), taken unchanged with their authorship (3 commits);
 #52 only adds a regression check on top. #66 has since grown to six commits (its first three rebased, the second
 revised), so merging it first now conflicts with #52 in five files: #52 waits for #66 to merge, then merges main in

@@ -6,6 +6,7 @@ pub mod callout;
 pub mod contest_run;
 pub mod dpo;
 pub mod end_dialog;
+pub mod film_run;
 pub mod lots;
 pub mod path_filter;
 pub mod objectives;

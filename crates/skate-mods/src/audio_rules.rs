@@ -77,7 +77,7 @@ pub enum RuleAt {
     Owner,
     /// At the fixed world `position`.
     World,
-    /// Non-positional, centred (the retail non-positional emitter outputs).
+    /// Non-positional, centered (the retail non-positional emitter outputs).
     #[serde(alias = "center")]
     Centre,
 }
@@ -111,7 +111,7 @@ pub struct RulePlay {
     /// Where it plays (default: at the owner).
     #[serde(default)]
     pub at: RuleAt,
-    /// `owner` only: metres added to the owner's position (world axes, y up), −100..100.
+    /// `owner` only: meters added to the owner's position (world axes, y up), −100..100.
     #[serde(default)]
     pub offset: Option<[f32; 3]>,
     /// `owner` only: the axes of `offset` (default `world`; `owner` = the owner's right, up, facing).
@@ -227,7 +227,7 @@ mod tests {
     }
 
     /// Where the rule's sound plays (user decision 2026-10-04): at the owner by default, with an
-    /// offset; a fixed world position; centred; the reach. Each combination is checked.
+    /// offset; a fixed world position; centered; the reach. Each combination is checked.
     #[test]
     fn rule_placement_options_validate() {
         let play = |p: serde_json::Value| -> Rule {

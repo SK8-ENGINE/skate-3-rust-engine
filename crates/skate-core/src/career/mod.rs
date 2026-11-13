@@ -211,7 +211,7 @@ pub struct CareerConfig {
     pub crossbar_gates: Vec<String>,
 }
 
-/// What a career change did; serialisable by the game for logs, saves and multiplayer.
+/// What a career change did; serializable by the game for logs, saves and multiplayer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     /// A challenge's reward paid out: money, board sales and the reward ids to grant.

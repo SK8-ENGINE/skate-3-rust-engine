@@ -56,7 +56,7 @@ fn ctx(p: &TrickProfile, seed: u64) -> TrickContext<'_> {
 
 #[test]
 fn weighted_pick_takes_the_first_entry_below_the_running_sum() {
-    let t = [(1, 1.0), (2, 3.0)]; // normalised 0.25 / 1.0
+    let t = [(1, 1.0), (2, 3.0)]; // normalized 0.25 / 1.0
     assert_eq!(pick_weighted(&t, 0.0), Some(1));
     assert_eq!(pick_weighted(&t, 0.249), Some(1));
     assert_eq!(pick_weighted(&t, 0.25), Some(2), "u < sum is strict");

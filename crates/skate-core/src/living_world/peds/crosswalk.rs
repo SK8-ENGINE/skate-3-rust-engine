@@ -8,7 +8,7 @@ use crate::living_world::traffic::signals::{Light, SignalClock};
 use super::nav::dist_xz;
 use super::wander::WalkSignals;
 
-/// The end points of every signalled junction arm: (junction, end, point on the road middle).
+/// The end points of every signaled junction arm: (junction, end, point on the road middle).
 pub fn signalled_arms(net: &RoadNetwork) -> Vec<(usize, u8, Vec3)> {
     let mut out = Vec::new();
     for (j, junction) in net.junctions.iter().enumerate() {

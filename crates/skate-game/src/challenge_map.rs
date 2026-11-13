@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-/// One Challenge Map teleport (serialisable: a host can send it to peers; multiplayer-ready, no transport here).
+/// One Challenge Map teleport (serializable: a host can send it to peers; multiplayer-ready, no transport here).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct TeleportRequest {
     /// The fe_locations key (`dist_downtown_aletown`).
@@ -150,7 +150,7 @@ mod tests {
         let (_, load) = plan("megapark_full", &[park.clone()], &stadium, Some(&at_stadium), None, &worlds, false).unwrap();
         assert_eq!(load.and_then(|m| m.world), Some("dist_megapark_full".into()), "Empty to Full: reload with the world");
         assert!(plan("megapark_full", &[park], &stadium, Some(&at_stadium), Some("MegaPark_Fullpark"), &worlds, false).unwrap().1.is_none(), "same layout: no load");
-        // The event survives serialisation unchanged (what a host sends a peer).
+        // The event survives serialization unchanged (what a host sends a peer).
         let json = serde_json::to_string(&request).unwrap();
         assert_eq!(serde_json::from_str::<TeleportRequest>(&json).unwrap(), request);
     }

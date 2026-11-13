@@ -309,7 +309,7 @@ struct ViewApplied {
 
 /// The film pack's replay mode on the player and the world (b557, `827F9D40` / `827FEFD0`): "player visible" off hides
 /// the player's root; greenscreen hides everything the map owns and the sky dome (not the lights, so the characters
-/// stay lit) and clears to the greenscreen colour (retail fills (0, 1, 0, 1) before the scene, b558 `827FE8D8`). Put back when the mode changes or the replay closes.
+/// stay lit) and clears to the greenscreen color (retail fills (0, 1, 0, 1) before the scene, b558 `827FE8D8`). Put back when the mode changes or the replay closes.
 fn apply_view(
     replay: Res<Replay>,
     mut state: Local<ViewApplied>,

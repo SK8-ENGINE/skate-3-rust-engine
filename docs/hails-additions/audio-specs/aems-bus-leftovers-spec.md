@@ -1,7 +1,7 @@
 # Bus leftovers: FlangeSub returns, sense_of_speed FXWET0, Splice Send A / Collision SubMix, reverb zones
 
 Written 2026-10-02 (headless reading of the code). Companion to `aems-env-bus-spec.md` (§7 FlangeSub, §6.2 zones) and
-`aems-eqchain-buses-spec.md`, which it completes. Behaviour in our own words from the TU3 (title update 3) lifted code (reference
+`aems-eqchain-buses-spec.md`, which it completes. Behavior in our own words from the TU3 (title update 3) lifted code (reference
 only); addresses are TU3 3.0.3.0. Tags: [R] our reading of the code, [IMG] image constant, [VLT] vault value,
 [TR] checked against a clean recomp trace, UNCERTAIN = not settled. Local analysis scripts
 (`sendb_bank.py`, `senda_bank_fixed.py`, `senda_windows.py`, `voice_windows.py`, `submix_sends.py`). Crate
@@ -21,7 +21,7 @@ its voices), `aems_render` with `AEMS_FLANGE=…`, `voice_load_probe … fx`.
 3. **Splice voices have no Send A** (retail graph `Rsp0 → Gai0 → … → Sen0`, trace `PITCH GAIN SEND6`). The
    "0.0146" was the same attribution artefact. The collision voices' wet path is the per-voice **Collision
    SubMix** (`sub_824D25E0`): mono, env send = Collision output (category) / 32767 posted once at build (≈ 0.1
-   near the camera, retail trace cluster 0.100), then into SFX Master's centre. Implemented (`Route::mono`,
+   near the camera, retail trace cluster 0.100), then into SFX Master's center. Implemented (`Route::mono`,
    `CollisionManager::submix`).
 4. **Reverb zones** (`.ems` attribute type 5): the full `SFXObj_Reverb` state machine with zone fade,
    zone-to-zone and the rotation of the reverb outputs toward the zone. Implemented as
@@ -85,13 +85,13 @@ Totals over all routing records: 0: 211, 256: 3, 512: 160, 2048: 347, 4096: 6, 8
 | 4 | 113F78E17495296F | 0.3 | 0.3 | PI20 LFO rate: period = 1 / v (fdivs, no lower bound) |
 | 8 | 3C0376079AD9A56C | 0.2 | 0.0 | PI20 LFO amount |
 | 12 | 7D3294EC1C443CBD | 0.1 | 1.0 | stored only (PI20 gain?) |
-| 16 | CD44B25FAD9E48D9 | 1500 | 250 | PI20 LFO centre = depth (Hz) |
-| 20 | EDEE41D561FA8CE5 | 0.002 | 0.0005 | Del0 LFO centre = depth (s) |
+| 16 | CD44B25FAD9E48D9 | 1500 | 250 | PI20 LFO center = depth (Hz) |
+| 20 | EDEE41D561FA8CE5 | 0.002 | 0.0005 | Del0 LFO center = depth (s) |
 | 24 | 9C890EC62D3BC5C6 | 0.5 | 0.25 | Del0 LFO rate (period 1 / v) |
 | 28 | D10D7F661896AC30 | 0.9 | 0.6 | Del0 LFO amount |
 | 32 | 9024FC56E2314F9F | 0.03 | 0.11 | stored only (feedback?) |
 
-- LFO records 11 / 13 (Del0 p0) and 12 / 14 (PI20 p0): {period, phase 0, amount, centre, depth = centre}.
+- LFO records 11 / 13 (Del0 p0) and 12 / 14 (PI20 p0): {period, phase 0, amount, center, depth = center}.
   - The "LFO Task" (`aems-env-bus-spec.md` §5) posts them every block: d(t) = d₀ (1 + amount · sin 2πt / period).
   - A: delay 0.2…3.8 ms at 0.5 Hz (10…182 samples). B: 0.2…0.8 ms at 0.25 Hz.
 - **Nothing posts PI20's gain or Q, nor Del0's feedback.** The trace's PEAK lines stay at gain 1.0 / Q 3.0
@@ -112,7 +112,7 @@ Totals over all routing records: 0: 211, 256: 3, 512: 160, 2048: 347, 4096: 6, 8
 - The values go through `sub_8248FFF8`.
 - mgr+124 / +160 (the Pn21 value) and +136 … +144 / +172 … +180 (parameter ids) are never written.
   - Zeroed allocation assumed: Pn21 p0 (azimuth) = 0, D = 1 (class default). The return plays **in the
-    centre**. UNCERTAIN (allocator flags 257 | 0x1000000, not traced).
+    center**. UNCERTAIN (allocator flags 257 | 0x1000000, not traced).
 - Retail processes return A only in bursts (its PEAK lines appear while grinds / skids play). We render a return
   only in blocks where some voice sends into it; its LFO advances every block.
 
@@ -122,7 +122,7 @@ Totals over all routing records: 0: 211, 256: 3, 512: 160, 2048: 347, 4096: 6, 8
   Sen0 64 / 65 ramp. Allocation-free per block.
 - **Identity:** returns disabled → GRINDS and WHEEL_SKID `aems_render` WAVs byte-identical to the baseline; the
   mixer test renders an effect-routed voice identically to a plain one.
-- **Effect:** GRINDS render with the returns: the difference signal is −26.1 dB re the dry (a −26 dB centre
+- **Effect:** GRINDS render with the returns: the difference signal is −26.1 dB re the dry (a −26 dB center
   copy, 0.2–3.8 ms, sweeping). Comb ripple ≈ ±0.4 dB.
 - **Cost:** `voice_load_probe 96 3000` p50 per block, three runs each:
   - baseline 516 / 515 / 516 µs;
@@ -175,8 +175,8 @@ Totals over all routing records: 0: 211, 256: 3, 512: 160, 2048: 347, 4096: 6, 8
   posted (1.0).
 - The Splice voice is started with this Sub0 as its output (`sub_82975700` r6).
   - Its 6-ch final Send sums 6 → 1 (L … Rs, LFE dropped).
-  - The submix's Sen0 into the 6-ch bus is 1 → 6 = **centre**.
-  - So retail collisions are mono in the centre, and a voice panned between two speakers sums its pair (up to
+  - The submix's Sen0 into the 6-ch bus is 1 → 6 = **center**.
+  - So retail collisions are mono in the center, and a voice panned between two speakers sums its pair (up to
     +3 dB at the sides).
 - `sub_82497BF8`: AudioSurfaceMap entry (0..93 by material, else entry 94).
   - +48 (word 12) for tier 0, +64 (16) for tier 2.
@@ -187,7 +187,7 @@ Totals over all routing records: 0: 211, 256: 3, 512: 160, 2048: 347, 4096: 6, 8
   `SEND1 SEND1`.
 
 ### 3.3 Port
-- `Route::mono` (mixer `SIX_TO_MONO_CENTRE`: the final Send adds L…Rs into the bus centre; the existing
+- `Route::mono` (mixer `SIX_TO_MONO_CENTRE`: the final Send adds L…Rs into the bus center; the existing
   owner-env tap gives the env send).
 - `CollisionTuning::{surface_eq, eq_bus, env_output}`.
 - `CollisionManager::submix` (default **off** = SFX Master as before). With it on, `start` sets each voice's
@@ -273,7 +273,7 @@ State:
   - `preset`: the attribute's RefSpec `99FD793BC30CF0FA` collection key (class `204CAC1FD77088B8`; the only
     type-5 record on the disc, `1F94F2F815C00368`, 37 nodes in the sfx files, points at
     `BEEFC8E3DE04FBAE`; its parent `ECADC64E974CF9A1` holds reverb01);
-  - `d`: normalised distance after the inner core (`ems-emitters-re.md`: sphere / ellipsoid, active while
+  - `d`: normalized distance after the inner core (`ems-emitters-re.md`: sphere / ellipsoid, active while
     d < 1);
   - `position` [x, z];
   - `enabled` = vfunc92 `sub_824A2438`: the attribute's `99FD793BC30CF0FA` key is in the image table `0x8302E298` (the 24
@@ -310,23 +310,23 @@ State:
 - **Defaults** (returns disabled, `submix = false`, `request` / `frame` kept): every scenario bit-identical to
   the baseline.
 - **Flange on:**
-  - rail / ledge grind scenarios gain a centre-channel −26 dB (re the grind voices' dry level) flanged copy,
+  - rail / ledge grind scenarios gain a center-channel −26 dB (re the grind voices' dry level) flanged copy,
     plus its env send (0.0706 × that);
   - power-slide / skid scenarios −25 dB;
   - rolling, ollie, manual, bail: unchanged (no effect records). Folded level change < 0.1 dB RMS, comb ripple
     ±0.4 dB.
 - **Submix on:**
   - every collision one-shot (grind-start rail hits, deck impacts, landings on landing-flag surfaces) moves
-    to the centre;
+    to the center;
   - level +0 … +3 dB depending on its azimuth (the e2e camera sits behind the skater, so most are near the
-    centre: small);
+    center: small);
   - a new reverb tail at ≈ −20 dB (Collision outputs 2–11 / 32767) into the env network.
 - **scale_frame with in5 = 0:** wet path −0.01 dB everywhere. With in5 = 32767: −4 dB (wrong, see §5.2).
 - **update instead of request / frame:** with no map (reverb01) identical. With a region preset ≠ reverb01 the
   start fades in over 1 s instead of applying at once, and fades start one frame later.
 
 ## 7. UNCERTAIN
-1. FlangeSub Pn21 azimuth (mgr+124 / +160 never written; zeroed allocation → 0 = centre).
+1. FlangeSub Pn21 azimuth (mgr+124 / +160 never written; zeroed allocation → 0 = center).
 2. The three unread FlangeSub record fields (+0, +12, +32: Q / gain / feedback by their values; no code posts
    them).
 3. When retail processes a return. Evidence: A's modules log only in bursts. Ours: blocks with a sending voice;

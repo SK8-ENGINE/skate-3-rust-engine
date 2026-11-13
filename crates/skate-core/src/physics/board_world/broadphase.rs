@@ -102,7 +102,7 @@ pub(super) fn primitive_bounds(primitive: ContactPrimitive) -> Option<Bounds> {
             if !radius.is_finite() {
                 return None;
             }
-            // 82AD97A0: centre +- fma(|axis|, half length +68, radius +80).
+            // 82AD97A0: center +- fma(|axis|, half length +68, radius +80).
             let extent = |a: f32| a.abs().mul_add(half_length, radius.abs());
             let e = Vector3::new(extent(axis.x), extent(axis.y), extent(axis.z));
             return Bounds::from_points([
@@ -176,7 +176,7 @@ pub(super) fn conservative_bounds(bounds: Bounds, padding: f32) -> Bounds {
 
 /// Data 0x820849C8: the fixed 1/60 step the world query predicts over.
 pub const VOLUME_QUERY_STEP: f32 = f32::from_bits(0x3C88_8889);
-/// Data 0x821659FC: scale applied to the swept box about its centre.
+/// Data 0x821659FC: scale applied to the swept box about its center.
 pub const VOLUME_QUERY_SCALE: f32 = 1.05;
 
 /// Body motion the per-volume query box sweeps over (body +32, +48, +144, +160).
@@ -225,7 +225,7 @@ fn motion_step(rate: Vector3, acceleration: Vector3, dt: f32) -> Vector3 {
 /// triangle 82ADDC40, box 82AD9558: shape plus radius/fatness +80 only, no
 /// +112 padding, no separation term), padded by the largest extent
 /// difference times min(|angular step|, 1), unioned with itself moved by the
-/// linear step, then scaled about its centre.
+/// linear step, then scaled about its center.
 pub fn volume_query_bounds(
     primitive: ContactPrimitive,
     motion: VolumeMotion,

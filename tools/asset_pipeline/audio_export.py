@@ -1623,7 +1623,7 @@ def _convert(game_root: Path, private: Path, work: Path, vgmstream: Path, report
         (output/'banks'/f'{stem}.pack').write_bytes(pack)
         for sample, at in zip(samples, ranges):
             sample['pack'] = list(at)
-        # Retail's own layering/randomisation per sound (audio_formats.splc_patches).
+        # Retail's own layering/randomization per sound (audio_formats.splc_patches).
         return stem, samples, splc_patches(data) if data[:4] == b'SPLC' else None
     manifest['bank_packs'] = {}
     for stem, samples, patches in _in_order(decode_bank, order):

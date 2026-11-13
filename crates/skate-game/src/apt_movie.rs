@@ -349,7 +349,7 @@ impl Movie {
         }
         out.filter(|o| o.iter().all(|v| v.is_finite()))
     }
-    /// TextField.setTextFormat / setNewTextFormat: the format's colour becomes the field's text colour; on a field
+    /// TextField.setTextFormat / setNewTextFormat: the format's color becomes the field's text color; on a field
     /// made by createTextField its font, size and alignment replace the field's own (authored fields keep theirs).
     /// NOT RETAIL YET: standard AS2 semantics, whole field.
     pub fn set_text_format(&mut self, vm: &mut Vm, id: usize, format: usize) -> Result<(), String> {
@@ -373,7 +373,7 @@ impl Movie {
             if let Value::Number(size) = size {
                 text["font_height"] = size.into();
             }
-            // 82CA23B4: 1 right, 2 / 3 centred, else left.
+            // 82CA23B4: 1 right, 2 / 3 centered, else left.
             match align.as_str() {
                 "center" => text["alignment"] = 2.into(),
                 "right" => text["alignment"] = 1.into(),
@@ -402,7 +402,7 @@ impl Movie {
         let height = text["font_height"].as_f64().ok_or("Invalid text size")? as f32;
         let width = font.width(&value, height);
         vm.set(id, "textWidth", Value::Number(width as f64))?;
-        // NOT RETAIL YET: one line of the font size (button_menu centres its labels with textHeight); multi-line
+        // NOT RETAIL YET: one line of the font size (button_menu centers its labels with textHeight); multi-line
         // measurement is not decoded.
         vm.set(id, "textHeight", Value::Number(height as f64))?;
         let bounds = character.bounds.ok_or("Missing text bounds")?;
@@ -415,7 +415,7 @@ impl Movie {
             value.split('\n').count().max(1)
         };
         vm.set(id, "maxscroll", Value::Number(lines as f64))?;
-        // The field's authored height (core_menu centres its DLC label with `_height`).
+        // The field's authored height (core_menu centers its DLC label with `_height`).
         // NOT RETAIL YET: retail's autosize height (line height vs field) is not decoded; single-line labels
         // keep the field height here.
         vm.set(id, "_height", Value::Number((bounds[3] - bounds[1]) as f64))?;
@@ -890,7 +890,7 @@ impl Movie {
             "gotoAndPlay" | "gotoAndStop" => {
                 let c = &self.characters[&self.instances[&id].character];
                 let frame = match args.first().ok_or("APT goto requires frame")? {
-                    // An unknown label leaves the clip where it is (Flash behaviour; retail not traced), so a
+                    // An unknown label leaves the clip where it is (Flash behavior; retail not traced), so a
                     // menu item with an icon name the movie lacks does not stop the whole movie. Labels match
                     // without case, as AS2's do: hudcountdown's GO is `gotoAndStop(FELanguage.GetLanguage())`
                     // ("english") on the label "English".

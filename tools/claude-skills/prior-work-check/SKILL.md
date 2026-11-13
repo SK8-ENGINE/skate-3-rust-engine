@@ -31,14 +31,14 @@ Read every hit's title; for anything related, read the PR description, the file 
 - Other forks of upstream: `gh api repos/SK8-ENGINE/skate-3-rust-engine/forks --paginate --jq '.[] |
   "\(.full_name) \(.pushed_at)"'`; check recently pushed ones for matching branches
   (`gh api repos/<fork>/branches --jq '.[].name'`).
-- Sibling projects: `mchughalex/skate3recomp` (static recompilation; check its licence before reusing anything:
-  without a licence it is read/run only, never copy code; see skill `recomp-audio-trace`).
+- Sibling projects: `mchughalex/skate3recomp` (static recompilation; check its license before reusing anything:
+  without a license it is read/run only, never copy code; see skill `recomp-audio-trace`).
   `gh search repos "skate 3" --limit 30`, `gh search code "<format magic or identifier>"` (for example `SPLC`,
   `ABKC`, `MOIR` for EA audio).
 - Related EA projects for any subsystem (render, physics, AI / navigation, streaming, audio): the Need for Speed:
   Most Wanted decompilation (CC0, byte-matching) and the Burnout decompilation work (b5-decomp, BP-Decomp workflow
   with DWARF outlines), plus the debug symbols that shipped with Need for Speed ProStreet (Xbox 360): same-era EA
-  engine code with names, useful to recognise shared library functions in Skate 3. Reference only.
+  engine code with names, useful to recognize shared library functions in Skate 3. Reference only.
 - Design reference for multiplayer, mod tooling and a park editor: `Dingo-Shenanigans/ReSkate` (skate. 2025,
   GPL-3.0; ideas only, not code).
 - To read retail code, see skills `recomp-research` (the recomp's generated code) and `ghidra` (pseudocode).
@@ -46,7 +46,7 @@ Read every hit's title; for anything related, read the PR description, the file 
 
 ## 4. Report before starting
 Report briefly: what exists (link, state, author, date), how complete it looks, what can be reused or learned
-(licence permitting: upstream code is under the project's own licence; repos without a licence are reference-only),
+(license permitting: upstream code is under the project's own license; repos without a license are reference-only),
 and whether starting fresh, building on it, or reviewing/testing it is the better move. If a substantial existing
 PR covers the work, let the person you work for decide.
 

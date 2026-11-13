@@ -41,7 +41,7 @@
 //! - **SFXObj_Wheels** (key `…820`): the spin-down streams on layers 0 (air) / 1 (balance); 18
 //!   starts in ~74 s held. Layer 2 (on foot) and the owner-bus send written after a start are
 //!   local only (`[[obj+16]+72]`), which [`crate::player::wheels`] already follows (`s.local`;
-//!   the send is not modelled for anyone). [`NpcSkater::update_wheels`].
+//!   the send is not modeled for anyone). [`NpcSkater::update_wheels`].
 //! - **Clothing** (key `…860`): the push / plant foley and the body slide / cloth falls posts;
 //!   its non-local start block (float `+112` = 0, the eq-chain create flag = local72) is
 //!   [`crate::player::clothing`]'s own `s.local` branch.

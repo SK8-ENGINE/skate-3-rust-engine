@@ -10,7 +10,7 @@ pub struct JitterParams {
     pub enabled: bool,
     /// Field `0xE7D491E2EB228F54`: the controller input id.
     pub id: usize,
-    /// Field `0xB66AAD957873A8B3`: centre, range, largest and smallest velocity step.
+    /// Field `0xB66AAD957873A8B3`: center, range, largest and smallest velocity step.
     pub centre: f32,
     pub range: f32,
     pub max_step: f32,

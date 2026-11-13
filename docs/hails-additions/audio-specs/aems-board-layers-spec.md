@@ -176,7 +176,7 @@ trigger: the first rattle's peak equals the later ones (asserted).
   `Rolling::process`'s `GrainEvent`s (two trucks, hand-over, never stopping the local player's last sounding truck;
   the MixMap mutes it on grinds / in the air), and its SkateBoard input 0 / 6 writes taken from `Routed`.
 
-## 9. UNCERTAIN / not modelled
+## 9. UNCERTAIN / not modeled
 
 - `sub_824B23C8` for non-local players (a lookup, not `+684`).
 - The loose-board vectors and `[rec+24]+3475` (§4); our engine publishes none of it yet.
@@ -200,6 +200,6 @@ Session `state_20261002_203746` (+ stderr log), headless analysis:
 - Retail facts checked for the other owners: retail's state `+208` keeps the riding speed in the air and fluctuates
   ±5 km/h (GREC 180430, owner 40C33020, 96 takeoffs), so SenseOfSpeed's rattle (level(1) not wheel-gated: 832 at
   31 km/h both on the ground and in the air) toggling around 30 km/h in jumps (11 posts in this 38 s session) is retail
-  behaviour, not a bug. Retail's wheel material is 143 on 96 % of air frames (37938 / 39685), so routing surface 3
+  behavior, not a bug. Retail's wheel material is 143 on 96 % of air frames (37938 / 39685), so routing surface 3
   (asphalt_smooth) in the air and the grain bed's "bind asphalt_smooth_hard (surface tag 0)" at landings is retail-like;
   the bed is muted there by level(1) = 0 (the grain bed's part).

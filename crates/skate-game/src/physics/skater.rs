@@ -172,7 +172,7 @@ pub(crate) static PLACED_ON_FOOT: std::sync::atomic::AtomicBool = std::sync::ato
 
 impl SkaterRuntime {
     /// A pooled body becoming a new NPC: retail builds a new actor and PhysicalPlayer per NPC (`82590DC0` ->
-    /// `82DB18A0`, b295). Re-runs the load-time initialisers of the per-actor parts the placement does not route
+    /// `82DB18A0`, b295). Re-runs the load-time initializers of the per-actor parts the placement does not route
     /// through the state machine (b299); the placement's ResetSystems port and state Exit / Enter do the rest.
     pub(crate) fn reset_for_new_actor(&mut self, data: &Collections) -> Result<(), String> {
         self.player_input.reset_for_new_actor(data)?;

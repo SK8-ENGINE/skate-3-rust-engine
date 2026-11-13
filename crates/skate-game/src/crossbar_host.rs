@@ -407,7 +407,7 @@ impl crate::apt_stage::StageNatives for FrontEnd<'_> {
     }
 }
 
-/// `Game` natives with a fixed answer. `IsDemo`: false, not the demo build (the replay editor movies grey out and never
+/// `Game` natives with a fixed answer. `IsDemo`: false, not the demo build (the replay editor movies gray out and never
 /// highlight the Advanced Camera rows when it is true; unanswered, their `== false` check failed and rows 4..6 lost
 /// the highlight: laptop 2026-10-25, USER-ASKS 339, research b591). Retail's other demo flags are constant false too
 /// (`coremenu.GetIsDemo`, stub 825B3C80).
@@ -474,7 +474,7 @@ mod tests {
         assert_eq!(m.call(&mut vm, "GetMaxSubOptions", &[]), Ok(num(6.0)));
         assert_eq!(m.call(&mut vm, "GetCurrentMenuLevel", &[]), Ok(num(1.0)));
         assert_eq!(m.call(&mut vm, "GetCurrentModeTitle", &[]), Ok(Value::Text("ID_CROSSBAR_FREEPLAY".into())));
-        // Greyed until a handler enables it (the registry's "greyed until built" rule).
+        // Grayed until a handler enables it (the registry's "grayed until built" rule).
         assert_eq!(m.call(&mut vm, "IsItemEnabled", &[num(0.0), num(0.0)]), Ok(Value::Bool(false)));
         let Ok(Value::Object(p)) = m.call(&mut vm, "GetProgressionData", &[]) else { panic!() };
         assert_eq!((vm.get(p, "0"), vm.get(p, "length")), (num(-1.0), num(6.0)));

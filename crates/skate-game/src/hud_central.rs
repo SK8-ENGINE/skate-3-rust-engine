@@ -6,7 +6,7 @@ use crate::{
 };
 use bevy::prelude::*;
 
-/// Show one centre-screen line: a language id of the HUD movie (`ID_CHASE_TAZER_1`) or plain text. Retail's
+/// Show one center-screen line: a language id of the HUD movie (`ID_CHASE_TAZER_1`) or plain text. Retail's
 /// defaults: style 0 (off-white), audio hook 0 (the default central message sound), shown for
 /// [`DISPLAY_SECONDS`] (`seconds` overrides it, a mod's choice).
 #[derive(Message, Clone, Debug, PartialEq)]
@@ -34,7 +34,7 @@ impl CentralMessage {
 /// (`0xB4`), i.e. 6 s at the console's 30 updates a second; time-based here, so any frame rate gives the same.
 pub(crate) const DISPLAY_SECONDS: f32 = 180.0 / 30.0;
 
-/// `ScreenManager` colours the movie reads (`source/helper/screenmanager`: `mColour_OffWhite` 0xFFFDEC,
+/// `ScreenManager` colors the movie reads (`source/helper/screenmanager`: `mColour_OffWhite` 0xFFFDEC,
 /// `mColour_Red` 9904651); that movie runs on the front-end stage, not here.
 pub(crate) const SCREEN_MANAGER_COLOURS: [(&str, f64); 2] = [("mColour_OffWhite", 16776940.0), ("mColour_Red", 9904651.0)];
 
@@ -192,7 +192,7 @@ impl Runtime {
         Ok(())
     }
 
-    /// Retail `82663F38` then the screen event 4 (`SetState(4)`). Retail stores the formatted, localised text
+    /// Retail `82663F38` then the screen event 4 (`SetState(4)`). Retail stores the formatted, localized text
     /// (the id is looked up, `8290C8A8`), so a language id the movie knows goes in as its text ("ZAP!"); anything
     /// else as written. It restarts the timer.
     /// The modified slot: retail 826640F0 then the screen event 10 (its own timer; 11 hides it).
@@ -276,7 +276,7 @@ mod tests {
         let mut hud = Runtime::load(&json, &["central_message_default".to_owned()]).unwrap();
         assert_eq!(hud.bindings.movie.text_assets.localize("ID_CHASE_TAZER_1"), "ZAP!");
         hud.show(&CentralMessage::new("ID_CHASE_TAZER_1")).unwrap();
-        // ShowMessage wrote the localised text into the message clip's label (mcText2.mcTextStringWhite.labelText.text).
+        // ShowMessage wrote the localized text into the message clip's label (mcText2.mcTextStringWhite.labelText.text).
         let zap = Value::Text("ZAP!".into());
         assert!(hud.vm.objects.iter().any(|o| o.fields.get("text") == Some(&zap)), "label text set");
         assert_eq!(hud.bindings.sounds, ["central_message_default"], "kAUDIOHOOK_DEFAULT is 0");

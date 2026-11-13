@@ -6,9 +6,9 @@
 //!
 //! Each frame, per channel: one draw r of the title generator; s = r mod 2001 − 1000;
 //! d = (max − min)·(s·0.001); the step is d pushed away from zero by `min`; velocity += step,
-//! clamped to ±max; value += velocity, reflected off centre ± range (the velocity flips), then
+//! clamped to ±max; value += velocity, reflected off center ± range (the velocity flips), then
 //! clamped there. Enabled channels write clamp(trunc(clamp(value, 0, 32767)), 0, 32767) to their
-//! input id. Every channel starts at its centre with zero velocity.
+//! input id. Every channel starts at its center with zero velocity.
 //!
 //! Retail draws from the title-wide generator (shared with ~100 call sites, seeded with the time
 //! base), so sequences are not reproducible; we use our own instance of the same add-with-carry

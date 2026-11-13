@@ -197,7 +197,7 @@ Per sound (`aud_emitter` record):
 - **Lookup:**
   - 128 m tiles (`sub_82C0EFA0`), each with 19 layer slots matched by `name_id(layer name)`:
     7 audio_ambience, 8 audio_emitters, 10 audio_reverb, plus districts, fog, sky, bloom, etc.
-  - Each slot is a quadtree (`sub_82C0F0B0`): header centre (x, z) +0, half-size +16, node count +32,
+  - Each slot is a quadtree (`sub_82C0F0B0`): header center (x, z) +0, half-size +16, node count +32,
     node offset +36.
   - Nodes are 10 bytes: four u16 children and a u16 value. child[0] 0xFFFF = leaf; value 0xFFFF = no key.
   - Children are tested in order −x−z, −x+z, +x−z, +x+z, with inclusive edges.
@@ -328,7 +328,7 @@ in 30 s (not 24). Details: `aems-evaluator-spec.md`.
 
 ## Zone bed level: −11 dB base VERIFIED (2026-10-02)
 `check_bed_level.py` compared retail capture levels (1 s RMS percentiles, long-run stops) with the bed's
-5-channel stream × zone volume folded like the capture (host fold 0.4·(front + surround + 0.5·centre)).
+5-channel stream × zone volume folded like the capture (host fold 0.4·(front + surround + 0.5·center)).
 - Medians, retail vs predicted with −11 dB: dt_open −42.1 / −42.1; dt_main −39.2 / −38.7;
   dt_rez −44.2 / −43.6; indu_quarry −47.7 / −47.8. Without the base, every prediction is 11 dB too loud.
 - The stream channel order L R C Ls Rs fits slightly better than L C R Ls Rs (0.3 dB). Unverified.

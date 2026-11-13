@@ -1,5 +1,5 @@
 //! Where the window opens and how big it is, and one launcher per folder (doc 44a 2, SkateLauncher.cs StartScreen /
-//! Main): 62 % of the work area's height at the panel's 1240 x 760 shape, centred, on the main monitor or (Tools >
+//! Main): 62 % of the work area's height at the panel's 1240 x 760 shape, centered, on the main monitor or (Tools >
 //! Open on, or `--same-monitor`) on the monitor of the window it was started from.
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ pub fn fit(w: f32, h: f32) -> (f32, f32) {
     ((height * 1240.0 / 760.0).floor(), height)
 }
 
-/// The chosen monitor's work area in points (x, y, w, h). Windows only; elsewhere the window centres itself and sizes
+/// The chosen monitor's work area in points (x, y, w, h). Windows only; elsewhere the window centers itself and sizes
 /// from the monitor on its first frame.
 #[cfg(windows)]
 #[allow(unsafe_code)]

@@ -83,7 +83,7 @@ impl Treatment {
         w[15] = t.levels[0].clamp(0, 32767);
         w[16] = t.levels[1].clamp(0, 32767);
         w[17] = t.levels[2].clamp(0, 32767);
-        w[18] = 0; // bool class 0x11A631878B239355 through sub_82484460 (global setting, not modelled)
+        w[18] = 0; // bool class 0x11A631878B239355 through sub_82484460 (global setting, not modeled)
         w[19] = i32::from(s.local); // local && [[owner+28]+64] == 0
         w[20] = i32::from(s.local);
         w[21] = 8;

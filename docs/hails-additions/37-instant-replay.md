@@ -23,7 +23,7 @@ when the replay opened, so a replay of a line past a crowd shows a still picture
 - `crates/skate-core/src/replay_buffer.rs` (new, engine independent): one key track per actor, keyed by a stable u64
   id. A key holds the root transform (f32 translation and scale, i16 quaternion) and every joint's local rotation as
   retail's 4 x i16 quaternion; joint translations are stored only where they left the actor's rest translation, scale
-  only when not 1. A key is written only when the quantised pose changed (a resting prop costs one key for the whole
+  only when not 1. A key is written only when the quantized pose changed (a resting prop costs one key for the whole
   window); after a hold the held pose is repeated at the previous frame so playback holds instead of blending across
   the gap. Playback blends translation / scale linearly and rotations with nlerp, like retail's decoder.
 - Limits are data (`ReplayLimits`): `max_frames` defaults to retail's 5400. `byte_budget` defaults to 128 MiB (OURS):
@@ -51,7 +51,7 @@ when the replay opened, so a replay of a line past a crowd shows a still picture
     (time, label, owner). `snapshot.replay` stays the old boolean.
   - Still to come: a mod-side provider (record per-frame mod values, read them back during playback).
 - Ids are the stable network ids (`LivingWorldId::to_u64`, prop instance ids), keys are plain bytes with counts, so
-  a recording is serialisable. Replay stays refused in multiplayer for now (unchanged).
+  a recording is serializable. Replay stays refused in multiplayer for now (unchanged).
 
 ### Files
 `crates/skate-core/src/replay_buffer.rs`, `crates/skate-core/src/replay_buffer/tests.rs`, `crates/skate-core/src/lib.rs`,
@@ -60,7 +60,7 @@ when the replay opened, so a replay of a line past a crowd shows a still picture
 accessors in `animation.rs`, `living_world/npc_skaters.rs`, `living_world/peds.rs`, `living_world/vehicles.rs`.
 
 ### Verification
-- skate-core: 7 tests (quantise round trip within 2e-4 rad, keys only on change and holds across gaps, hidden before
+- skate-core: 7 tests (quantize round trip within 2e-4 rad, keys only on change and holds across gaps, hidden before
   spawn and after despawn, nlerp midpoint, eviction at the frame cap keeping the key that holds at the window start,
   eviction by bytes with exact byte accounting, clock reset clears).
 - skate-mods: the replay commands parse and validate (bounds refused), the Lua functions submit them, the capability
@@ -132,13 +132,13 @@ Test: the leash keeps a camera inside 40 m and pulls a far one onto the sphere.
   pack's screen, B goes straight to the quit warning and X on the timeline opens its menu (in its effects menu X still
   commits a soft key): Save to PC (with the Save Replay? confirm), Take Photo (the same flow as the base X), Replay
   Mode, Reset Timeline Current Channel, Reset Timeline. Replay Mode is a popup of three toggles that stays up
-  (`82615728`): greenscreen (only characters drawn over a flat colour: everything the map owns hides except its
-  lights, the clear colour turns green; retail fills the screen with the constant (0, 1, 0, 1) before the scene while greenscreen is on [code 827FE8D8, b558; the +0x7DF0 read in b557 is a screen fade colour], so the default matches retail and stays data; the retail sky dome hides with the world, and the visual indicators (teleporter icons) hide too, as retail skips their draw [code 827FF7D0 -> 827AFC80, b559]),
+  (`82615728`): greenscreen (only characters drawn over a flat color: everything the map owns hides except its
+  lights, the clear color turns green; retail fills the screen with the constant (0, 1, 0, 1) before the scene while greenscreen is on [code 827FE8D8, b558; the +0x7DF0 read in b557 is a screen fade color], so the default matches retail and stays data; the retail sky dome hides with the world, and the visual indicators (teleporter icons) hide too, as retail skips their draw [code 827FF7D0 -> 827AFC80, b559]),
   player visible (the player's root), skaters visible (NPC skaters and peds; cars and props hide only under
   greenscreen). They are local view state (`Replay::view`) and go back to the defaults when the replay closes
   (`82610828`). The resets (`82C7F728`) ask No / Yes (No reopens the menu) and clear every key of the current channel
   or of all channels (the camera channel: back to the recorded camera); playhead, channel and clip heads stay.
-- **Not yet:** Upload (no service); a Lua hook for the replay mode flags; retail's greenscreen colour value and its
+- **Not yet:** Upload (no service); a Lua hook for the replay mode flags; retail's greenscreen color value and its
   other render switches (fog / light blends, one full-screen pass) beyond hiding the world.
 - **Tests:** `the_finished_menu_offers_save_to_pc_and_exit` (trim ignores B, the Save confirm), `camera_keys_hold_cut_and_blend`
   (Game key), `the_film_pack_finished_menu_works_as_retail`, `replay_mode_flags_pick_what_draws`,
@@ -217,7 +217,7 @@ camera (C) uses the same constraint.
 
 Cause, highlight [code, research b591]: the editor movies (`replay_editor2` `UpdateEffectsSelection`, and
 `replay_editor3` in camera mode) select the AdvFollow / AdvTripod / AdvFree clips only when `Game.IsDemo() == false`
-(true greys them out). We did not answer `Game.IsDemo`, so the check failed and rows 4..6 showed no highlight. Our row
+(true grays them out). We did not answer `Game.IsDemo`, so the check failed and rows 4..6 showed no highlight. Our row
 indices and states were already right (one flat list of 9: Follow, Tripod, Game, Free, AdvFollow, AdvTripod, AdvFree,
 Speed, Shake). Change: `crossbar_host.rs` `game_constant`: `Game.IsDemo` = false (retail's other demo flags are
 constant false too).
@@ -285,7 +285,7 @@ retail):
   stage (old installs, `SKATE3_RETAIL_MENUS=0`) B / Back leave at once. OURS, a safety until play-tested: Back again
   while the warning is up leaves at once. Fix 2026-10-20 (desktop session: "the close confirmation dialog [is] closed
   instantly"; log: popup 0 shown at 14:32:45.341, choice -1 at .389): the B press that asked for the warning reached
-  the popup the next frame and cancelled it. The warning now opens when B / Back is released.
+  the popup the next frame and canceled it. The warning now opens when B / Back is released.
 - **RB** plays / stops (was A); stick or D-pad input resumes a stopped replay (`82C7FFB8`).
 - **D-pad Left / Right** jump to the start / end (was a one-frame step; the frame step stays for the editor).
 - **A** (retail: open the full editor) and **Y** (retail: cycle the edit channel, film DLC only) do nothing until
@@ -322,7 +322,7 @@ effect values and stepped marker lanes, and retail's length rules. Pure data, no
   refuses at 100 with "no more markers", `82613500`, research b381). A marker within 0.0089 of the clip span from
   an existing one is "at the cursor" (setting a value edits that marker), and no marker goes within 0.0089 of the
   clip's in / out points (`825084C8`, constants 0x822428EC and 0.9911 at 0x822F8F74; research b382; that the
-  normalised unit is the clip span is inferred).
+  normalized unit is the clip span is inferred).
 - Data: `EditLimits` and `LaneSpec` hold every number; lanes have stable string ids (`speed`, `tint_r`, ...) for mod
   records and saved edits. A mod may allow speeds over 100 % (ours, not retail).
 - Tests: 6 (open threshold, stepping / clamping / wrapping, stepped markers, marker cap, marker spacing, encoded
@@ -438,7 +438,7 @@ Retail [trace]: recomp hooks in `hooks_replay.cpp` (category `replay`: `RCAMN` c
 (local). At the commit the raw recorded camera (game axes, y up) had row 1 = (-0.135, 0.991,
 -0.007), pitched about 7.8 degrees, while the Follow eye frame (space 0, object 2) came back as rows (0.039, 0.999, 0),
 (-0.999, 0.039, 0), (0, 0, 1) at the camera's position: the camera's side axis (row 0) with its vertical part removed
-and renormalised, up = world up. That is the upright form b605 read in `828F36B0` (+0x194). `82C84CF8` / `82C82A50`
+and renormalized, up = world up. That is the upright form b605 read in `828F36B0` (+0x194). `82C84CF8` / `82C82A50`
 run only on edit events (editor open, commit, exit); `82672118` runs only while the replay is open. The camera-system
 path `828F1C90` -> `828F2C38` b606 named did not run at all, in plain replay or in the Follow edit (hook `CAMSYSN`, 0
 calls in runs 1 to 4).
@@ -555,17 +555,17 @@ table is data a mod can replace. Not wired to the game yet: our current replay c
 FE 12 host lands (retail differences listed in the plan: Back opens only, B opens Finished, D-pad jumps, 150-frame
 minimum). Test: retail's mode transitions.
 
-## M3 step 1: the look lanes as a colour matrix override (skate-core)
+## M3 step 1: the look lanes as a color matrix override (skate-core)
 
 `ReplayEdit::look_at(clip, frame, base)` turns a clip's look lanes into what the screen uses: the world grade's
-colour matrix record with the lanes' terms replaced, plus an RGBA tint overlay. Retail (research b380): the lane
+color matrix record with the lanes' terms replaced, plus an RGBA tint overlay. Retail (research b380): the lane
 consumers (`82686DF0` brightness, `82687FD8` contrast, `826888B8` saturation) write an override copy of the world
-colour block that the post FX update uses instead of the base while set (verified `82686DF0` stores the near and
+color block that the post FX update uses instead of the base while set (verified `82686DF0` stores the near and
 far add terms at +0x7C00 / +0x7C40); brightness is the matrix add term on R, G, B; the values replace, never
 multiply; lane 6 is a separate RGBA screen tint. Our `colour_matrix::build` takes the same roles as retail's builder
 `827F13D8`, so the override record goes straight into it. A lane at its neutral default keeps the world's term
 (OURS: when retail counts a lane as set is not read), so zombie mode's grade stays under an untouched replay. Not
-wired to the renderer yet (M3 step 2, with the editor UI). Test: untouched lanes keep the grade; greyscale,
+wired to the renderer yet (M3 step 2, with the editor UI). Test: untouched lanes keep the grade; grayscale,
 brightness and contrast replace both bands; a tint marker shows from its frame.
 
 ### Open
@@ -574,7 +574,7 @@ brightness and contrast replace both bands; a tint marker shows from its frame.
 - Retail editor cameras (for M2, research b376 / b377): ICELITE keyed values (eye, look, dutch, lens mm), lens
   10..500 mm, default 24; shake levels 0 / 0.35 / 1.0 / 1.0 for amplitude and frequency (`8250A6E8`); effect lanes
   step at marker times (speed +10 % up to 100 %, shake 0..3, brightness, contrast, saturation, tint).
-- The player is still recorded as full `Mat4` skin rows (about 45 MB at 90 s); moving it into the quantised buffer
+- The player is still recorded as full `Mat4` skin rows (about 45 MB at 90 s); moving it into the quantized buffer
   would cut that to about a fifth.
 
 ## Ghosts sound in playback (2026-10-29, research b670)
@@ -607,7 +607,7 @@ Actors that despawned inside the recorded window (ghosts) were drawn in playback
 
 ### Problem
 The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane kept our own meaning: 100 = x1
-(default), 0 = greyscale. Retail's look defaults had not been read.
+(default), 0 = grayscale. Retail's look defaults had not been read.
 
 ### Retail [code, verified]
 - The editor starts brightness and saturation at 0 and speed at 100 (`82506CD8`: editor +0x1A0, +0x1A4, +0x19C);
@@ -616,7 +616,7 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
   SATURATE_FAR (0x3F) into `+0x7C50`, which the builder never reads.
 - `827F3D20` calls the band builder `827F13D8` for both bands with saturation = slot 4 + 1.0 (`0x8231A844`); the
   builder's third argument is the saturation ((1 - s) times the luma weights).
-- So lane value v (x 0.01, b379) gives saturation 1 + v / 100: 0 leaves the colours alone, 100 doubles their distance
+- So lane value v (x 0.01, b379) gives saturation 1 + v / 100: 0 leaves the colors alone, 100 doubles their distance
   from luma. Retail's lane cannot desaturate.
 
 ### Change
@@ -758,7 +758,7 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
   `private/hud/replay-shake/replay_shake.json`; the asset check offers "replay camera shake" until a refresh adds it.
 - Engine: `skate_core::replay_edit::shake` (clips, levels as data, `sample`), `Replay::shake` (the shake lane at the
   cursor, timed from the in point), applied in `camera.rs` (camera space). NOT RETAIL YET: retail's gain is
-  `2 x amp x sin(R)` with R a global angle whose writer is not found; ours holds `2 sin(R)` at 1, and normalises the
+  `2 x amp x sin(R)` with R a global angle whose writer is not found; ours holds `2 sin(R)` at 1, and normalizes the
   quaternion.
 - Verified: `off_and_empty_clips_do_nothing_and_keys_step_at_the_clip_rate`, the asset check test, the exporter on the
   owned disc (13 of 14 clips with keys; Jog 119, RunFast 110), the game logs `REPLAY_SHAKE 13 clips`. Not play-tested.
@@ -773,7 +773,7 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
 - Ours: `replay/camera_key.rs` (CameraKey, CameraRules as data, `key_from_view`, `edit`, `pose`, `lens_fov`), one key
   per clip in `replay/editor.rs`, the edit modes in `replay.rs` `editor_controls`, the pose and lens applied in
   `camera.rs` (before the shake), `GetCurrentCameraEditIndex` from the clip's camera, the edit states posted by the
-  host. Rates are normalised to 30 Hz so any fps gives the same motion.
+  host. Rates are normalized to 30 Hz so any fps gives the same motion.
 - One pose per clip is retail for the basic cameras (b404: their setup clears the channel's keys and the sampler
   `82C89A50` holds the value without keys). NOT RETAIL YET: the skater root for retail's objects 2 / 4, the pad mapping
   (left stick turns, right stick distance / move, D-pad up / down height, left / right lens; retail's axis table
@@ -788,14 +788,14 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
 
 ## M2 step 6: the timeline strip (markers on the timeline) (2026-10-20)
 - Retail [code, b403]: the movie's mCustomRender clip has `_type` "CustomTimeline"; the APT custom render dispatcher
-  `825D4828` calls `82509B80`, which draws in the clip's space (x = normalised time x 817) every frame: `82508E08` one
-  untextured band per camera segment from y 3 to the clip height, coloured by the camera type (normal / selected,
+  `825D4828` calls `82509B80`, which draws in the clip's space (x = normalized time x 817) every frame: `82508E08` one
+  untextured band per camera segment from y 3 to the clip height, colored by the camera type (normal / selected,
   alpha 0.65 / 0.85; selected = no key under the playhead, not instant mode), and `82509298` one 13 x 51 quad per key
   after the first with `key_default` / `key_glow` (under the playhead within 0.00889) or `marker_default` /
   `marker_glow` (hard markers); in the camera edit modes the key under the playhead is not drawn.
 - Ours: `apt_scene.rs` emits a `REPLAY_TIMELINE` placeholder with the clip transform; `retail_menu_stage.rs`
   `timeline_draws` expands it from the replay feed (one band for the clip's camera, the markers as keys) with
-  `TimelineLook` (retail's colours, sizes, snap; data). The textures are retail's, already in the menu set.
+  `TimelineLook` (retail's colors, sizes, snap; data). The textures are retail's, already in the menu set.
 - NOT RETAIL YET: the band bottom (clip height 30 assumed), our markers live on the speed lane (retail's keys are camera
   channel keys carrying the values), no hard markers (Advanced cameras), one segment per clip.
 - Verified: `timeline_draws_the_camera_band_and_the_keys`, full bin 850 before the test was added. No screenshot (the
@@ -839,7 +839,7 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
 - First game run (2026-10-20 evening, the user paused gaming): wgpu refused the readback (the scene image had no
   COPY_SRC usage); fixed in `graphics_menu.rs` (a usage flag only, rendering unchanged). Then a 10.5 s replay exported
   in about 9.4 s to a 16 MB .mp4 (1280 x 800, 30 fps, H.264 + AAC). Checked: the encoder test now decodes a frame back
-  (Media Foundation's source reader) and finds a white top half on top (upright, colours right); the game export's first
+  (Media Foundation's source reader) and finds a white top half on top (upright, colors right); the game export's first
   frame decoded to PNG shows the world without UI; its audio decodes to 10.5 s of 48 kHz stereo (quiet ambience, the
   skater standing still). The save dialog itself (B > Save to PC) is not clicked through yet; the user tests it.
 
@@ -870,7 +870,7 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
 - Deleting: see "Deleting keys" below (b407). NOT RETAIL YET: the stick mapping
   (retail's axis table is unread); the look effects (DLC lanes) are not ported.
 - Verified: `camera_keys_hold_cut_and_blend`, the curve test, `follow_orbits_in_the_skater_frame_with_retail_caps`
-  (orbit centre now includes the look height); skate-core 1176 and full bin 855 passed. Verify switches
+  (orbit center now includes the look height); skate-core 1176 and full bin 855 passed. Verify switches
   `SKATE_VERIFY_REPLAY_EDITOR=markers` (two markers, the playhead glows on the second) and `=camera` (Follow picked at
   the playhead, then its edit mode). Not play-tested by the user yet.
 - Look target (b406, 2026-10-20): Follow / Tripod look at the look object's origin plus LOOK_Z straight up; every
@@ -928,10 +928,10 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
 - A committed value also sets its lane's OVERRIDE flag at the key, and the renderer applies a lane only where the flag
   is on [code, research; brightness setter read in full, the others by pattern; the check could not find the
   flag write in the recomp's `sub_82C81750` by a quick search: UNVERIFIED]. Ours counts a lane as set when it differs
-  from its default (`replay_edit.rs` `look_at`, already labelled OURS).
+  from its default (`replay_edit.rs` `look_at`, already labeled OURS).
 - Sampling [code `82C87640` / `82C8E680`, research]: look values are interpolated (linear between soft keys), the flags
   stepped; ours steps every lane (`value_at`).
-- Renderer (b380, re-read): a set lane replaces its term in an override copy of the world colour block, built into the
+- Renderer (b380, re-read): a set lane replaces its term in an override copy of the world color block, built into the
   post FX matrix by `827F3D20` / `827F13D8`; the tint goes to a separate overlay. OPEN: who sets the +0x7E00 gate,
   the far band's extra saturation term, how the tint overlay blends, the DLC row labels.
 - Port rule: explicit per-lane override flag with each commit, linear look values between keys, `look_at` into
@@ -974,7 +974,7 @@ The look lanes were ported in M3 steps 1 and 2 (above), but the saturation lane 
   (`LANGUAGE_Labels_creator_skate3ng-dlc_creator.BIN` + English); the labels table ends with one NUL where the disc's
   end with two (one string short of the parser's count).
 - Tint overlay (b413, 2026-10-20) [code; verified `827FE770`'s counter read at +0x347AC, its blend state call
-  `82CFC990` and the draw `824FA4A0`]: retail draws lane 6 as one constant colour on a full-screen quad, straight alpha
+  `82CFC990` and the draw `824FA4A0`]: retail draws lane 6 as one constant color on a full-screen quad, straight alpha
   (SRC_ALPHA / INV_SRC_ALPHA), after the scene and before the front end's Render2D, so the HUD, menus and the editor
   are never tinted; the setter `82C81AC8` sets TINT_OVERRIDE, the consumer `82688E78` copies R, G, B, A to the overlay
   and clears it when the override is off [code, research]. Ours: the grade gets a ninth row (RGBA, alpha 0 = none) and
@@ -1067,7 +1067,7 @@ Retail (FEReplayMenu host `823011D8`, editor state `DAT_83067084`; research b343
 - Encoded length = round(sum over clips of (end - start) / (speed% x 0.01) / 30 + 0.5) s; sharing needs <= 60 s (`825ADF88`, `cmplwi 60`).
 - Effect values per clip (record +0x50 speed, +0x54.. the look): speed 10..100 % step 10 default 100 (slows only; `82506CD8` stores 100), shake 0..3 wrapping (`8250A6E8`), brightness -100..100 step 20, contrast 10..30 step 2, saturation 0..100 step 10, tint R / G / B / A 0..250 step 25 (`8250AB28`, `8250B218`).
 - Effect lanes (b461 to b466): per lane hard keys (cuts, D-pad Down) and soft keys (A / X commits). Each segment between keys has a start and an end value and ramps linearly on interpolated lanes (speed, the looks); a soft key shares its value with the end of the segment before it. Left / Right only step a live value; a commit writes it (the base game's B: the segment under the playhead; the film pack's A / X: a soft key). A fresh clip has no keys, and a write that adds no key to an empty lane is lost, as in retail.
-- Lane values reach the screen as: brightness = the colour matrix add term, contrast, saturation (near and far bands), each replacing the world block while set; tint = an RGBA screen overlay (b380).
+- Lane values reach the screen as: brightness = the color matrix add term, contrast, saturation (near and far bands), each replacing the world block while set; tint = an RGBA screen overlay (b380).
 
 Every limit is data ([`EditLimits`], [`LaneSpec`]) so a mod can change them (for example allow speeds over 100 %).
 
@@ -1087,7 +1087,7 @@ On a lane without keys a write that adds no key is lost, as in retail, unless [`
 
 ### Clip look
 
-The look at `frame`: the world grade `base` with the clip's set look lanes replacing their terms (retail's consumers `82686DF0` / `82687FD8` / `826888B8` write an override copy of the world colour block, research b380 / b408): brightness = the add term on R, G, B, contrast, saturation, in both bands (retail's far band takes the near saturation). Values ramp between markers. Plus the tint lanes as an RGBA screen overlay (0 alpha = none).
+The look at `frame`: the world grade `base` with the clip's set look lanes replacing their terms (retail's consumers `82686DF0` / `82687FD8` / `826888B8` write an override copy of the world color block, research b380 / b408): brightness = the add term on R, G, B, contrast, saturation, in both bands (retail's far band takes the near saturation). Values ramp between markers. Plus the tint lanes as an RGBA screen overlay (0 alpha = none).
 
 ### Encoded length
 
@@ -1123,7 +1123,7 @@ The replay editor's camera shake (the Pro Edit Menu's Shake row; research b376, 
 
 ### Shake sample
 
-The shake at `t` seconds into the take: (rotation quaternion `[x, y, z, w]`, translation `[x, y, z]`) in camera space, or None when off or the clip is empty. Key position `f = t x freq x key_rate`, keys `i = floor(f) mod n` and `i + 1`; rotation per key `(qx g, qz g, -qy g)` with `w = sqrt(1 - |xyz|)` (retail's double square root, confirmed in the recomp), lerped per component without renormalising; translation `(-pz g, -px g, py g)` from key `i` only (retail reads key `i` twice) [code `82C8AF50`, b399].
+The shake at `t` seconds into the take: (rotation quaternion `[x, y, z, w]`, translation `[x, y, z]`) in camera space, or None when off or the clip is empty. Key position `f = t x freq x key_rate`, keys `i = floor(f) mod n` and `i + 1`; rotation per key `(qx g, qz g, -qy g)` with `w = sqrt(1 - |xyz|)` (retail's double square root, confirmed in the recomp), lerped per component without renormalizing; translation `(-pz g, -px g, py g)` from key `i` only (retail reads key `i` twice) [code `82C8AF50`, b399].
 
 ## Code reference: replay_buffer.rs
 
@@ -1133,7 +1133,7 @@ Detail moved out of the code comments of `crates/skate-core/src/replay_buffer.rs
 
 Instant replay recording of every drawn actor (NPC skaters, peds, cars, props, mod bodies).
 
-Retail records presentation data, never a re-simulation: one tracker frame per sim step (60 / s), at most 5400 frames in a byte ring that evicts the oldest (DataTracker `82726170` / `82DBBAF8`, b345 / b346). Skater poses are LOCAL joint rotations as 4 x i16 quaternions (scale 32767), interpolated per joint between frames with nlerp (b365 to b367, decoder `8278ABE0`). This buffer keeps one track of keys per actor, keyed by a stable u64 id, and writes a key only when the quantised pose changed, so a resting prop costs one key for the whole window.
+Retail records presentation data, never a re-simulation: one tracker frame per sim step (60 / s), at most 5400 frames in a byte ring that evicts the oldest (DataTracker `82726170` / `82DBBAF8`, b345 / b346). Skater poses are LOCAL joint rotations as 4 x i16 quaternions (scale 32767), interpolated per joint between frames with nlerp (b365 to b367, decoder `8278ABE0`). This buffer keeps one track of keys per actor, keyed by a stable u64 id, and writes a key only when the quantized pose changed, so a resting prop costs one key for the whole window.
 
 Engine independent: the caller supplies frame times and poses as plain arrays.
 

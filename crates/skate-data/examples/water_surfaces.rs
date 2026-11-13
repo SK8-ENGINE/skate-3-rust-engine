@@ -83,10 +83,10 @@ fn main() {
             ..Default::default()
         };
         let mut streams = BTreeMap::<String, usize>::new();
-        // Surface IDs of the lowest geometry (harbour/sea beds below y = -1).
+        // Surface IDs of the lowest geometry (harbor/sea beds below y = -1).
         let mut low = BTreeMap::<u16, (usize, f32)>::new();
         let result = skate_data::retail_collision::visit_clusters(&archive.payload, |name, cluster| {
-            // Tile streams are cSim_<x>_<z>_<lod>.xsf; summarise by LOD/kind.
+            // Tile streams are cSim_<x>_<z>_<lod>.xsf; summarize by LOD/kind.
             let stream = name.split('#').next().unwrap_or(name);
             let kind = stream
                 .split('_')
@@ -382,7 +382,7 @@ pub fn model_materials(map: &skate_data::skate_map::SkateMap, model: &str) {
     }
 }
 
-/// `TEXTURES=id,id,...`: size, colour space and mean RGBA of 1-based texture ids.
+/// `TEXTURES=id,id,...`: size, color space and mean RGBA of 1-based texture ids.
 pub fn texture_stats(map: &skate_data::skate_map::SkateMap, ids: &[usize]) {
     for &id in ids {
         let Some(t) = id.checked_sub(1).and_then(|i| map.textures.get(i)) else {

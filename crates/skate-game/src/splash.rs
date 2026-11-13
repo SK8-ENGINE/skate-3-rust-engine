@@ -13,9 +13,15 @@ struct Text {
     started: Option<Instant>,
     /// A warning that stays until the splash closes (out-of-date game files), drawn under the status line.
     warning: String,
+    /// An asset refresh is running (design b172): the groups being rebuilt, the known fraction, setup's error.
+    refresh: Option<String>,
+    progress: Option<f32>,
+    error: String,
 }
 
-static TEXT: Mutex<Text> = Mutex::new(Text { stage: String::new(), detail: String::new(), history: Vec::new(), started: None, warning: String::new() });
+static TEXT: Mutex<Text> = Mutex::new(Text { stage: String::new(), detail: String::new(), history: Vec::new(), started: None, warning: String::new(), refresh: None, progress: None, error: String::new() });
+/// The Cancel button was clicked during a refresh (setup stops, the game starts on the current files).
+static CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The splash window (0 = none, or closed).
 static WINDOW: AtomicIsize = AtomicIsize::new(0);
 const HISTORY_LINES: usize = 4;
@@ -56,6 +62,44 @@ pub(crate) fn warning(text: String) {
     if let Ok(mut t) = TEXT.lock() {
         t.warning = text;
     }
+}
+
+/// An asset refresh shows on the splash: title "UPDATING GAME FILES", the groups under it and a Cancel button.
+pub(crate) fn refresh_mode(groups: &[String]) {
+    CANCEL.store(false, Ordering::Relaxed);
+    if let Ok(mut t) = TEXT.lock() {
+        let names: Vec<&str> = groups.iter().map(|g| if g == "hud" { "HUD" } else { g.as_str() }).collect();
+        t.refresh = Some(if names.is_empty() { "Checking your game files".to_owned() } else { format!("Converting what changed: {}", names.join(", ")) });
+        t.progress = None;
+        t.error.clear();
+    }
+}
+
+/// The refresh's known fraction (0..1), drawn as a bar; None hides it.
+pub(crate) fn progress(fraction: Option<f32>) {
+    if let Ok(mut t) = TEXT.lock() {
+        t.progress = fraction.map(|f| f.clamp(0.0, 1.0));
+    }
+}
+
+/// Setup failed: the message in the warning color with where the details are.
+pub(crate) fn fail(text: &str) {
+    if let Ok(mut t) = TEXT.lock() {
+        t.error = text.to_owned();
+    }
+}
+
+/// The refresh is over (done or cancelled): back to the normal start.
+pub(crate) fn end_refresh() {
+    if let Ok(mut t) = TEXT.lock() {
+        t.refresh = None;
+        t.progress = None;
+    }
+}
+
+/// The player clicked Cancel during a refresh.
+pub(crate) fn cancel_requested() -> bool {
+    CANCEL.load(Ordering::Relaxed)
 }
 
 /// The splash is up (not closed yet).
@@ -141,6 +185,7 @@ unsafe extern "system" {
     fn SetThreadDpiAwarenessContext(context: isize) -> isize;
     fn GetDpiForSystem() -> u32;
     fn LoadCursorW(instance: *const c_void, name: usize) -> *mut c_void;
+    fn ScreenToClient(hwnd: Hwnd, point: *mut i32) -> i32;
 }
 #[link(name = "gdi32")]
 unsafe extern "system" {
@@ -180,6 +225,7 @@ const WM_PAINT: u32 = 0x000F;
 const WM_ERASEBKGND: u32 = 0x0014;
 const WM_TIMER: u32 = 0x0113;
 const WM_NCHITTEST: u32 = 0x0084;
+const WM_LBUTTONUP: u32 = 0x0202;
 const WS_POPUP: u32 = 0x8000_0000;
 const WS_VISIBLE: u32 = 0x1000_0000;
 const WS_EX_APPWINDOW: u32 = 0x0004_0000;
@@ -291,8 +337,19 @@ unsafe extern "system" fn wnd_proc(hwnd: Hwnd, msg: u32, wparam: usize, lparam: 
                 0
             }
             WM_ERASEBKGND => 1,
-            // Drag it anywhere.
-            WM_NCHITTEST => 2,
+            // Drag it anywhere but the Cancel button (client area there, so it gets the click).
+            WM_NCHITTEST => {
+                let mut p = [(lparam & 0xFFFF) as i16 as i32, ((lparam >> 16) & 0xFFFF) as i16 as i32];
+                ScreenToClient(hwnd, p.as_mut_ptr());
+                if on_cancel(hwnd, p) { 1 } else { 2 }
+            }
+            WM_LBUTTONUP => {
+                let p = [(lparam & 0xFFFF) as i16 as i32, ((lparam >> 16) & 0xFFFF) as i16 as i32];
+                if on_cancel(hwnd, p) {
+                    CANCEL.store(true, Ordering::Relaxed);
+                }
+                0
+            }
             WM_PAINT => {
                 paint(hwnd);
                 0
@@ -308,6 +365,26 @@ unsafe extern "system" fn wnd_proc(hwnd: Hwnd, msg: u32, wparam: usize, lparam: 
             _ => DefWindowProcW(hwnd, msg, wparam, lparam),
         }
     }
+}
+
+/// The Cancel button in the 560 x 240 layout.
+const CANCEL_RECT: Rect = Rect { left: WIDTH - 104, top: HEIGHT - 38, right: WIDTH - 16, bottom: HEIGHT - 12 };
+
+fn refreshing() -> bool {
+    TEXT.lock().is_ok_and(|t| t.refresh.is_some())
+}
+
+/// A client point (window pixels) over the Cancel button while a refresh shows.
+unsafe fn on_cancel(hwnd: Hwnd, p: [i32; 2]) -> bool {
+    if !refreshing() || CANCEL.load(Ordering::Relaxed) {
+        return false;
+    }
+    let mut client = Rect::default();
+    // SAFETY: a valid window handle and a live local rect.
+    unsafe { GetClientRect(hwnd, &mut client) };
+    let (cw, ch) = (client.right.max(1), client.bottom.max(1));
+    let (x, y) = (p[0] * WIDTH / cw, p[1] * HEIGHT / ch);
+    (CANCEL_RECT.left..CANCEL_RECT.right).contains(&x) && (CANCEL_RECT.top..CANCEL_RECT.bottom).contains(&y)
 }
 
 /// One frame drawn into a memory bitmap: the side-view board at 4x, scaled down with HALFTONE.
@@ -362,7 +439,7 @@ unsafe fn draw_board(dc: Hdc, x: i32, y: i32, len: i32) {
             v.extend(under);
             v
         };
-        // Maple edge (5 px thick) with a darker centre ply, then the griptape on top.
+        // Maple edge (5 px thick) with a darker center ply, then the griptape on top.
         let wood = outline(0.0, 5.0);
         fill(PLY, PLY_EDGE, 0.5, &move |d: Hdc| {
             Polygon(d, wood.as_ptr(), wood.len() as i32);
@@ -386,7 +463,7 @@ unsafe fn draw_board(dc: Hdc, x: i32, y: i32, len: i32) {
             fill(METAL, METAL_DARK, 0.5, &move |d: Hdc| {
                 Polygon(d, hanger.as_ptr(), 4);
             });
-            // Wheel: solid urethane with a coloured core and the bearing.
+            // Wheel: solid urethane with a colored core and the bearing.
             let (cx, cy) = (ax, 26.5);
             fill(WHEEL, WHEEL_EDGE, 0.6, &circle(cx, cy, 7.5));
             fill(WHEEL_CORE, 0, 0.0, &circle(cx, cy, 3.9));
@@ -418,10 +495,13 @@ unsafe fn paint(hwnd: Hwnd) {
         FillRect(dc, &Rect { left: 0, top: 0, right: w, bottom: h }, bg);
         DeleteObject(bg);
 
-        let (text, history, started, warning) = match TEXT.lock() {
-            Ok(t) => (line(&t), t.history.clone(), t.started, t.warning.clone()),
-            Err(_) => (String::new(), Vec::new(), None, String::new()),
+        let (text, history, started, mut warning, refresh, progress, error) = match TEXT.lock() {
+            Ok(t) => (line(&t), t.history.clone(), t.started, t.warning.clone(), t.refresh.clone(), t.progress, t.error.clone()),
+            Err(_) => (String::new(), Vec::new(), None, String::new(), None, None, String::new()),
         };
+        if !error.is_empty() {
+            warning = format!("Setup could not finish: {error}");
+        }
         let t = started.map_or(0.0, |s| s.elapsed().as_secs_f32());
 
         // The board, side view, rolling left to right and coming round again.
@@ -446,17 +526,41 @@ unsafe fn paint(hwnd: Hwnd) {
         };
         // DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS (0x8000) | DT_NOPREFIX (0x800)
         let one_line = 0x1 | 0x20 | 0x8000 | 0x800;
-        draw("SKATE 3 RUST ENGINE", 13, 600, TITLE, Rect { left: 0, top: 16, right: w, bottom: 36 }, one_line);
+        draw(if refresh.is_some() { "UPDATING GAME FILES" } else { "SKATE 3 RUST ENGINE" }, 13, 600, TITLE, Rect { left: 0, top: 16, right: w, bottom: 36 }, one_line);
+        if let Some(groups) = &refresh {
+            draw(groups, 12, 400, TEXT_DIM, Rect { left: 16, top: 34, right: w - 16, bottom: 50 }, one_line);
+            if let Some(f) = progress {
+                let (left, right, top) = (60, w - 60, 104);
+                let track = CreateSolidBrush(GRIP);
+                FillRect(dc, &Rect { left, top, right, bottom: top + 4 }, track);
+                DeleteObject(track);
+                let done = CreateSolidBrush(PLY);
+                FillRect(dc, &Rect { left, top, right: left + ((right - left) as f32 * f) as i32, bottom: top + 4 }, done);
+                DeleteObject(done);
+            }
+            if !CANCEL.load(Ordering::Relaxed) {
+                let r = CANCEL_RECT;
+                let edge = CreateSolidBrush(TEXT_DIM);
+                let inner = CreateSolidBrush(BACKGROUND);
+                FillRect(dc, &r, edge);
+                FillRect(dc, &Rect { left: r.left + 1, top: r.top + 1, right: r.right - 1, bottom: r.bottom - 1 }, inner);
+                DeleteObject(edge);
+                DeleteObject(inner);
+                // DT_CENTER | DT_VCENTER (0x4) | DT_SINGLELINE | DT_NOPREFIX
+                draw("Cancel", 13, 600, TEXT_BRIGHT, r, 0x1 | 0x4 | 0x20 | 0x800);
+            }
+        }
         draw(&text, 16, 400, TEXT_BRIGHT, Rect { left: 16, top: 122, right: w - 16, bottom: 146 }, one_line);
         // With a warning the finished lines make room for it (two lines kept, the warning in two wrapped lines below).
-        let kept = if warning.is_empty() { HISTORY_LINES } else { 2 };
+        let kept = if warning.is_empty() && refresh.is_none() { HISTORY_LINES } else { 2 };
+        let right_edge = if refresh.is_some() { CANCEL_RECT.left - 8 } else { w - 16 };
         for (i, h_line) in history.iter().rev().take(kept).enumerate() {
             let top = 152 + i as i32 * 19;
             draw(h_line, 13, 400, TEXT_DIM, Rect { left: 16, top, right: w - 16, bottom: top + 18 }, one_line);
         }
         if !warning.is_empty() {
             // DT_CENTER | DT_WORDBREAK (0x10) | DT_END_ELLIPSIS | DT_NOPREFIX
-            draw(&warning, 13, 600, WARNING, Rect { left: 16, top: 194, right: w - 16, bottom: 232 }, 0x1 | 0x10 | 0x8000 | 0x800);
+            draw(&warning, 13, 600, WARNING, Rect { left: 16, top: 194, right: right_edge, bottom: 232 }, 0x1 | 0x10 | 0x8000 | 0x800);
         }
 
         let (cw, ch) = (client.right, client.bottom);
@@ -522,9 +626,26 @@ mod tests {
         std::fs::write(path, file).unwrap();
     }
 
+    /// Shows the splash in refresh mode with made-up progress for 8 s, to look at it (`--ignored`).
+    #[test]
+    #[ignore = "opens the splash window for a visual check"]
+    fn refresh_mode_preview() {
+        show();
+        refresh_mode(&["maps".into(), "hud".into()]);
+        stage("Converting 12 maps with 4 workers");
+        for i in 1..=5 {
+            detail(format!("Converted {i}/12 maps: map {i}"));
+            progress(Some(i as f32 / 12.0));
+            std::thread::sleep(std::time::Duration::from_millis(800));
+        }
+        fail("disc unreadable (details: setup-error.log)");
+        std::thread::sleep(std::time::Duration::from_secs(4));
+        close();
+    }
+
     #[test]
     fn steps_and_items_become_finished_lines() {
-        let mut t = Text { stage: String::new(), detail: String::new(), history: Vec::new(), started: None, warning: String::new() };
+        let mut t = Text { stage: String::new(), detail: String::new(), history: Vec::new(), started: None, warning: String::new(), refresh: None, progress: None, error: String::new() };
         push_history(&mut t, String::new());
         assert!(t.history.is_empty());
         for i in 0..6 {

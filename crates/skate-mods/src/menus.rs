@@ -469,7 +469,7 @@ impl ProfileOptions {
     }
 }
 
-/// One line of `sdk.menus.credits(key, lines)`: a string id (`ID_...`, localised) or `#literal text`, its font size
+/// One line of `sdk.menus.credits(key, lines)`: a string id (`ID_...`, localized) or `#literal text`, its font size
 /// and its line advance as a multiple of the line's height (retail lines: size 18 to 30, spacing 2).
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -493,7 +493,7 @@ fn credit_spacing() -> f64 {
 pub const MAX_CREDIT_LINES: usize = 512;
 
 /// A loading screen line of a mod (`sdk.loading`): a hint panel's title and text, a Coach Frank line, or a Stats panel
-/// row (label and value). A string id is localised, any other text shows as written.
+/// row (label and value). A string id is localized, any other text shows as written.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "panel", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LoadingLine {

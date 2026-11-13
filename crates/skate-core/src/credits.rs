@@ -8,7 +8,7 @@ pub const STATE_ROLLING: i32 = 1;
 /// spacing +0x28).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
-    /// `#ID_...` (localised by GetLine) or literal text (kept with its leading `#`, APT's literal marker).
+    /// `#ID_...` (localized by GetLine) or literal text (kept with its leading `#`, APT's literal marker).
     pub text: String,
     /// Font table index (0x82FCA4BC: every slot "Futura Std Medium"); stored, no native returns it.
     pub font: i32,
@@ -86,7 +86,7 @@ impl Credits {
         0
     }
 
-    /// GetLine (825AB0B0): the text; `#ID_...` localised without its `#` (`localise` gives the id back when the
+    /// GetLine (825AB0B0): the text; `#ID_...` localized without its `#` (`localise` gives the id back when the
     /// language has none); anything else as stored; empty out of range.
     pub fn line(&self, i: i64, localise: impl Fn(&str) -> String) -> String {
         match self.get(i) {
@@ -124,7 +124,7 @@ mod tests {
         assert_eq!((entries[6].size, entries[6].spacing), (30, 1.5));
     }
 
-    /// The natives: ids localised without `#`, literal text as stored, out of range empty / 0, offset always 0;
+    /// The natives: ids localized without `#`, literal text as stored, out of range empty / 0, offset always 0;
     /// mod sections after the retail lines, in order.
     #[test]
     fn credits_answer_the_fecredits_natives() {

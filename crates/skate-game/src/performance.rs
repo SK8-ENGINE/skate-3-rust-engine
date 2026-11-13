@@ -182,7 +182,7 @@ impl Performance {
         self.physics_elapsed += elapsed;
     }
 
-    /// The rolling report: windows of `window` seconds after the warmup, summarised and written
+    /// The rolling report: windows of `window` seconds after the warmup, summarized and written
     /// by the `perf-report` thread.
     pub(crate) fn rolling(output: PathBuf, window: f32) -> Self {
         let (sender, receiver) = std::sync::mpsc::sync_channel::<Window>(4);
@@ -303,7 +303,7 @@ pub(crate) const ENV_GPU_EVERY: &str = "SKATE_PERF_GPU_EVERY";
 const TRACE_ALL_GPU_EVERY: u32 = 30;
 
 /// The GPU query interval: `SKATE_PERF_GPU_EVERY` when set (1 = every frame, the
-/// single report's behaviour; 0 = no GPU queries), otherwise 30 in trace-all and 1
+/// single report's behavior; 0 = no GPU queries), otherwise 30 in trace-all and 1
 /// for the one-shot `SKATE_PERF_REPORT` benchmark.
 fn gpu_sample_every() -> u32 {
     parse_gpu_sample_every(std::env::var(ENV_GPU_EVERY).ok().as_deref(), crate::trace_all::on())

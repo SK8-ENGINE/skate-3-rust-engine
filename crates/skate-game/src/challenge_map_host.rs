@@ -6,7 +6,7 @@ use skate_core::menus::{EntryKind, EntryRef, MenuContext, MenuRegistry};
 
 #[derive(Clone, Default)]
 pub struct ChallengeMapHost {
-    /// The map markers to draw (icon, map pixels from the centre, highlighted), refreshed after each update while open.
+    /// The map markers to draw (icon, map pixels from the center, highlighted), refreshed after each update while open.
     pub markers: Vec<(String, [f32; 2], bool)>,
     /// The map clip's translation on screen (MapRenderComponent's origin, retail `0x830B8600` = row 3 of the matrix
     /// the render callback `825D4390` writes; b282), set while drawing: markers and the cursor sit at origin + point.
@@ -64,7 +64,7 @@ impl ChallengeMapHost {
                     self.apply(action);
                     Some(Value::Undefined)
                 }
-                // The picker asks per row (menu, row): our greyed rule (no handler, greyed; folders by their children).
+                // The picker asks per row (menu, row): our grayed rule (no handler, grayed; folders by their children).
                 "OnMenuGetItemEnabled" => Some(Value::Bool(self.state.rows(registry, ctx).get(index(1)).is_some_and(|r| r.enabled))),
                 _ => None,
             });
@@ -133,7 +133,7 @@ impl ChallengeMapHost {
             "GetPropertyPriceOrPaid" => Value::Text("#GetPropertyPriceOrPaid".into()),
             "IsPropertyOwned" | "IsChallengeTeamChallenge" | "HasOnlineDifficultySelector" => Value::Bool(false),
             "GetMapHelperInfoString" => Value::Text("#".into()),
-            // Challenge details: no challenge system yet (the challenge rows stay greyed).
+            // Challenge details: no challenge system yet (the challenge rows stay grayed).
             "GetChallengeObjectiveTitle" => Value::Text("#OBJECTIVE NOT VALID!".into()),
             "GetChallengeNumObjectives" | "GetChallengeComponentNumOptions" => Value::Number(0.0),
             "GetChallengeComponentOption" | "GetCurrentOnlineDifficultyName" => Value::Text(String::new()),

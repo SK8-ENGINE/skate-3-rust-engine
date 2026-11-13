@@ -319,9 +319,9 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
                 // Body calming as on the large water, but never below the look's fountain floor.
                 let size=select(1.0,max(frame_state.fountain.y,saturate(log2(max(p.decal.y,1.0)/100.0)/log2(40.0))),frame_state.water_look.w>0.5);
                 let calm_n=normalize(2.0*up+2.0*(first-up)*(0.6+0.4*size)+(second-up)*2.0*size*size);
-                // The look's tilt gain (fountain_ripple.x): a flat basin colour shows the waves only through the lighting.
+                // The look's tilt gain (fountain_ripple.x): a flat basin color shows the waves only through the lighting.
                 let basin_n=normalize(vec3<f32>(calm_n.x*frame_state.fountain_ripple.x,calm_n.y,calm_n.z*frame_state.fountain_ripple.x));
-                // The basin takes the look's colour (fountain_body), not the donor's diffuse; the donor gives the waves only.
+                // The basin takes the look's color (fountain_body), not the donor's diffuse; the donor gives the waves only.
                 d=mix(frame_state.fountain_body.rgb,d,steep);
                 mask_share=mix(frame_state.fountain_body.w,1.0,steep);
                 water_n=normalize(mix(basin_n,water_n,steep));
@@ -357,8 +357,8 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
             // Instruction 95 uses the environment fetch without an added
             // mip bias or color multiplier; the water look adds both (family
             // 33: an even steel-blue reflection as in the Aletown canal
-            // footage, where the sharp cube read grey with bright/dark bands).
-            // Fountain water (flat basins included) keeps a sharp reflection: the blur greyed it next to the falls (09-water.md#better-water-falls-keep-retail-flow).
+            // footage, where the sharp cube read gray with bright/dark bands).
+            // Fountain water (flat basins included) keeps a sharp reflection: the blur grayed it next to the falls (09-water.md#better-water-falls-keep-retail-flow).
             let blur=frame_state.water_look.y*select(lookw,0.0,cascade);
             let cube=bindings::sample_environment(slot,vec3<f32>(-rv.x,-rv.y,rv.z),log2(frame::view.viewport.w/640.0)+blur).rgb;
             let tint=mix(vec3<f32>(1.0),frame_state.water_tint.rgb,lookw);
@@ -389,10 +389,10 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
         if fam == 18u { alpha = a.a; }
     } else if fam >= 50u && fam <= 52u {
         // environmentpark{diffuse,decal,alphatest}_defaultPS: the skate.Park pieces (research b442, slot numbers of
-        // the diffuse program; doc 39 "Park shading"). Tint and the two shadow colours: ParkDraw (b443).
+        // the diffuse program; doc 39 "Park shading"). Tint and the two shadow colors: ParkDraw (b443).
         let park = bindings::material_park;
-        // 14..28: 2 * normal - 1, NOT normalised before the frame (diffuse); decal adds the detail normal
-        // (2 * detail - 2); alphatest is shaped like dynamicobject: detail added, normalised.
+        // 14..28: 2 * normal - 1, NOT normalized before the frame (diffuse); decal adds the detail normal
+        // (2 * detail - 2); alphatest is shaped like dynamicobject: detail added, normalized.
         var nt = nm*2.0-1.0;
         if fam != 50u && (flags & 2u) != 0u { nt = vec3<f32>(nm.xy*2.0+detail*2.0-2.0,nm.z*2.0-1.0); }
         if fam == 52u { nt = nt*inverseSqrt(max(dot(nt,nt),1e-12)); }
@@ -453,7 +453,7 @@ fn fragment(i: VertexOutput) -> @location(0) vec4<f32> {
         var dxy = vec2<f32>(0.5);
         if (flags & 2u) != 0u { dxy = detail; }
         let raw = vec3<f32>(nm.xy*2.0+dxy*2.0-2.0,nm.z*2.0-1.0);
-        // 25..28: normalised before both the frame transform and the kd term.
+        // 25..28: normalized before both the frame transform and the kd term.
         let vnd = raw*inverseSqrt(max(dot(raw,raw),1e-12));
         // 29..34: world normal from the interpolated frame.
         let n = normalize(vnd.x*kt+vnd.y*kb+vnd.z*wn);

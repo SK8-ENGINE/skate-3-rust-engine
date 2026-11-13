@@ -280,7 +280,7 @@ impl AudioSettings {
         }
         let speech_decoded = speech_decoded(&config.asset_root);
         if saved.decode_speech && !speech_decoded {
-            // Asked for but not decoded yet (or the refresh was cancelled): the overlay offers the refresh.
+            // Asked for but not decoded yet (or the refresh was canceled): the overlay offers the refresh.
             crate::setup::mark_stale("audio");
         }
         Self { saved, path, muted: config.mute, volume_overrides: RetailVolumeOverrides::default(), speech_decoded }

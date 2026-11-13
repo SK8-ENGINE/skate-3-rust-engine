@@ -1,7 +1,7 @@
 # RenderWare Audio (rwaudiocore) + Snd9 AEMS: prior work for the native evaluator / voice-graph / mixer port
 
 Research 2026-10-02. Knowledge only: everything below is written in our own words. Never paste code from these
-repos into ours, whatever their licence (project rule "no copied game content": they transcribe EA code; we
+repos into ours, whatever their license (project rule "no copied game content": they transcribe EA code; we
 re-implement). Companion to `aems-reference.md` (our ABKC/csi/opcode notes from PR #4 / sk8audio).
 
 ## Local copies (small sparse clones; delete freely, re-create with the commands below)
@@ -17,9 +17,9 @@ re-implement). Companion to `aems-reference.md` (our ABKC/csi/opcode notes from 
   the command with `MSYS_NO_PATHCONV=1`.
 - The plug-in descriptor layout dossier in BurnoutDecomp/BP-Decomp_Workflow `progress/scratch_dossiers/` read via gh api only (not cloned).
 
-## Sources, licence, applicability
+## Sources, license, applicability
 
-| Source | What it is | Licence | Applies to Skate 3? |
+| Source | What it is | License | Applies to Skate 3? |
 |---|---|---|---|
 | BP-Decomp_Workflow `references/DecFIGS/dwarfdump/SDKs/...` | DWARF outlines (no bodies) from an internal Burnout PS3 ELF: rwaudiocore **3.03.00**, csis **2.12.00**, Snd9 AEMS (`aemsdef.h`, `sndcmn.h`, `saemsi.h`). Enums, consts, struct field lists, GUIDs. | MIT (repo), but the content is EA's | High: same rwaudiocore line; FourCCs identical to ours |
 | BP-Decomp_Workflow `progress/scratch_dossiers/*` | Machine-assisted decode dossiers of Burnout X360 ARTIST XEX: SndPlayer1 bodies (350 KB), AEMS/RWAC factory, plug-in descriptor rodata dumps | MIT | High for SndPlayer1/descriptors |
@@ -30,7 +30,7 @@ re-implement). Companion to `aems-reference.md` (our ABKC/csi/opcode notes from 
 | b5-decomp `src/SDKs/EATech/include/NFSMix/*` | NFSMixMap/NFSMixShape (EA "NFS mix" dynamic mixer; record layouts from the ProStreet PDB) | none | Medium: related lineage of Skate's MixMap (PR #1 already ports MixMapSK8.mxb at 99.999 %) |
 | dbalatoni13/nfsmw `src/Speed/Indep/Libs/snd/9/` | **Matching** (1:1) decomp of NFS Most Wanted 2005 Snd9 incl. `saems.c` (AEMS interpreter) and DWARF-named `aemsdef.h` (every opcode's SETTINGS/STATE struct with offsets) | CC0 | High for names/semantics; older (2005, GC/PS2 gen); Skate's op-27 sample selection format differs |
 | mitsevox/tw2004 `docs/reference-builds/tw07-ps3/cu/*.txt` | Per-CU DWARF function listings from Tiger Woods 07 PS3 (rwaudiocore **2.08.01**): function names, source line, PS3 address, size, locals, inlines. No bodies. Covers gain, gainfader, highpassiir2, lowpassiir2, iir2, resample, rechannelgainwrite, pan2d1, matrixpanner, send, smixer, sndplayer1, plugin, pluginregistry, voice, snd9, sndi_sin/cos | CC0 | Medium: names/local-variable hints only, older version |
-| Kxboo/EA-Playground `_bevy/src/aems.rs`, `_bevy/docs/*` | Rust/Bevy reimplementation of EA Playground (Wii). ABKC there = **native PowerPC code** per class + fixups (not bytecode) | none | Low: confirms ABKC header field meanings; different flavour |
+| Kxboo/EA-Playground `_bevy/src/aems.rs`, `_bevy/docs/*` | Rust/Bevy reimplementation of EA Playground (Wii). ABKC there = **native PowerPC code** per class + fixups (not bytecode) | none | Low: confirms ABKC header field meanings; different flavor |
 | Frostbite `LowPassIir2NodeData` hits (VU-Docs etc.) | Frostbite engine audio nodes: unrelated | n/a | No |
 
 Version evidence: Skate 3 graph FourCCs (`SnP1 → Rch0 → Rsp0 → Gai0 → LI20 → Sen0`, `ems-emitters-re.md`)
@@ -100,14 +100,14 @@ AEMS timer formula reproduces our measured 6-block tick exactly (see 1 below) �
     (0x377FFC9C), not exactly 1/65536. 6 floats history per channel. PreProcess multiplies a context
     "pitch/rate" accumulator by the clamped ratio (b5 calls it a gain; DWARF Mixer has mTotalPitch/ScalePitch,
     probably that). On a source-rate change, the frame passes through unprocessed once.
-14. Rechannel: only acts when in ≠ out channels. Kernel table: mono→5.1 = centre only; stereo→5.1 = FL/FR;
+14. Rechannel: only acts when in ≠ out channels. Kernel table: mono→5.1 = center only; stereo→5.1 = FL/FR;
     5.1→stereo L = 0.707·C + FL + BL (LFE dropped); quad→stereo L = FL+BL. rwaudio 5.1 order:
     **0 FL, 1 C, 2 FR, 3 BL, 4 BR, 5 LFE** (DecFIGS channel.h). MAX_CHANNELS 6.
-15. Pan2D1 (GUID 'Pn21', 7 attributes: azimuth°, radius, width, spread°, focus, level, centre level; ctor params
-    front angle 45°, rear 135°, normalisation mode 2 = 1/sqrt(N emitters)). Speakers: dir0 +45 (FL), dir1 0° (C),
+15. Pan2D1 (GUID 'Pn21', 7 attributes: azimuth°, radius, width, spread°, focus, level, center level; ctor params
+    front angle 45°, rear 135°, normalization mode 2 = 1/sqrt(N emitters)). Speakers: dir0 +45 (FL), dir1 0° (C),
     dir2 −45 (FR), dir3 +135 (BL), dir4 −135 (BR); azimuth is negated (positive degrees pans right). Pairwise
-    inverse 2×2 matrices (VBAP style), per-source 5-vector normalised to unit power × norm × level; stereo
-    out = constant-power pair from target y. 6-ch input → 5 emitters + LFE copy at centre-level gain.
+    inverse 2×2 matrices (VBAP style), per-source 5-vector normalized to unit power × norm × level; stereo
+    out = constant-power pair from target y. 6-ch input → 5 emitters + LFE copy at center-level gain.
     **b5's ComputeInteriorTerm is a stub**: the radius<1/spread interior term is still unknown.
 16. Send: accumulates (MixWithGainRamp) into a SubMix; gain attr 0, de-click ramp; connect by pointer or by SubMix
     name. Gain: attr 0 linear, init 1.0.
@@ -120,7 +120,7 @@ AEMS timer formula reproduces our measured 6-block tick exactly (see 1 below) �
 19. SndPlayer1: header bitfields version 4, codec 4, channels 6, sample rate 18, play type 2, loop flag 1,
     num samples 29, loop start 32; chunk header {bytes, samples}; PlayParams {startTime f64, streamFileOffset f64,
     path, pRamData, streamPoolGuid, expelMode, requestHandle}; MAX_DECODERFEEDS 20; declick on start/stop.
-    350 KB of decoded bodies in `sndplayer1_bodies_decode.md` if we need exact start/loop/stream behaviour.
+    350 KB of decoded bodies in `sndplayer1_bodies_decode.md` if we need exact start/loop/stream behavior.
 20. Util constants exist for dB/cents conversion (DECIBEL_MIN, CENTS_MIN, PITCHLINEARTOCENTSCONST) but values are
     not in the DWARF; NFSMixShape gives 2^(cents/1200) pitch and Q15↔hundredths-dB tables (MixMap side).
 

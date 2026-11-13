@@ -26,7 +26,7 @@ use skate_core::{
 };
 
 /// Template-space contact box that replaces the render-AABB box of one prop
-/// type (centre and half extents, per-axis scale applied on top).
+/// type (center and half extents, per-axis scale applied on top).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PropBox {
     pub center: Vector3,
@@ -321,7 +321,7 @@ pub(crate) fn prop_grab_enabled() -> bool {
 pub(crate) fn set_prop_grab_enabled(on: bool) {
     PROP_GRAB.store(on, std::sync::atomic::Ordering::Relaxed);
 }
-/// Holds [`PROP_GRAB`] at `on` for one test, serialised with the others, and restores it off even after a panic.
+/// Holds [`PROP_GRAB`] at `on` for one test, serialized with the others, and restores it off even after a panic.
 #[cfg(test)]
 pub(crate) fn prop_grab_for_test(on: bool) -> impl Drop {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -466,7 +466,7 @@ pub(crate) struct PropBody {
     /// Contact manifolds (static triangles and other props) that touched this
     /// body in its last step, for the HELD_PROP diagnostics.
     contacts: u32,
-    /// Box centre height where this body last rested (spawn, sleep or grab):
+    /// Box center height where this body last rested (spawn, sleep or grab):
     /// the ground probe for HELD_PROP / PROP_BELOW_GROUND starts above it, so
     /// a body that sank under the floor still finds the floor it left.
     rest_y: f32,
@@ -720,7 +720,7 @@ fn prop_sfx_record(collections: &skate_data::collections::Collections, key: u64)
 }
 
 /// A DMO type's prop audio [data]: the rolling or sliding RefSpecs' prop SFX records and the moved levels. The
-/// owner's other two sliding terms (DMO flags) are not modelled.
+/// owner's other two sliding terms (DMO flags) are not modeled.
 pub(crate) fn dmo_type_audio(collections: &skate_data::collections::Collections, record: &str) -> Result<Option<PropAudioType>, String> {
     let rolls = collections.boolean(DMO_TYPE_CLASS, record, DMO_ROLLS)?;
     let (refs, levels) = if rolls { (DMO_AUDIO_ROLLING, DMO_LEVELS_ROLLING) } else { (DMO_AUDIO_SLIDING, DMO_LEVELS_SLIDING) };
@@ -903,7 +903,7 @@ pub(crate) struct MoveCommandRules {
     pub upright_cos: f32,
     /// Per prop type overrides of the held / free blocks.
     pub by_template: std::collections::BTreeMap<String, PropMaterialBlocks>,
-    /// Linear command at the centre of mass (retail: accumulator +144, no
+    /// Linear command at the center of mass (retail: accumulator +144, no
     /// torque). `false` = applied at the grip point (lever torque; mod only).
     pub apply_at_com: bool,
     /// Yaw command replaces the angular accumulator (retail 82D9CCF0
@@ -981,7 +981,7 @@ const BELOW_GROUND_LOG_SECONDS: f32 = 10.0;
 /// One body's ground relation, for the diagnostics and tests.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PropGroundProbe {
-    /// Box centre.
+    /// Box center.
     pub center: Vector3,
     /// World-space half height of the (possibly tilted) box.
     pub half_height: f32,
@@ -996,7 +996,7 @@ impl PropGroundProbe {
         self.ground.map(|g| self.center.y - self.half_height - g)
     }
 
-    /// The centre is more than its half height below the floor: the box has
+    /// The center is more than its half height below the floor: the box has
     /// passed the floor's face and the one-sided triangle fixup can no longer
     /// push it back up (see `step_with_actors`).
     pub(crate) fn below_ground(&self) -> bool {
@@ -1282,7 +1282,7 @@ impl PropBody {
     }
 }
 
-/// Pose tolerance for "moved" (metres / basis component). Ours: float noise
+/// Pose tolerance for "moved" (meters / basis component). Ours: float noise
 /// of a body that slept at its authored pose; retail's per-DMO moved flag is a
 /// record field (sub_826666A8 reads it), not a distance. NOT RETAIL YET.
 const SPAWN_POSE_EPSILON: f32 = 1e-4;
@@ -1968,7 +1968,7 @@ impl PropDynamics {
     }
 
     /// Replace the tuning table and re-resolve every body. A changed
-    /// `collision_box` moves the box centre so the template origin (the
+    /// `collision_box` moves the box center so the template origin (the
     /// rendered pose) stays where it is; mass properties are unchanged.
     pub(crate) fn set_tuning(&mut self, table: PropTuningTable) {
         for body in &mut self.bodies {
@@ -1985,7 +1985,7 @@ impl PropDynamics {
     }
 
     /// Give one body its prop type's tuning: `collision_box` moves the box
-    /// centre so the template origin stays where it is.
+    /// center so the template origin stays where it is.
     fn apply_tuning(body: &mut PropBody, tuning: PropTuning) {
         let origin = body.origin();
         let (center, half) = match tuning.collision_box {
@@ -2072,7 +2072,7 @@ impl PropDynamics {
         Some((body.origin(), body.rates.basis))
     }
 
-    /// Every body as a navigation obstacle for peds (doc 26, fix 11): id, box centre, basis,
+    /// Every body as a navigation obstacle for peds (doc 26, fix 11): id, box center, basis,
     /// half extents (the contact box, so a `collision_box` override counts), linear velocity and
     /// whether it is carried (retail switches a carried object's obstacle off). Id order.
     pub(crate) fn obstacle_boxes(&self) -> Vec<(u32, Vector3, Basis3, Vector3, Vector3, bool)> {
@@ -2096,7 +2096,7 @@ impl PropDynamics {
         self.bodies.get(*self.by_id.get(&id)?).map(|b| b.template.as_str())
     }
 
-    /// One body's box centre, basis, half extents, linear and angular velocity and effective inertia (a solid proxy
+    /// One body's box center, basis, half extents, linear and angular velocity and effective inertia (a solid proxy
     /// in the skater's contact solve).
     pub(crate) fn body_state(&self, id: u32) -> Option<(Vector3, Basis3, Vector3, Vector3, Vector3, RetailInertiaDynamics)> {
         let b = self.bodies.get(*self.by_id.get(&id)?)?;
@@ -2248,7 +2248,7 @@ impl PropDynamics {
         self.held = held;
     }
 
-    /// Ground relation of one prop (centre, world half height, floor under it).
+    /// Ground relation of one prop (center, world half height, floor under it).
     /// (Diagnostics and tests; a mod-facing readout is a follow-up.)
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn ground_probe(&self, id: u32, world: &BoardWorld) -> Option<PropGroundProbe> {
@@ -2360,7 +2360,7 @@ impl PropDynamics {
         self.held == Some(self.bodies[index].id)
     }
 
-    /// The held prop as Move Object reads it (centre, box axes, half
+    /// The held prop as Move Object reads it (center, box axes, half
     /// extents, velocity, mass, yaw inertia): the interim grab record's source.
     pub(crate) fn held_body(&self, id: u32) -> Option<crate::physics::prop_carry::HeldBody> {
         let body = self.bodies.get(*self.by_id.get(&id)?)?;
@@ -4440,7 +4440,7 @@ mod tests {
         assert!(heading_of(&dynamics, 7) > 0.1);
     }
 
-    /// Retail controller math alone for a centre push on a free point mass (82D45318, `v += L dt`); speed per tick.
+    /// Retail controller math alone for a center push on a free point mass (82D45318, `v += L dt`); speed per tick.
     fn predicted_centre_push(mass: f32, move_z: f32, ticks: usize) -> Vec<f32> {
         use skate_core::player::offboard::move_object::{command, MoveObjectController, MoveObjectInput};
         let t = crate::physics::prop_carry::CarryLocomotion::default().move_object;
@@ -4471,7 +4471,7 @@ mod tests {
             .collect()
     }
 
-    /// Object-relative stick (82D45318): the left stick never turns a centre-grabbed prop; Z push / pull, X slide.
+    /// Object-relative stick (82D45318): the left stick never turns a center-grabbed prop; Z push / pull, X slide.
     #[test]
     fn move_object_left_stick_moves_the_prop_in_the_edge_frame() {
         for step in 0..8 {
@@ -4579,7 +4579,7 @@ mod tests {
     fn a_prop_with_grab_splines_is_carried_by_its_authored_record() {
         let (world, mut layer, mut dynamics) = fixture([0., REST_Y, 1.2]);
         let mut splines = std::collections::BTreeMap::new();
-        // Spline on the -Z face (toward the skater), off centre along X.
+        // Spline on the -Z face (toward the skater), off center along X.
         splines.insert("template".to_owned(), vec![crate::living_world::vehicles::CarGrabSpline { points: vec![[-0.4, 0.3, -0.5], [0.0, 0.3, -0.5], [0.4, 0.3, -0.5]], direction: [0.0, 0.0, -1.0], flags: 0 }]);
         assert_eq!(dynamics.set_grab_splines(&splines), 1);
         let mut carry = crate::physics::prop_carry::PropCarry::default();
@@ -4747,14 +4747,14 @@ mod tests {
         assert!(off.abs() < 0.05, "skater not facing the grab edge: {off} rad off");
     }
 
-    /// Pushing at the grab point off the centre turns the prop through the
+    /// Pushing at the grab point off the center turns the prop through the
     /// lever-arm curves (a bench grabbed near its end).
     #[test]
     fn off_centre_push_turns_a_long_prop() {
         let (world, mut layer, mut dynamics) = box_fixture([0., super::super::ground::HEIGHT + 0.41, 0.], [2.3, 0.41, 0.29]);
         let id = dynamics.bodies[0].id;
         let mut carry = crate::physics::prop_carry::PropCarry::default();
-        // Behind the bench, 1.8 m right of its centre.
+        // Behind the bench, 1.8 m right of its center.
         let mut at = crate::physics::prop_carry::Carrier {
             position: Vector3::new(1.8, super::super::ground::HEIGHT + 0.9, -0.9),
             ..carrier(skate_core::player::state::PhysicalStateId::BipedGround, 0.)
@@ -4775,7 +4775,7 @@ mod tests {
             previous = h;
         }
         assert_eq!(carry.held(), Some(id), "the push dropped the bench");
-        // Push along +Z at r = (1.8, 0, -0.3) from the centre: torque about +Y
+        // Push along +Z at r = (1.8, 0, -0.3) from the center: torque about +Y
         // is -1.8 F, and retail's yaw term (82D45318) turns the same way.
         println!("off-centre push: turned {turned:.3} rad");
         assert!(turned < -0.05, "the off-centre push did not turn the bench with its torque: {turned}");
@@ -5208,8 +5208,8 @@ mod tests {
     const NPC: skate_core::living_world::LivingWorldId =
         skate_core::living_world::LivingWorldId { kind: skate_core::living_world::Kind::Skater, serial: 7 };
 
-    /// Run an NPC line along +X through a prop centred at x = 0 for `ticks` 60 Hz ticks.
-    /// Returns the prop centre x per tick and the NPC x per tick.
+    /// Run an NPC line along +X through a prop centered at x = 0 for `ticks` 60 Hz ticks.
+    /// Returns the prop center x per tick and the NPC x per tick.
     fn npc_run(
         dynamics: &mut PropDynamics,
         world: &BoardWorld,
@@ -5240,7 +5240,7 @@ mod tests {
         let s = PropSolverSettings::default();
         let v = |x: f32, y: f32, z: f32| Vector3::new(x, y, z);
         let zero = v(0.0, 0.0, 0.0);
-        // 1 kg at rest (d = 0): the ball is centred on 0 with radius 5, so 10 m/s becomes 5 m/s; spin 30 -> 15.
+        // 1 kg at rest (d = 0): the ball is centered on 0 with radius 5, so 10 m/s becomes 5 m/s; spin 30 -> 15.
         let (l, a) = bail_clamp(&s, 1.0, zero, v(10.0, 0.0, 0.0), v(0.0, 30.0, 0.0)).unwrap();
         assert!((l.x - 5.0).abs() < 1e-5 && l.y.abs() < 1e-6 && (a.y - 15.0).abs() < 1e-4, "{l:?} {a:?}");
         // 20 kg: 0.25 m/s, 0.75 rad/s.
@@ -5366,7 +5366,7 @@ mod tests {
         let (end_prop, end_npc) = *run.last().unwrap();
         assert!(end_prop > 1.0, "bin pushed ahead along the line: x {end_prop}");
         assert_eq!(dynamics.pushed_by(dynamics.bodies[0].id), Some(crate::living_world::npc_skaters::PROXY_ID_TAG | NPC.to_u64()));
-        // No pass-through: once the board reached the bin, the bin's centre stays ahead of the
+        // No pass-through: once the board reached the bin, the bin's center stays ahead of the
         // board's nose (0.4 m) minus the bin's own half depth, or it was knocked clear sideways.
         for &(prop, npc) in &run {
             assert!(prop - npc > -(0.4 + half[0]) - 0.05 || dynamics.bodies[0].rates.position.z.abs() > 0.6, "bin {prop} behind npc {npc}");
@@ -5673,7 +5673,7 @@ mod tests {
         assert!(failures.is_empty(), "{failures:#?}");
     }
 
-    /// A tall prop pushed off-centre into the curb tips (the contacts decide) and never ends under the floor.
+    /// A tall prop pushed off-center into the curb tips (the contacts decide) and never ends under the floor.
     #[test]
     fn pushing_a_tall_prop_into_the_curb_can_tip_it() {
         let world = street_world();
@@ -5715,7 +5715,7 @@ mod tests {
         assert!(!dynamics.ground_probe(id, &world).unwrap().below_ground(), "the tipped prop went under the floor");
     }
 
-    /// A straight full push on flat ground does not tip a prop (spec 7.4: command at the centre of mass).
+    /// A straight full push on flat ground does not tip a prop (spec 7.4: command at the center of mass).
     #[test]
     fn straight_push_on_flat_ground_does_not_tip_a_cube_or_the_bin() {
         for (name, half) in [("cube", [0.5f32, 0.5, 0.5]), ("bin", [0.28, 0.41, 0.27])] {
@@ -6050,7 +6050,7 @@ mod tests {
     }
 
     /// Slot 9 sinks (82D9CC78 / 82D9CCF0): the linear command adds L dt at the
-    /// centre of mass with no mass factor and no torque, the vertical part is
+    /// center of mass with no mass factor and no torque, the vertical part is
     /// dropped, and the yaw command adds (0, Y, 0) dt with no inertia factor.
     #[test]
     fn move_command_is_an_acceleration_at_the_centre_of_mass() {

@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 pub(crate) const FALLBACK_PED_RADIUS: f32 = 0.35;
 pub(crate) const FALLBACK_PED_HEIGHT: f32 = 1.6;
 
-/// One car touching one ped (serialisable: stable ids as `LivingWorldId::to_u64`).
+/// One car touching one ped (serializable: stable ids as `LivingWorldId::to_u64`).
 #[derive(Message, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct VehicleContactEvent {
     pub tick: u64,

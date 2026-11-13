@@ -1,4 +1,4 @@
-//! Pedestrian navmesh: NavPower nav graphs as polygons with neighbours, location, reachability and paths.
+//! Pedestrian navmesh: NavPower nav graphs as polygons with neighbors, location, reachability and paths.
 //! Retail mechanism and our stand-ins: docs/hails-additions/26f-living-world-peds.md#ped-navmesh
 
 use std::cmp::Ordering;
@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BinaryHeap};
 
 use crate::living_world::Vec3;
 
-/// Area byte of road carriageway polygons [data: 98 % of DownTown road piece centres].
+/// Area byte of road carriageway polygons [data: 98 % of DownTown road piece centers].
 pub const AREA_ROAD: u8 = 0xA1;
 /// Area byte of pavement / default polygons [data: 91-92 % of recomp ped positions, trace].
 pub const AREA_DEFAULT: u8 = 0x11;
@@ -35,7 +35,7 @@ pub struct NavMeshInput {
 #[derive(Clone, Debug, PartialEq)]
 pub struct NavRules {
     pub blocked_areas: Vec<u8>,
-    /// Cost per metre by area (absent = 1). Retail costs are not read; empty by default.
+    /// Cost per meter by area (absent = 1). Retail costs are not read; empty by default.
     pub area_cost: Vec<(u8, f32)>,
     /// Horizontal snap radius of a point query [code `0x8209975C` = 0.5 in `sub_82C46348`].
     pub locate_radius: f32,
@@ -84,7 +84,7 @@ pub struct NavMesh {
     /// Walkable links per polygon in both directions (sorted; a tile-stitched link may be
     /// recorded on one side only).
     links: Vec<Vec<u32>>,
-    /// Per polygon (edge, neighbour) links incl. one-sided tile stitch links, mapped to the closest edge (fix 17). Sorted.
+    /// Per polygon (edge, neighbor) links incl. one-sided tile stitch links, mapped to the closest edge (fix 17). Sorted.
     edge_links: Vec<Vec<(u8, u32)>>,
 }
 
@@ -547,7 +547,7 @@ impl NavMesh {
     }
 
     /// Signed distance (xz) of `p` outside edge `e` of polygon `k` (positive = outside, away
-    /// from the polygon's centre).
+    /// from the polygon's center).
     fn outside(&self, k: u32, e: usize, p: Vec3) -> f32 {
         let poly = &self.polys[k as usize];
         let (a, b) = (poly.verts[e], poly.verts[(e + 1) % poly.verts.len()]);
@@ -596,7 +596,7 @@ impl NavMesh {
         ca != u32::MAX && ca == cb
     }
 
-    /// The portal between `p` and its neighbour `q` across edge `e` of `p`: `p`'s edge clipped
+    /// The portal between `p` and its neighbor `q` across edge `e` of `p`: `p`'s edge clipped
     /// to the part `q`'s matching edge covers (T-junctions), else `p`'s whole edge.
     fn portal(&self, p: u32, e: usize, q: u32) -> (Vec3, Vec3) {
         let pp = &self.polys[p as usize];
@@ -709,7 +709,7 @@ impl NavMesh {
                 .map(|&(p, e, q)| {
                     let (a, b) = self.portal(p, e, q);
                     // Orient as (left, right) seen along the travel from p to q (x right of +z,
-                    // the funnel's convention: right = larger cross(v - centre, travel)).
+                    // the funnel's convention: right = larger cross(v - center, travel)).
                     let c = self.polys[p as usize].centre;
                     let dir = sub2(self.polys[q as usize].centre, c);
                     if cross2(sub2(a, c), dir) <= cross2(sub2(b, c), dir) { (a, b) } else { (b, a) }

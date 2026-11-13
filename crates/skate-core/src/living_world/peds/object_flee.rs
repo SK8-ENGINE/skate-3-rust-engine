@@ -7,7 +7,7 @@ use super::super::Vec3;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ObjectFleeParams {
     pub enabled: bool,
-    /// Flat distance from the prop's centre (8 m: 64.0 squared at 0x820ED958).
+    /// Flat distance from the prop's center (8 m: 64.0 squared at 0x820ED958).
     pub radius: f32,
     /// The prop's speed floor (0.75 m/s: 0.5625 squared at 0x822F915C).
     pub min_speed: f32,
@@ -21,7 +21,7 @@ impl Default for ObjectFleeParams {
     }
 }
 
-/// A moving prop: box centre, linear velocity and its four footprint corners (world x, z).
+/// A moving prop: box center, linear velocity and its four footprint corners (world x, z).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MovingObject {
     pub centre: Vec3,

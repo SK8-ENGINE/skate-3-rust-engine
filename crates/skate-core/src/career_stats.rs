@@ -61,9 +61,9 @@ pub mod row {
 pub enum Kind {
     /// Seconds as `hh:mm:ss.ff` with leading zero fields left out, then " s".
     Time,
-    /// Metres, cut to whole metres, through the 1-decimal distance template.
+    /// Meters, cut to whole meters, through the 1-decimal distance template.
     DistanceWhole,
-    /// Metres through the 1-decimal distance template.
+    /// Meters through the 1-decimal distance template.
     Distance,
     /// Row 17: the successes (row 16) over the attempts (this row), whole percent.
     Percent,
@@ -160,7 +160,7 @@ pub struct BailRecord {
     pub air_distance: f32,
     air_open_distance: f32,
     air_apex: Option<f32>,
-    /// The skeleton centre of mass's path on ground ticks (|velocity| x time), m.
+    /// The skeleton center of mass's path on ground ticks (|velocity| x time), m.
     pub ground_distance: f32,
     /// The bones' injury levels (0x82DAE9A8 / 0x82DAF1D8), when the tuning is loaded.
     pub injuries: crate::hall_of_meat::Injuries,
@@ -179,7 +179,7 @@ pub struct BailTick<'a> {
     pub frozen: bool,
     pub response_strength: f32,
     pub airborne: bool,
-    /// The skeleton centre of mass height and speed (retail `[skater+0x24]`, the system reckoning).
+    /// The skeleton center of mass height and speed (retail `[skater+0x24]`, the system reckoning).
     pub centre: (f32, f32),
     /// The hips (physical part 23) rows 0..2 (retail `[skater+0x14]` +0x30 / +0x50 / +0x60).
     pub hips: [[f32; 4]; 3],
@@ -330,7 +330,7 @@ pub fn clock(seconds: f32) -> String {
     out
 }
 
-/// What a row shows: the localised pieces the caller passes in (units setting, unit words, number grouping and the
+/// What a row shows: the localized pieces the caller passes in (units setting, unit words, number grouping and the
 /// ped type names).
 pub struct Format<'a> {
     /// Game Settings > Units: imperial (the distance handler 0x824FE848 multiplies by 3.0 and shows feet).

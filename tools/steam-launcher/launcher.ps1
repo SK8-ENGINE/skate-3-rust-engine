@@ -433,7 +433,7 @@ function Get-PrebuiltLauncher([string]$Out) {
     } catch { Remove-Item $Out -ErrorAction SilentlyContinue; return $false }
     finally { Remove-Item $side -ErrorAction SilentlyContinue }
 }
-# The switchover (docs/hails-additions/44-every-os.md "Switching launchers"): launcher-flavour.txt says "rust" once
+# The switchover (docs/hails-additions/44-every-os.md "Switching launchers"): launcher-flavor.txt says "rust" once
 # Tools > Try the new launcher put the Rust launcher in place of SkateLauncher.exe. It keeps itself current from the
 # release, so this never puts the classic exe back over it.
 function Launcher-IsRust { $f = Join-Path $StateDir 'launcher-flavour.txt'; (Test-Path $f) -and "$(Get-Content $f -Raw)".Trim() -eq 'rust' }
@@ -980,7 +980,7 @@ function Recomp-Script {
 }
 
 # Entries. Group: rust (the selected version), recomp, retail (RPCS3), tools. Every entry is always listed; one that
-# isn't set up is greyed out in the window with the reason (Why), so the menu shows what could be there.
+# isn't set up is grayed out in the window with the reason (Why), so the menu shows what could be there.
 $Entries = [ordered]@{
     'rust-play'     = @{ Group = 'rust'; Name = 'Play';                       Kind = 'rust';     Hint = "The version's PLAY.bat." }
     'rust-traceall' = @{ Group = 'rust'; Name = 'Play + trace all';           Kind = 'traceall'; Hint = "Every trace (frames, audio, performance, GPU, living world) into logs\trace-all-<time>." }

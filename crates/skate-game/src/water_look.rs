@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use skate_mods::presentation::WaterLookPatch;
 
-/// Better Water basin colour and reflection share: matched to the Aletown canal by capture (doc 09).
+/// Better Water basin color and reflection share: matched to the Aletown canal by capture (doc 09).
 const FOUNTAIN_COLOUR: [f32; 3] = [0.018, 0.024, 0.032];
 const FOUNTAIN_REFLECTION: f32 = 0.15;
 const FOUNTAIN_RIPPLE: f32 = 2.;
@@ -21,7 +21,7 @@ pub(crate) struct WaterLook {
     pub ripple_scale: f32,
     /// Extra environment cube mip levels: an even, blurrier reflection.
     pub reflection_blur: f32,
-    /// Reflection colour multiplier: slightly blue, as in the footage.
+    /// Reflection color multiplier: slightly blue, as in the footage.
     pub reflection_tint: [f32; 3],
     /// Third wave from a rotated 0.613x sample plus broad swells, so the fine
     /// layer does not tile visibly over large stretches.
@@ -54,7 +54,7 @@ pub(crate) struct WaterLook {
     pub ocean_swell_speed: f32,
     /// Fountains (family 30) take the largest family 33 body's waves and textures in Better Water mode: docs/hails-additions/09-water.md#fountain-water
     pub fountain_water: bool,
-    /// Metres per basin wave tile (the fine wave layer).
+    /// Meters per basin wave tile (the fine wave layer).
     pub fountain_tile: f32,
     /// Least wave strength on small basins (0..1), so body calming does not flatten them.
     pub fountain_waves: f32,
@@ -63,14 +63,14 @@ pub(crate) struct WaterLook {
     pub cascade_rate: f32,
     /// White foam on cascades from the two flow layers; 0 = none.
     pub cascade_foam: f32,
-    /// Basin body colour (linear rgb) under the lighting. University's fountains have a black diffuse, so with only
+    /// Basin body color (linear rgb) under the lighting. University's fountains have a black diffuse, so with only
     /// the reflection they read "just too blue" (laptop session 2026-10-21); this brings them in line with the
-    /// Aletown canal, whose own diffuse gives its colour.
+    /// Aletown canal, whose own diffuse gives its color.
     pub fountain_colour: [f32; 3],
     /// Basin reflection as a share of the material's own specular mask: University's fountains carry a plain white
     /// mask (about 0.9), DownTown's water `pool_S_30per` (about 0.18).
     pub fountain_reflection: f32,
-    /// Basin wave tilt gain: a flat basin colour shows the waves only through the lighting, so they need more tilt
+    /// Basin wave tilt gain: a flat basin color shows the waves only through the lighting, so they need more tilt
     /// than the canal, whose own diffuse carries its ripple ("the fountain doesnt ripple enough", 2026-10-21).
     pub fountain_ripple: f32,
     /// Props in water sink or float by their own density with water drag (`physics::prop_water`); retail props
@@ -176,7 +176,7 @@ impl WaterLook {
         [self.fountain_tile.max(0.5), self.fountain_waves.clamp(0., 1.), self.cascade_foam.max(0.), clock]
     }
 
-    /// `FrameState.fountain_body`: basin colour (rgb) and reflection share; zero when fountains are off (the shader
+    /// `FrameState.fountain_body`: basin color (rgb) and reflection share; zero when fountains are off (the shader
     /// reads it only on basins, which need `fountain_row`).
     pub fn fountain_body_row(&self) -> [f32; 4] {
         if !self.fountain_water {

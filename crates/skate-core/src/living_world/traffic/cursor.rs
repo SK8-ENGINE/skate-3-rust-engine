@@ -16,7 +16,7 @@ pub enum Place {
 /// How a car picks the connector at the end of its lane.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ConnectorChoice {
-    /// Retail on every car: least loaded exit lane per metre.
+    /// Retail on every car: least loaded exit lane per meter.
     #[default]
     LeastLoaded,
     /// Retail's other branch (flag clear; no car uses it): uniform from the world RNG.
@@ -67,7 +67,7 @@ pub struct Advance {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LaneCursor {
     pub place: Place,
-    /// Metres along the segment (on a lane) or the connector.
+    /// Meters along the segment (on a lane) or the connector.
     pub distance: f32,
     /// The connector chosen for the end of the current lane (retail `+4388`); `None` at a dead
     /// end or while on a connector.
@@ -92,7 +92,7 @@ impl LaneCursor {
         }
     }
 
-    /// Metres left to the end of the current lane or connector (the stop line on a lane).
+    /// Meters left to the end of the current lane or connector (the stop line on a lane).
     pub fn remaining(&self, net: &RoadNetwork) -> f32 {
         (self.span(net) - self.distance).max(0.0)
     }

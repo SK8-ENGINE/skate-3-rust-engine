@@ -132,6 +132,63 @@ pub(crate) fn poll_controllers(mut input: ResMut<ControllerInput>,config:Res<cra
     }
 }
 
+/// Retail AI.PinAI on the local player (cMsgPinPlayer -> the skater's pin bit): the pad drives nothing from a
+/// contest's setup_round through the countdown and from end_round on, and in a race before GO and after the finish.
+/// Mods still override the actions on top (`override_actions`).
+pub(crate) fn player_pinned(contests: Option<&crate::contest_host::Contests>, races: Option<&crate::race_host::Races>,
+    ftl: Option<&crate::ftl_host::FollowTheLeader>) -> bool {
+    ftl.is_some_and(crate::ftl_host::FollowTheLeader::player_pinned) ||
+        contests.is_some_and(crate::contest_host::Contests::player_pinned) || races.is_some_and(|r| r.run.is_some() && !r.started)
+}
+
+#[derive(Default)]
+pub(crate) struct PinTest {
+    ticks: u64,
+    pinned_at: Option<[f32; 3]>,
+    last: Option<[f32; 3]>,
+    released: Option<([f32; 3], u64)>,
+}
+
+/// `SKATE_TEST_PRESS=<action key>` (dev, unset in play): presses that action 10 of every 40 ticks, and logs the
+/// pin's start and end with the board position, so a run shows the pad is ignored while pinned.
+fn test_press(values: &mut [f32; 18], pinned: bool, skater: Option<&crate::physics::SkaterRuntime>, test: &mut PinTest) {
+    static ACTION: std::sync::OnceLock<Option<usize>> = std::sync::OnceLock::new();
+    let Some(index) = *ACTION.get_or_init(|| {
+        let key = std::env::var("SKATE_TEST_PRESS").ok()?;
+        skate_core::input::gameplay_map::ACTIONS.iter().position(|a| a.key == key)
+    }) else { return };
+    test.ticks += 1;
+    if test.ticks % 40 < 10 {
+        values[index] = 1.0;
+    }
+    let Some(d) = skater.map(|s| crate::trigger_volumes::player_points(s)[2]) else { return };
+    let flat = |a: [f32; 3], b: [f32; 3]| ((a[0] - b[0]).powi(2) + (a[2] - b[2]).powi(2)).sqrt();
+    match (pinned, test.pinned_at) {
+        (true, None) => {
+            test.pinned_at = Some(d);
+            info!("SKATE_TEST_PRESS pin start at {d:?}");
+        }
+        (true, Some(_)) => {
+            if test.last.is_some_and(|l| flat(l, d) > 2.0) {
+                test.pinned_at = Some(d);
+                info!("SKATE_TEST_PRESS teleported while pinned, now at {d:?}");
+            }
+        }
+        (false, Some(start)) => {
+            test.pinned_at = None;
+            test.released = Some((d, test.ticks));
+            info!("SKATE_TEST_PRESS pin end: moved {:.3} m on the ground while pinned (since the last teleport)", flat(start, d));
+        }
+        (false, None) => {
+            if let Some((at, tick)) = test.released.filter(|&(_, t)| test.ticks - t >= 180) {
+                test.released = None;
+                info!("SKATE_TEST_PRESS free: moved {:.3} m in the {} ticks after the pin end", flat(at, d), test.ticks - tick);
+            }
+        }
+    }
+    test.last = Some(d);
+}
+
 pub(crate) fn publish_actions(
     mut input: ResMut<ControllerInput>,
     mut published: ResMut<PublishedTickInput>,
@@ -139,6 +196,12 @@ pub(crate) fn publish_actions(
     debug: Res<crate::debug_cam::DebugCam>,
     camera: Res<crate::camera::CameraRuntime>,
     mods: Option<Res<crate::modding::Mods>>,
+    contests: Option<Res<crate::contest_host::Contests>>,
+    races: Option<Res<crate::race_host::Races>>,
+    ftl: Option<Res<crate::ftl_host::FollowTheLeader>>,
+    skater: Option<Res<crate::physics::SkaterRuntime>>,
+    mut physics: Option<ResMut<crate::physics::GamePhysics>>,
+    mut pin_test: Local<PinTest>,
 ) {
     let blocked = !crate::graphics_menu::gameplay_active(menu) || debug.suppress_gameplay(&camera);
     if blocked {
@@ -147,6 +210,10 @@ pub(crate) fn publish_actions(
     input.publish_actions();
     let tick = input.tick_input();
     let mut values=*tick.actions().values();
+    let pinned = player_pinned(contests.as_deref(), races.as_deref(), ftl.as_deref());
+    if let Some(p) = physics.as_deref_mut() { p.set_pinned(pinned); }
+    test_press(&mut values, pinned, skater.as_deref(), &mut pin_test);
+    if pinned { values = [0.0; 18]; }
     if !blocked { crate::modding::override_actions(mods.as_deref(), &mut values); }
     let tick=TickInput::new(tick.tick(),skate_core::input::gameplay_map::GameplayActions::from_values(values),tick.controller_available());
     published.0 = if debug.suppress_gameplay(&camera) {

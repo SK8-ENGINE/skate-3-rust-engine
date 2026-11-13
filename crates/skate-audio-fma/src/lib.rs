@@ -18,7 +18,7 @@
 //! `#![forbid(unsafe_code)]`.
 //!
 //! The process-wide choice ([`active`]) is made once and cached in an atomic: FMA when the CPU has
-//! it, unless `SKATE_AUDIO_FMA=0` forces the plain copy (`SKATE_AUDIO_FMA=1` asks for FMA, honoured
+//! it, unless `SKATE_AUDIO_FMA=0` forces the plain copy (`SKATE_AUDIO_FMA=1` asks for FMA, honored
 //! only when the CPU supports it). [`init`] makes the choice up front and says what it picked, for
 //! the game's start-up log.
 #![deny(unsafe_op_in_unsafe_fn)]
@@ -53,7 +53,7 @@ pub const COS: [u32; 11] = [
     0x9C86_71CB,
 ];
 
-/// Normalised biquad coefficients {a1, a2, b0, b1, b2} (re-exported as
+/// Normalized biquad coefficients {a1, a2, b0, b1, b2} (re-exported as
 /// `skate_audio::dsp::biquad::Coefficients`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Coefficients {

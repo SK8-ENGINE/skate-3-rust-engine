@@ -45,12 +45,12 @@ settings screen (`screens/options/options.apt`) are AS2 (ActionScript 2) movies;
   the Skate challenge, two lobby modes and the Party Play menu. Career Main = ChallengeMap, MyCareerTeam,
   SkateProfileOffline, SkateWith, SkateFeed, SoloFreeskate, PartyPlay (matches the retail screenshot row for row).
 - **Rules** (from the code): the settings row count stops at the SFX pack row with <= 1 SFX pack
-  (`GameSettings_GetNumOptions` 825A6F70) and IsItemEnabled (`8260D648`) greys it, greys Difficulty in online modes
+  (`GameSettings_GetNumOptions` 825A6F70) and IsItemEnabled (`8260D648`) grays it, grays Difficulty in online modes
   (GameMode 4 / 5) and Skate Feed settings when unavailable (`8245A2D0`). In a park (`8261FB18`) SkateReel and
-  SkateWith are greyed, SavePark needs a park-state flag, RatePark / FlagSkatePark only in a community park. The park
+  SkateWith are grayed, SavePark needs a park-state flag, RatePark / FlagSkatePark only in a community park. The park
   select hook (`8261F9D8`) asks `ID_SKATEPARK_DIRTY_TITLE` / `_DESC` (Yes / No) before ChallengeMap /
   OnlineChallengeMap leave a dirty park. Settings select (`8260D290`) links rows to screens, Video by front-end
-  state, mode and session (screen 8 / 7 / 6 / 5 / 4). Retail's own greyed look is the row state `disabled` in
+  state, mode and session (screen 8 / 7 / 6 / 5 / 4). Retail's own grayed look is the row state `disabled` in
   core_menu's row sprite.
 
 ## Change
@@ -61,7 +61,7 @@ own executable with `XexImage` and writes `assets/private/menu-tables.json`; set
 (`tools/asset_pipeline/menu_tables.py`, `asset_exports.py`; failures become an optional-content note). Every table is
 found by content or code pattern, never by address, so any build works:
 
-- settings rows: the pointer to the string `ID_GAMESETTINGS_SFXVOLUME` whose neighbour points to `slider`; the run of
+- settings rows: the pointer to the string `ID_GAMESETTINGS_SFXVOLUME` whose neighbor points to `slider`; the run of
   (string, widget) pairs around it; the screens follow while every block holds valid row indices;
 - crossbar items: the pointer to `ReplayEditor` in a record of the item shape (three strings, a small kind, a
   string); categories are the 12-byte `ID_CROSSBAR_*` records right before;
@@ -93,12 +93,12 @@ internal names (`GameSettings`, `SkateFeed`, `SinglePlayer`, `ID_GAMESETTINGS_SF
   `on_select` / `on_highlight` handlers, select interceptors (confirmation popups), value get/set bindings. Every
   hook list is a stack by owner (`Retail`, `Engine(name)`, `Mod(id)`); the last registered wins and removing an
   owner restores the one below.
-- **Greyed until handled:** an entry is enabled only when a handler (or value binding) exists and its enabled rule
+- **Grayed until handled:** an entry is enabled only when a handler (or value binding) exists and its enabled rule
   holds; a settings link is enabled when its target screen has an enabled row. So every retail item exists from the
-  start, greyed, and a feature enables it by registering a handler, with no menu code changes. Online / Xbox LIVE
-  items stay greyed placeholders until the custom online feature registers.
-- Retail rules registered as `Owner::Retail` data: SFX pack hidden and greyed at <= 1 pack (fact `sfx_packs`),
-  Project10 hidden until `project10_unlocked`, Difficulty greyed when `game_mode` is 4 / 5, Skate Feed settings by
+  start, grayed, and a feature enables it by registering a handler, with no menu code changes. Online / Xbox LIVE
+  items stay grayed placeholders until the custom online feature registers.
+- Retail rules registered as `Owner::Retail` data: SFX pack hidden and grayed at <= 1 pack (fact `sfx_packs`),
+  Project10 hidden until `project10_unlocked`, Difficulty grayed when `game_mode` is 4 / 5, Skate Feed settings by
   `skate_feed_available`, park rules (SkateReel / SkateWith off in `CareerPark` / `FreePlayPark`, SavePark by
   `park_saveable`, RatePark / FlagSkatePark by `park_community`), the dirty-park confirmation on ChallengeMap /
   OnlineChallengeMap, and the settings links incl. the Video screen choice (`retail_link`).
@@ -124,7 +124,7 @@ Mod images are a designed field only; drawing them comes with the menus (milesto
 
 ### Problem
 Milestone 1 had value get/set hooks but no rule for how a row's value changes, and no engine setting was bound, so
-every value row was greyed.
+every value row was grayed.
 
 ### What retail does
 All from the TU3 settings input handler `sub_8260C258` (events 14 = Left, 15 = Right), GetIntegerValue
@@ -157,7 +157,7 @@ All from the TU3 settings input handler `sub_8260C258` (events 14 = Left, 15 = R
 
 ### Change
 - `skate_core::menu_values` (new): `ValueRule` {Slider, Toggle, Cycle} with the arithmetic above (f32,
-  `mul_add` like `fmadds`, deterministic), `Display` (bars or a label id), `Direction` (serialisable by name), and
+  `mul_add` like `fmadds`, deterministic), `Display` (bars or a label id), `Direction` (serializable by name), and
   `retail_rule(id)`: the retail rules keyed by string id (disc and TU3 tables agree), so ranges and steps are data.
 - Registry: retail rules installed as `Owner::Retail`; `set_rule` stacks an owner's rule over it (last wins);
   `MenuAction::Step { entry, direction }` turns Left / Right into a `SetValue` through the rule in force;
@@ -205,7 +205,7 @@ All from the TU3 settings input handler `sub_8260C258` (events 14 = Left, 15 = R
 
 ### Open
 - Subtitles, Minimap, HUD, offboard axes, Camera manual, Vibration, Units, Transparency, HOM
-  mode, Skate Feed rows: rules ported, no engine setting yet, so they stay greyed until a feature binds them.
+  mode, Skate Feed rows: rules ported, no engine setting yet, so they stay grayed until a feature binds them.
 - Music volume as a gate (no track started at 0.0, `sub_8249A7E8` / `sub_824CF350`): needs the music player.
 - Retail's default volumes (settings constructor, inside the profile save) not read; 1.0 matches the recomp's
   free-skate capture (Master.in1..3 = 32767).
@@ -217,7 +217,7 @@ All from the TU3 settings input handler `sub_8260C258` (events 14 = Left, 15 = R
   Values: volumes 1.0, Subtitles 0, Minimap 1, Vibration 1, HUD 1, Camera manual 0, Units 0, Play Mode 1, HOM 0,
   Camera Angle 0, axes 0 / 0, Transparency 0, the five Skate Feed toggles 1. `skate_core::menu_values::retail_default`
   holds them; `MenuRegistry::value` falls back to it when a row has no value layer, so rows without an engine
-  setting show retail's value instead of "ERROR!!" (they stay greyed: a default is not a binding). Video Settings
+  setting show retail's value instead of "ERROR!!" (they stay grayed: a default is not a binding). Video Settings
   before: Subtitles / Minimap / Cameraman Mode / HUD read "ERROR!!"; after: Off / On / Off / On. Test
   `every_rule_row_has_a_retail_default_that_displays`. The recomp is not retail: the values are its boot state
   with no save loaded.
@@ -323,7 +323,7 @@ character id). Source paths are relative to `data/fe/` (`source/controls/button_
   `resolve(root, movie, source)`: loads each source movie once, on demand, and binds every import of the root and
   of every library it reaches with retail's rule (first export of exactly that name; a chained import is followed to
   the defining movie, which is what retail's pre-linked source table gives). Output: sorted `Binding`s
-  (movie, character id -> defining movie, character id) and `Unresolved` entries with a `Failure`; serialisable and
+  (movie, character id -> defining movie, character id) and `Unresolved` entries with a `Failure`; serializable and
   deterministic (BTreeMaps, sorted output).
 - `Movie::link_imports(key, resolution, libraries)` in `apt_movie.rs`: gives each bound id a copy of the defining
   library's character plus everything it places, its action streams and its fonts, under free ids / action keys
@@ -361,7 +361,7 @@ character id). Source paths are relative to `data/fe/` (`source/controls/button_
   movies in the user's assets first, part of the screen-manager step).
 - Running the linked menu movies end to end needs the pipeline to export menu movies in the player's JSON format
   (characters, fonts, language) like the HUD prepare step; then `link_imports` is called after `Movie::load`.
-- The missing-file and cycle behaviour of retail (above).
+- The missing-file and cycle behavior of retail (above).
 
 ## Milestone 3c: menu movies exported at setup, loaded and linked (2026-10-08)
 
@@ -490,7 +490,7 @@ handlers), which `apt_display.rs` refused, and 4 import one of them (button_menu
 - small_popup (the last of the 23): the Futura Shadow foreground-font rule (done in Milestone 3e).
 - Input-driven clip events (press, release, rollOver, key*) wait for the menu input milestone; the dispatcher
   shape (`queue_events`, flag constants) is ready for them.
-- The onLoad / onUnload name ids in table 0x82FC9A3C are one entry off from the others (see above); behaviour
+- The onLoad / onUnload name ids in table 0x82FC9A3C are one entry off from the others (see above); behavior
   does not depend on it.
 
 ## Milestone 3e: the Futura Shadow secondary font in every movie (2026-10-08)
@@ -508,7 +508,7 @@ small_popup places "Futura Shadow" but no character that uses futuraheavy.
   miss, the row whose +0 name is "debug" (0x821A06E0); else row 0. It never fails.
 - Text font setup sub_825D6B68: primary = lookup(APT font name); if that name equals "Futura Shadow" (0x8220BD44,
   sub_82AE89B0) the text also gets a secondary font = lookup("futuraheavy") (0x8220BD54) with X adjustment 1 and
-  the other 0. sub_82CA1FD8 draws the primary black, then the secondary in the text colour. The secondary comes
+  the other 0. sub_82CA1FD8 draws the primary black, then the secondary in the text color. The secondary comes
   from the global native table: it does not depend on the movie using that font.
 
 ### Change
@@ -552,7 +552,7 @@ was unknown whether retail APT draws such masks (stencil, scissor) and whether t
 
 ### What retail does [code, TU3]
 - **Read.** `sub_82E7B340` (placement record at r31 = control + 4: +0 flags, +4 depth, +8 character, +12 matrix,
-  +36 colour transform, +44 ratio, +48 name, +52 clip depth, +56 clip-event table) loads +52 and passes it to
+  +36 color transform, +44 ratio, +48 name, +52 clip depth, +56 clip-event table) loads +52 and passes it to
   `sub_82E7AE98` -> `sub_82E7B090` on every path that creates a display object: flag 2 (new or replaced character)
   and a move (flag 1) onto an empty depth. It does not test flag 0x40. A move of an existing object
   (`loc_82E7B5F8`) passes -1, and `sub_82E7B090` only hands the value to the create call `sub_82E7A950`, so a move
@@ -609,7 +609,7 @@ one.
   207 `texture_clamped` (render type 2) and 24 `solid` (type 1); no `texture_wrapped` (3) or `line` (0). Every unit
   resolves; the 207 textured units use all 154 bitmaps (30 are used by more than one unit). The 2 HUD movies
   (trickdisplay and its fonts) have only textured units.
-- [data] GEO unit layout (`tools/vendor/skate3_ui/geo.py`): +0x00 render type, +0x04 RGBA colour (floats), +0x14
+- [data] GEO unit layout (`tools/vendor/skate3_ui/geo.py`): +0x00 render type, +0x04 RGBA color (floats), +0x14
   bitmap character id, +0x18 UV matrix (6 floats, applied to the vertex position, in texels), +0x30 triangle count,
   +0x34 triangles. The bitmap character's `texture_id` names the texture `<movie>_textures\<id>.Texture` in the
   movie's texture package (fetexture.big / fedata.big RX2), decoded to RGBA8 at setup (158 payloads incl. fonts).
@@ -621,8 +621,8 @@ one.
   the movie resource, `sub_82CA30B8` relocates the GEO in place, `sub_82CA2A40` makes one record per shape and
   `sub_825D5DC8` one draw object per unit: type 1 -> solid object `sub_825D5800` (draw `825D5AE0`), types 2 / 3 ->
   textured object `sub_825D4FC0` (draw `825D5580`), any other type (line 0) -> nothing. The textured draw computes
-  one colour = unit colour * colour-transform multiply + add, draws nothing when its alpha <= 0, and hands 6
-  vertices (2 triangles), the UV rows from unit +24..+44, the texture and that colour to `TheSimpleDraw`
+  one color = unit color * color-transform multiply + add, draws nothing when its alpha <= 0, and hands 6
+  vertices (2 triangles), the UV rows from unit +24..+44, the texture and that color to `TheSimpleDraw`
   (`sub_82805368`, shaders `simpledraw_*` in shaders_final.big).
 - Not decoded yet: the sampler (filter, and which of types 2 / 3 clamps); see Open.
 
@@ -633,7 +633,7 @@ one.
 - **Scene** (`crates/skate-game/src/apt_scene.rs`): `Fill` (GEO render type), `Shape.texture` optional (solid and
   line units), `Shape.bitmap`, `Vertex.uv` optional; `Draw.fill` tells the renderer clamp or wrap addressing (text
   draws are clamped); a solid draw has texture `""`. Line units are not drawn (retail `sub_825D5DC8`). Shapes come
-  from a `ShapeSource`; for menus (`retail_unit_colour`) a unit draws with retail's single colour
+  from a `ShapeSource`; for menus (`retail_unit_colour`) a unit draws with retail's single color
   `unit colour * multiply + add` and is skipped at alpha <= 0 (`825D5580`). The HUD keeps its `Shapes` table and
   its earlier `texel * multiply + add` (output unchanged; see Open).
 - **Imports** (`apt_movie.rs`): `Movie::shape_origins` records, for every shape `link_imports` copies, the library
@@ -644,7 +644,7 @@ one.
 - **Stable id and mod entry point**: a bitmap is `<movie key>#<bitmap character id>` in the movie that defines the
   shape. `sdk.menus.bitmap(movie, bitmap, path)` (command `menu_bitmap`) replaces it with a PNG from the mod's
   folder (4 MB file, up to 2048 x 2048, 64 per mod), decoded to RGBA8; the image covers the same fill (same UVs,
-  normalised), newest mod wins, removed on mod stop / disable with the rest of the mod's menu content
+  normalized), newest mod wins, removed on mod stop / disable with the rest of the mod's menu content
   (`clear_owner` / `clear_mods`). `sdk.menus.info().movies.bitmaps` lists every id (`ids`) and each mod's
   replacements (`mods`). A whole movie can still be replaced with `sdk.menus.movie`.
 - **Fixed**: `menu_movie` validated its path as a `.glb` asset, so every Lua `sdk.menus.movie(..., 'x.json')` was
@@ -656,9 +656,9 @@ one.
   data-gated export checks that every shape resolves and every textured unit names a bitmap character whose texture
   id is the payload's. 6 passed.
 - `retail_menu_movies::tests::menu_bitmaps_draw_through_imports_and_mods_replace_then_revert`: a menu importing a
-  library sprite draws the library's solid and textured units (colour, UVs, placement), the retail payload resolves,
+  library sprite draws the library's solid and textured units (color, UVs, placement), the retail payload resolves,
   a mod bitmap replaces it by stable id (invalid ids, sizes and movies refused), newest owner wins, stop reverts.
-  `menu_units_follow_the_retail_colour_rule` (line unit not drawn, alpha 0 skipped, add folded into the colour),
+  `menu_units_follow_the_retail_colour_rule` (line unit not drawn, alpha 0 skipped, add folded into the color),
   `menu_shapes_reject_textured_units_without_bitmap`. skate-mods: `menu_movie` / `menu_bitmap` validation.
 - Data-gated `retail_menu_movie_set_loads_links_and_runs` now also walks every shape of every linked movie
   (local and imported) and draws each movie's first frame: **`RETAIL_MENUS movies=23 of 23 imports=25/25
@@ -670,10 +670,10 @@ one.
 - Sampler: the tfetch filter / address bits of the `simpledraw_*` pixel shaders are not decoded (disassembler fails
   on constant-less shaders; notes "APT shape renderer" OPEN), nor which of types 2 / 3 clamps. Ours names the
   addressing from the render type (`Draw.fill`); the screen-manager renderer must take filtering from that decode.
-- The HUD movie has 233 placements with colour-transform add terms; retail folds add into the unit colour
+- The HUD movie has 233 placements with color-transform add terms; retail folds add into the unit color
   (`825D5580`), ours still adds after the texel for the HUD. Switching the HUD to `retail_unit_colour` is a one-line
   change that changes its look, so it waits for an in-game check. The solid draw `825D5AE0` is assumed to use the
-  same colour rule (to read).
+  same color rule (to read).
 - `missingtexture.Texture` (`0x820AEDB4`): retail's fallback for a missing payload; ours fails the movie at setup
   instead (no retail movie misses one).
 - Drawing the menus on screen comes with the screen manager milestone (the renderer maps `Draw.texture` through
@@ -754,7 +754,7 @@ no-op).
 ### Change
 - `apt_stage.rs`: loaded roots start stopped (above); `retail_screen_manager_closes_a_screen` now passes
   (OnScreenOutroComplete(600) after CloseScreen("600")).
-- `skate-core/src/crossbar.rs` (new): `CrossbarState` (the screen fields, serialisable), `CrossbarView`,
+- `skate-core/src/crossbar.rs` (new): `CrossbarState` (the screen fields, serializable), `CrossbarView`,
   `NavEvent` (retail key indices), `CrossbarRules` (sounds and SetState numbers as data, retail defaults),
   `handle` (port of sub_8261B560 / 8261F0E8 / 8261D9F8 / 8261BC30 / 8261DA58), `RegistryView` (rows and enabled
   rules from the menu registry, so mods change the rows).
@@ -764,7 +764,7 @@ no-op).
 - `Stage::draw` gives each loaded movie's draws under the clip it was loaded into (ancestor matrices, visibility,
   alpha); `apt_scene::draw_from`. Font atlases join the menu image map (`RetailMenuMovies::image`). The open pause
   menu gives 24 draws (22 textured), all textures resolved (data-gated test).
-- Text fields get `_height` (field height; core_menu centres its DLC label with it). NOT RETAIL YET: retail's
+- Text fields get `_height` (field height; core_menu centers its DLC label with it). NOT RETAIL YET: retail's
   autosize height rule is not decoded.
 - `fe_language.rs` (new): FELanguage GetLocalizedFormatNumberString / FormatString / FormatStringCustom
   (registrar 825AA5E8; a local research note; verified the example strings
@@ -792,13 +792,13 @@ no-op).
   (0x82300C68) while core_menu.apt reads `coremenu`.
 - Export set version 4 adds `source/screens/main` and getURL operands (`tools/prepare_menu_movies.py`,
   `tools/vendor/skate3_ui/actions.py`); the user's install needs the hud setup group re-run (automatic).
-- Stage: getURL `_levelN` loads, MovieClip.loadMovie, text changes re-localise (`property_changed`).
+- Stage: getURL `_levelN` loads, MovieClip.loadMovie, text changes re-localize (`property_changed`).
 - Dev view (`retail_menu_stage.rs`, `SKATE3_RETAIL_MENUS=1`, F8; `SKATE3_MENU_MOVIES` points at a dev export):
   boots main.apt, registers the crossbar enums and the CrossBar template, opens core_menu with the retail
   arguments and posts InitialiseMenu on IntroComplete. In game (a local screenshot): the retail
   Free Play pause menu, Port Carverton banner, tab icons, and the Free Play Main rows Challenge Map, Resume
-  Career, Free Play, Call Skater, skate.Profile: Career (greyed: no handlers yet, the agreed rule).
-- Missing frame labels leave the clip where it is (Flash behaviour; retail not traced).
+  Career, Free Play, Call Skater, skate.Profile: Career (grayed: no handlers yet, the agreed rule).
+- Missing frame labels leave the clip where it is (Flash behavior; retail not traced).
 - main.apt needs three more opcodes: 0x3F modulo (82E6E5F8: ToNumber both, C fmod, f32 result), 0x4B ToString
   (82E70458), 0x44 typeof (82E6ECC0; standard AS2 names, NOT RETAIL YET: retail's name table not read).
 - Data-gated tests skip an installed set older than the engine reads (`apt_imports::test_menu_set`); pass
@@ -866,7 +866,7 @@ retail switches the blur on for the pause menu was not known (`pause-backdrop.md
 ### NOT RETAIL YET
 - The blur kernel: retail's blur pass (sub_827F7270, renderer +3292 / pass bit 0x40) is not ported; ours is a
   17-tap gaussian whose radius is the strength in pixels at 720 lines (assumed). The tint multiplies the displayed
-  colour (tint alpha is 0.0 in retail; assumed multiply).
+  color (tint alpha is 0.0 in retail; assumed multiply).
 - The tick rate of the FE manager is not measured (assumed 30 Hz: about 0.37 s to full tint).
 - The alternative (30, 30, 30) floor and the +462 blur-only mode are not ported.
 
@@ -881,7 +881,7 @@ retail switches the blur on for the pause menu was not known (`pause-backdrop.md
 ## Row handlers: retail pause rows open our features (2026-10-10)
 
 ### Problem
-Every retail pause row was greyed: the registry enables a row only when someone handles it, and nothing did.
+Every retail pause row was grayed: the registry enables a row only when someone handles it, and nothing did.
 
 ### Change
 - `retail_menus.rs`: `OVERLAY_ITEMS` registers engine handlers (owner `overlay:<SECTION>`) for ChallengeMap -> MAPS,
@@ -918,7 +918,7 @@ manager whose per-screen records also suspend gameplay, show the chyron and set 
 ### Change
 - `skate-core/src/fe_stack.rs` (new): `FeStack` (main + overlay stacks, FIFO queues, the five ops, the wait rule,
   `input_target`), `ScreenInfo`, `Effect` for the host (open / close / show, gameplay suspend, chyron, blur, HUD,
-  focus). Serialisable plain requests, screens by this build's index.
+  focus). Serializable plain requests, screens by this build's index.
 - `menu_tables`: `FeScreen` carries all record fields (`suspends_gameplay`, `chyron`, `hud`, `input_to_movie`).
 - `retail_menu_stage.rs`: F8 pushes the pause screen (retail Start, plain push) or closes it (op 5); the crossbar's
   back and an engine row close it through the stack; input only while the stack says the pause screen has it.
@@ -965,7 +965,7 @@ them to the top screen's C++ handler and then its movie.
 ### Verification
 - `cargo test -p skate-core fe_input`: parsing in key order, unknown slots rejected, press / repeat / release,
   threshold, pressed keys do not repeat.
-- A local screenshot (`SKATE3_RETAIL_MENUS_KEYS=13`): one AptDown skips the greyed
+- A local screenshot (`SKATE3_RETAIL_MENUS_KEYS=13`): one AptDown skips the grayed
   rows to skate.Profile ("View your career profile"); the movie's UpdateInput after the handler changes nothing
   else.
 
@@ -1017,20 +1017,20 @@ options.apt also needs APT features the pause menu never used (attachMovie, comp
 - A local screenshot (`SKATE3_RETAIL_MENUS_KEYS=15,15,15,2`): Game Settings with
   Difficulty / Audio / Video / Control / Online / skate.Feed Settings, the first row selected.
 
-### Panel, sub-screens and colour (same day)
+### Panel, sub-screens and color (same day)
 - [data, a local research note, verified] The squares were not gradients: panel.apt
-  stretches 16 x 16 colour swatches (panelTopFill, panelCoreFill, ...) into its bands with `_xscale` / `_yscale`
+  stretches 16 x 16 color swatches (panelTopFill, panelCoreFill, ...) into its bands with `_xscale` / `_yscale`
   in BuildPanel, which our APT player ignored; and button_item2's `mButtonRender` is a placeholder for a native
   component (`_type = "CustomButton"`, `_test` = the button), drawn by the player.
 - APT: `_xscale` / `_yscale` / `_rotation` seeded from the placement, script writes (and `_width` / `_height` on
   non-text clips, through their bounds) replace the matrix's linear part (`apt_movie::clip_matrix`, both matrix
   builders). The front-end stage host applies it; the gameplay HUD host does not yet (unchanged).
 - removeMovieClip on attached clips reaches the movie (DeleteOptions on a sub-screen rebuild); test: screen 2.
-- Colour: the menus apply colour transforms in gamma space (hud_render.wgsl mode 1): the console front end works
-  on display values, and a recomp shot shows a near-black panel body where ours was mid grey (solid 0.145
+- Color: the menus apply color transforms in gamma space (hud_render.wgsl mode 1): the console front end works
+  on display values, and a recomp shot shows a near-black panel body where ours was mid gray (solid 0.145
   encoded twice). The gameplay HUD uses the same path and the scale support (user: follow retail; one APT player
   in retail). Checked: the line HUD's ring at 2 s is identical before / after (textured, identity transform);
-  tinted / solid HUD elements now show their display colours (to look at in play).
+  tinted / solid HUD elements now show their display colors (to look at in play).
 - In game (`SKATE3_RETAIL_MENUS_KEYS=15,15,15,2,2,15`): A on Difficulty Settings opens the Difficulty screen
   ("Play Mode < Normal >", "Classic Skate Gameplay" description); Right steps the difficulty through the engine
   binding.
@@ -1081,14 +1081,14 @@ prompt, `PromptImages`); `hint_row` lays out "glyphs, keyboard keys, action". Us
 footer (A / B / Y / LB + RB / X; keyboard mode keeps its key chips), the replay panel (LT + RT, d-pad, A, Y, Back + B,
 sticks, LB + RB, L3) and the mod menu (d-pad, A, B). Mods: the glyph art follows the prompt style table above.
 
-  Face looks: Xbox coloured balls (retail's), PlayStation dark buttons with coloured symbols, Nintendo dark with
+  Face looks: Xbox colored balls (retail's), PlayStation dark buttons with colored symbols, Nintendo dark with
   light letters; named buttons a dark pill with the name. Generated (a small stroke font), no console art; sized
   to retail's measured glyph (0.83 of the box; a recomp shot, local screenshots). The menu
   renderer resolves `prompt/<button>` for the first connected pad (`resolve_for`), Xbox 360 without one.
   `cargo test -p skate-game prompt_sheet -- --ignored` with `SKATE3_PROMPT_SHEET=<folder>` writes a sheet.
 
 ### Verification
-- `cargo test -p skate-game prompt_glyphs controller_kind`: glyph size / colours, SDL-less fallbacks (PS5 ->
+- `cargo test -p skate-game prompt_glyphs controller_kind`: glyph size / colors, SDL-less fallbacks (PS5 ->
   Cross..., Switch South -> B).
 - A local screenshot: A / B prompts beside Select / Back like the retail shot.
 
@@ -1143,9 +1143,9 @@ The user's decision: faithfully recreate the recomp's guide menu and replace our
 the recomp's settings overlay (skate3recomp's rexglue-sdk, `src/ui/overlay/simple_settings_overlay.cpp`,
 `SimpleSettingsDialog::OnDraw` / `GatherInput`, at `third_party/rexglue-sdk` commit ae6ea8e); the rows stay ours.
 - Look: the recomp's palette, metrics (authored for 1080p, `s = clamp(h / 1080, 0.6, 3) * 0.92`, legend at the
-  base scale), column layout (300 s rail and description, content clamped to 300 to 800 s, the block centred, a
+  base scale), column layout (300 s rail and description, content clamped to 300 to 800 s, the block centered, a
   whole number of 52 s row slots, at most 12), title "Settings" (sub-pages show their own name), lime section bars,
-  white rows, magenta steppers that grey out at the ends, magenta sliders, the black focus fill with a 2 s lime ring
+  white rows, magenta steppers that gray out at the ends, magenta sliders, the black focus fill with a 2 s lime ring
   and a 4 s black edge outside it, the teal rail with Close Game pinned under it, the Description panel, and the
   pad / keyboard legend that follows the last input. Font: Inter Regular / SemiBold (SIL OFL, subset to Latin,
   `crates/skate-game/src/fonts/`, from Inter 4.1), the recomp's typeface; sizes converted from ImGui line heights
@@ -1194,7 +1194,7 @@ the recomp's settings overlay (skate3recomp's rexglue-sdk, `src/ui/overlay/simpl
   / 2.08 ms; the first "on" run is the only outlier, the other two match "off" to 0.02 ms.
 - `cargo test -p skate-game`: 508 passed, the known `pipelines_accept_valid_group_outputs_when_fingerprint_changes`
   failure.
-- Play-tested as the default in hails-additions sessions on 2026-10-12 (pause menu freeze, settings text colours,
+- Play-tested as the default in hails-additions sessions on 2026-10-12 (pause menu freeze, settings text colors,
   Trick Guide; each fixed in its own section below).
 
 ## Stored settings: every rule row steps and saves (2026-10-11)
@@ -1254,12 +1254,12 @@ then port each row's effect. Rows that save but have no effect yet are listed be
     trace hook on `sub_82694D38` logging caller, channel and the three floats would settle it).
   - Tests: `cargo test -p skate-core rumble`, `cargo test -p skate-game rumble` (60 Hz at any frame rate, the
     switch-on test rumble, off blocks starts, mod channels separate and stopped with their mod). Not felt on a pad.
-- No effect yet, so greyed (2026-10-13, see "Settings without an effect are greyed" below): Minimap +158
+- No effect yet, so grayed (2026-10-13, see "Settings without an effect are grayed" below): Minimap +158
   (`sub_82665278`: hidden with the HUD off, forced on / off in some game states; we draw no minimap), Subtitles +157
   (six readers gate subtitles on it or a forced flag; no subtitle text in the engine), Cameraman Mode +165 (decoded
   2026-10-13, see "Cameraman Mode" below; not ported), HOM mode +184 (readers found, effect undecoded), Units,
   Transparency (no reader of the copied byte found), the Skate Feed toggles.
-- Still greyed (no retail rule decoded): SFX Pack (hidden with one pack), Auto sign-in (an online popup; decoded
+- Still grayed (no retail rule decoded): SFX Pack (hidden with one pack), Auto sign-in (an online popup; decoded
   2026-10-13: Left / Right flip byte +194, default 1, a popup only when switched off; left out by the user's choice).
   Video Calibration now opens its screen (below).
 
@@ -1377,7 +1377,7 @@ announcer speech). Without the decode, ped speech is chosen and logged but silen
   overlay").
 - Ped Speech on without decoded takes (`private/audio/speech/livingworld` empty or missing) marks the `audio`
   group stale, so Extras shows **Refresh Game Files** and the title chip says GAME FILES OUT OF DATE; the same
-  check runs at every start while the choice is on (a cancelled refresh asks again). `setup::asset_root` passes
+  check runs at every start while the choice is on (a canceled refresh asks again). `setup::asset_root` passes
   `SKATE_SETUP_SPEECH=1` to the setup helper when the install's saved choice is on (logged
   `SETUP: speech decode asked for`). Off keeps the decoded takes; setup skips the decode from the next refresh.
 - `SKATE_VERIFY_MENU=optin` opens the overlay on the group for screenshots.
@@ -1425,7 +1425,7 @@ between), the third open fails 5 ms after `open pause menu (FE 54)`, physics tic
 - `retail_menu_stage.rs`: a stopped stage releases the gameplay suspension, the pause backdrop and the HUD mode once
   (warning `stage stopped with the pause menu open: gameplay resumed`); Start then opens the PC overlay.
 - NOT RETAIL (mechanism): retail's APT player refcounts its objects; the collection only keeps the slots bounded and
-  changes no script-visible behaviour (only unreachable objects are freed).
+  changes no script-visible behavior (only unreachable objects are freed).
 
 ### Verification
 - `cargo test -p skate-game pause_menu_reopens_without_growing` (data-gated on the exported menu set): 8 open/close
@@ -1436,7 +1436,7 @@ between), the third open fails 5 ms after `open pause menu (FE 54)`, physics tic
 - Challenge Map still opens the PC overlay's Maps section (the bridge in "Row handlers"); retail's Challenge Map
   screen (FE 17) with its locations and teleports is not ported.
 
-## Settings text colours and the glow (2026-10-12)
+## Settings text colors and the glow (2026-10-12)
 
 ### Problem
 Play test: on Difficulty Settings the current value ("< Normal >") was unreadable, the Audio "100%" values were very
@@ -1446,7 +1446,7 @@ dim, and the selected row's glow was far too bright while it flickered.
 - [data, code] The rows' own scripts set `TextField.textColor` per state in SetState (highlight_selector,
   highlight_slider, highlight_option, menu_part_text_hilite, main: selected value 0x37A5FF, rows on 0x70BBFF, off
   0x385570, disabled 0x555555). Our text draw never read it and used only the field's authored `color_argb` (dark
-  navy #0F4670 for the selector value, grey #3E485C for the slider value, #70BBFF for every row title).
+  navy #0F4670 for the selector value, gray #3E485C for the slider value, #70BBFF for every row title).
 - [code, medium-high] The HUD / menu layer blended in linear space (target `Rgba8UnormSrgb`, shader output converted
   to linear). Retail's APT draw state is straight SRC_ALPHA / INV_SRC_ALPHA (`sub_827E4AF0`, bound by the draw
   `sub_825D4490`) on a display-value image (the 2D pass's format is inferred from the recomp's tone chain and frame
@@ -1456,26 +1456,26 @@ dim, and the selected row's glow was far too bright while it flickered.
 ### Change
 - `apt_scene.rs`: a text draw takes the RGB of the field's script-set `textColor` when set, the alpha from the field.
 - `scoring_hud.rs`, `hud_render.wgsl`, `hud_composite.wgsl`: the layer target is `Rgba8Unorm` holding display values;
-  both shader modes output display values (mode 1 applies the colour transform to the texel's display value); the
+  both shader modes output display values (mode 1 applies the color transform to the texel's display value); the
   composite undoes the coverage, converts to linear and premultiplies again for the frame. The gameplay HUD shares the
   layer (one APT player in retail).
-- Moddability: the colours stay in the movie scripts (mod movies and scripts use the same path); no Rust constants.
+- Moddability: the colors stay in the movie scripts (mod movies and scripts use the same path); no Rust constants.
 
 ### Verification
-- `retail_options_screen_builds_rows` now also asserts the script colours (0x385570 / 0x37A5FF) reach the draws; the
+- `retail_options_screen_builds_rows` now also asserts the script colors (0x385570 / 0x37A5FF) reach the draws; the
   full skate-game suite passes apart from the known upstream `pipelines_accept_valid_group_outputs_when_fingerprint_changes`.
 - In game (local test build): the menus load (a first build put a helper between `@fragment` and the entry point and
   the composite shader failed to compile; fixed). The user's visual check of the glow and the gameplay HUD is pending.
 
 ### Open questions
-- Prove the 2D pass's colour format with a short recomp trace at `sub_825D4490`.
+- Prove the 2D pass's color format with a short recomp trace at `sub_825D4490`.
 - `apt_scene.rs` ignores `blend_mode`; retail also has an additive ONE/ONE object (`[0x830680AC]`, user not traced).
 - Trick Guide (Learn tab): ported, see "Trick Guide".
 
 ## Trick Guide (2026-10-12)
 
 ### Problem
-Pause menu > Learn > Trick Guide was greyed: no handler and no retail screen (play test 2026-10-12).
+Pause menu > Learn > Trick Guide was grayed: no handler and no retail screen (play test 2026-10-12).
 
 ### Root cause
 Not ported yet. Retail runs it as FE screen 14 (template 29 TrickTutorial, movie `screens/tricks/trickguide`); the
@@ -1510,7 +1510,7 @@ C++ screen object answers the movie's FETrickTutorial natives and its picker cal
 - Word wrap (the description field): `sub_82CA14D0` loop 0x82CA1BB0 breaks greedily at spaces only, `^` forces a
   break, a word wider than the field overhangs; lines advance by vfunc +72 (0x82806470: font+360 x scale) x font+364
   (FontManager row +24 = field 0x672E35A2AA8C4A00: futuraheavy 0.9, others 1.0) x height; per-line alignment
-  0x82CA23B4 (1 right, 2 and 3 centred); no clipping.
+  0x82CA23B4 (1 right, 2 and 3 centered); no clipping.
 - Research: a local note, `trick-guide-gestures.md`, `apt-text-wrap.md`.
 
 ### Change
@@ -1521,11 +1521,11 @@ C++ screen object answers the movie's FETrickTutorial natives and its picker cal
   array elements (`items`).
 - `skate-game/src/trick_guide_host.rs` (new): the natives and picker callbacks, `TrickGuideMods` (mod layers);
   `retail_menu_stage.rs`: FE 14 open / close, input, queued screen states, the TrickGuide item's engine handler (only
-  with tables, movie and collections, else the row stays greyed); `crossbar_host.rs` routes the objects;
+  with tables, movie and collections, else the row stays grayed); `crossbar_host.rs` routes the objects;
   `fe_backdrop.rs` `TRICK_GUIDE_SCREEN`; `skater_animation.rs` `regular_stance`.
 - APT fixes found on this screen: `apt_movie.rs` `class_links` (every copy of a library symbol gets its registered
   class; the screen imports "Button Item" itself and again through panel > button_menu, so its button help had no
-  SetButtonType and no prompts); `apt_text.rs` / `apt_scene.rs` word wrap, line advance and alignment 3 centred;
+  SetButtonType and no prompts); `apt_text.rs` / `apt_scene.rs` word wrap, line advance and alignment 3 centered;
   `apt_movie.rs` `link_imports` (2026-10-13: every library a screen copies from keeps all its exported symbols
   reachable by linkage name; gesture_item's `SetGestureType(gesture)` runs `attachMovie("g_" + gesture,
   "gestureitem", 0)` on symbols its timeline never places, so the stick icon showed the ring with no arrow. Retail
@@ -1694,7 +1694,7 @@ The demo used a fixed side view of the hips, no fog, and the current map's sun o
   element, +64 = 7, and element 87 at +60). [code + data]
 - Interpolation (read in the code): `sub_828F0BB0` sets each element up per segment as a cubic Hermite
   `((a*u + b)*u + c)*u + p0`, a = m0 + m1 - 2D, b = 3D - m1 - 2*m0; the tangent `sub_828F0990` is the non-uniform
-  Catmull-Rom tangent in the segment's own parameter (neighbour segment weighted by the durations; none at the ends:
+  Catmull-Rom tangent in the segment's own parameter (neighbor segment weighted by the durations; none at the ends:
   D), scaled by the tangent element's value at that key. [code]
 - FOV: `sub_828F1E80`, `2*atan(15.96 / lens_mm)`, lens clamped to 10..500 mm. [code]
 - While the set is loaded, the renderer's environment is render location `trick_guide` (`sub_827950A8`: model list
@@ -1707,7 +1707,7 @@ The demo used a fixed side view of the hips, no fog, and the current map's sun o
 ### Change
 - `skate-core/src/camera_track.rs` (new): `CameraTrack::sample` (the Hermite and tangent above), `fov_radians`.
 - `skate-data/src/ice_camera.rs` (new): `scene_tracks(bytes, VIEW_SCENE)` reads the block (little-endian; key times
-  u16/65535 of the length, quantised elements MSB-first bit streams).
+  u16/65535 of the length, quantized elements MSB-first bit streams).
 - `skate-data/src/trick_guide.rs`: `Entry.camera_track` from the ref; `skate-core` `TrickGuideState.camera_track`
   (S+200) and `EntryPatch.camera_track`; mods: `sdk.menus.trick_guide` option `camera_track` (track index).
 - `trick_guide_scene.rs`: the playing clip's track is fitted to the clip length (retail "Fixing Camera Group
@@ -1807,13 +1807,13 @@ words (64k frames, no malformed lines). A watch-list run read the element descri
   tracks 0 and 3) subtracts an offset from `sub_828F3088` from eye and look; the trace did not separate it from the
   follow offset.
 
-## Settings without an effect are greyed (2026-10-13)
+## Settings without an effect are grayed (2026-10-13)
 
-The user's decision: settings that do not work yet are greyed out, like the other retail menu items.
+The user's decision: settings that do not work yet are grayed out, like the other retail menu items.
 
 ### Change
 - `retail_menus.rs` `NO_EFFECT_YET`: Subtitles, Minimap, Cameraman Mode, HOM mode, Units, Transparency and the four
-  skate.Feed toggles get no stored value layer, so they stay greyed and show retail's default; values saved by
+  skate.Feed toggles get no stored value layer, so they stay grayed and show retail's default; values saved by
   earlier builds stay in `settings/game-settings.json` untouched. A mod's value layer (`menu_handle` with a value)
   still enables a row. An id leaves the list when its feature lands.
 - Rows that work (step, apply, persist): Play Mode, SFX / Dialog / Music volume, Camera Angle (engine bindings),
@@ -1822,12 +1822,12 @@ The user's decision: settings that do not work yet are greyed out, like the othe
 ### Verification
 - `cargo test -p skate-game rows_without_an_effect_stay_greyed_until_a_mod_binds_them`.
 - A local screenshot: Video Settings with Subtitles, Minimap and Cameraman
-  Mode greyed; Camera Angle, Video Calibration and HUD enabled.
+  Mode grayed; Camera Angle, Video Calibration and HUD enabled.
 
 ## Video Calibration (2026-10-13)
 
 ### Problem
-Game Settings > Video > Video Calibration was greyed (no handler).
+Game Settings > Video > Video Calibration was grayed (no handler).
 
 ### Root cause / evidence (TU3 recomp code, every handler named here re-read; research note on video calibration)
 - Row 25 in the settings select handler `sub_8260D290` plays core_a_button and pushes FE screen 51 through
@@ -1839,20 +1839,20 @@ Game Settings > Video > Video Calibration was greyed (no handler).
   0x8260EA48: choice 0 pops the screen, any other restarts at page 0). Input 0x8260E890: A (core_a_button) advances,
   B (core_b_button) pops below counter 2, else SetState(counter - 2) and counts down; it always returns 0.
 - The movie calls no Game.* native: pages settings / contrast / brightness (SD variants when Screen_EdgeOffset > 0);
-  nothing is changed or saved by the game. The A / B prompts come from button_menu (`AddItem`), coloured 0xFFFEEC
+  nothing is changed or saved by the game. The A / B prompts come from button_menu (`AddItem`), colored 0xFFFEEC
   through its SetInfo -> `setTextFormat`.
 - Hidden / shown screens: the facade's ShowScreen (0x825DA410) passes the AS id as "%d" and "true" / "false".
 
 ### Change
 - `tools/prepare_menu_movies.py`: root `source/screens/options/videocal` (setup's hud group re-exports; the row stays
-  greyed in sets without it).
+  grayed in sets without it).
 - `skate_core::video_calibration` (new): the counter as retail (`advance`, `back`, `popup_result`), rules as data
   (`CalibrationRules`: page count, popup strings, sounds; retail's the defaults).
 - `retail_menu_stage.rs`: FE 51 opens / closes its template; A / B as 0x8260E890; loaded posts the first page; settings
   rows whose engine handler names an FE screen push it with retail's flags; `Effect::Show` reaches the movies through
   `_global.ScreenManager.ShowScreen`. The row's engine handler (`Owner::Engine("screen:1f3e2788f93b6a2e")`) is
   registered when the movie is in the set; a mod can register its own handler on the row.
-- `apt_stage.rs`: `TextField.setTextFormat` applies the format's colour as the field's text colour. NOT RETAIL YET:
+- `apt_stage.rs`: `TextField.setTextFormat` applies the format's color as the field's text color. NOT RETAIL YET:
   standard AS2 semantics, whole field, font and size not applied.
 - The A / B prompts are the native CustomButton glyphs (doc "Button prompts"), so they follow the connected pad.
 - The "finished" popup is retail's (see "Popups" below): Yes closes the screen (Game Settings shows again on the
@@ -1863,7 +1863,7 @@ Game Settings > Video > Video Calibration was greyed (no handler).
 - `cargo test -p skate-game retail_video_calibration_steps_its_pages` (data-gated on the menu set): the retail movie
   loads, reports loaded / intro complete and takes SetState 0..2 with no Game.* call unanswered.
 - In game (dev export, `SKATE3_RETAIL_MENUS_KEYS` through Options > Game Settings > Video > Video Calibration):
-  a local screenshot (the settings page with colour bars, A Continue / B Back),
+  a local screenshot (the settings page with color bars, A Continue / B Back),
   `page1.png` (Contrast after A).
 
 - In game: a local screenshot (the popup over the dimmed brightness page), `yes.png`
@@ -1929,7 +1929,7 @@ settings?"); the engine had none, so the calibration screen auto-answered Yes.
 ### Change
 - `skate_core::fe_popup` (new): `PopupRequest` (sPopupInfo as data, retail defaults), `PopupList` (retail ordering,
   ids from 0, choose with auto-remove, remove, clear-all with choice -2, a mod's popups by callback prefix).
-  Callbacks are stable string ids, so requests and events are plain, serialisable data.
+  Callbacks are stable string ids, so requests and events are plain, serializable data.
 - `popup_host.rs` (new): the `Popup` natives from the shown request; while a popup is shown it answers
   `Game.OnMenuSelect` / `OnMenuGetItemEnabled` (every item enabled, host vt+72) / `OnMenuHilight`, so the choice does
   not reach the screen below.
@@ -1965,7 +1965,7 @@ settings?"); the engine had none, so the calibration screen auto-answered Yes.
 
 Local research notes (research; verified the S+165 branch in
 `sub_827F4D28`, the rig hashes and the +0x34788 flag in a recomp watch run).
-- [code] The setting is a look switch, not camera behaviour: `sub_82801990` sets the scene render manager's flag
+- [code] The setting is a look switch, not camera behavior: `sub_82801990` sets the scene render manager's flag
   `[0x83083C5C]+0x34788` from S+165 (forced on in cutscenes, off in the skatepark state +0x34786); with it set,
   character presentation objects pick LightRig "nis" (FNV-1 0x1E7BA14D) instead of "default" (`sub_827823D8` ->
   `sub_827A5A78`), draw an extra character pass (`sub_82784298`), and `sub_827F4D28` sets post mode 4414 (S+165 on)
@@ -1974,7 +1974,7 @@ Local research notes (research; verified the S+165 branch in
   off clears +0x34788 at once.
 - [code] A rig is a shader variant per material binder; its light values come from run-time globals, so a port needs
   a short recomp hook logging the binder constants (`sub_82CBBBF0` nis / `sub_82CBD050` default) with the setting on
-  and off. Our characters use one fixed rig (`retail_character.rs`). Greyed until then.
+  and off. Our characters use one fixed rig (`retail_character.rs`). Grayed until then.
 
 ## Loading screen (FE 52)
 
@@ -2060,7 +2060,7 @@ pass and recomp timing run), research b581 (port plan); claims below verified.)
     credits, the action overlay, the autosave wheel and the FMV popup. The Trick Guide panel's right edge was about
     200 px further in than in a retail shot (local screenshots); 136 of that was this.
     It also answers the video calibration question below: retail shows the HD pages.
-  - **Colours: no difference.** At full size the text matches (body (111,147,163) recomp vs (112,147,160) ours, title
+  - **Colors: no difference.** At full size the text matches (body (111,147,163) recomp vs (112,147,160) ours, title
     (54,78,101) vs (65,87,110), backdrop (20,27,39) vs (20,26,40)); "dimmer" and "bluer" came from the 480 px JPEG.
   - **Spinner.** The blue wheel at the bottom right is the autosave layer's load tag (`controls/autosave`, one of the
     layers `main.apt` loads): `_global.Load_EnableTag(bEnableBackground)` -> `SetLoadingVisible(true)` (corner
@@ -2069,7 +2069,7 @@ pass and recomp timing run), research b581 (port plan); claims below verified.)
     when FE 52 opens and `Load_HideTag()` when it closes (`retail_menu_stage::load_tag`); a menu set without the
     layer runs without it. Retail's own caller is the main table native EnableLoadingTag `825A9EC0` (not traced).
 - **Moddability (2026-10-24, USER-ASKS 326):** `sdk.loading` (capability `loading` 1, `sdk/ENGINE_API.md` "Loading
-  screen"): a mod's hint and Coach Frank lines by key (string ids localised, other text as written), joined to the
+  screen"): a mod's hint and Coach Frank lines by key (string ids localized, other text as written), joined to the
   retail lines when the screen opens; `retail(false)` leaves only mods' lines on a panel mods fill; `hold` / `release`
   keep a running load's screen up past the engine's own work, at most 30 s (`tips_loader_host::LoadingMods`,
   `MAX_MOD_HOLD_SECS`); all of it goes with the mod (`retail_menus::clear_owner`). The movie is replaceable through
@@ -2108,7 +2108,7 @@ research b589 (verified the table rows, enabled bytes and labels in the image an
   `ID_RECORD_DMO_01`; TU3 and disc builds checked; setup now requires it, so the environment group runs again on the
   next Refresh Game Files). `skate_core::career_stats` (rows, kinds, the fetch, the formats) and
   `career_stats_host.rs`: the local player's totals in `settings/career-stats.json` (written every 30 s when changed and
-  at exit; the 30 s write runs on a short-lived thread, off the game thread). Optimisation pass: a few adds per fixed
+  at exit; the 30 s write runs on a short-lived thread, off the game thread). Optimization pass: a few adds per fixed
   step and a small JSON (under 2 KB) at most every 30 s, nothing per frame to measure.
 - **Rows fed (2026-10-25, USER-ASKS 335; research b590, checked the bail-end
   writer 0x8250F820, the trick-end writer 0x82773D98 and the move-end writer 0x82774230 itself):**
@@ -2116,7 +2116,7 @@ research b589 (verified the table rows, enabled bytes and labels in the image an
     loads), distance on the board (7) and on foot (9), skitching distance and time (11, 12; while the skitch state
     holds a car), ped hits by type (47..60, 0x826C0730).
   - Wipeouts (6): +1 per bail start (0x82774DA0; ours: the scoring runtime's bail count). Bail distance (29): position
-    steps over 0.005 m while bailing, added in whole metres (0x82775158 / 0x82775018).
+    steps over 0.005 m while bailing, added in whole meters (0x82775158 / 0x82775018).
   - Trick ends (0x82773D98): successful (24) / unsuccessful (23) tricks per announced trick leaving its slot, and on a
     success a flip (15) or a late flip (18: the trick's base is the ollie, `catalog::base`); the scoring runtime posts
     `StatEvent::TrickEnd` from `finish`.
@@ -2157,7 +2157,7 @@ research b589 (verified the table rows, enabled bytes and labels in the image an
     bail end is not added, 0x82DAEBC0); ground time is the time in bail less the air time. Ours:
     `hall_of_meat::airborne`, `BailRecord::air_seconds`.
   - Bail ground and air distance (38, 39; research b597, checked 0x82DAECB8 and 0x82DAEBC0): the body is the
-    skeleton centre of mass (retail `[skater+0x24]`, written by 0x82BE1AE8 from Skeleton +16144 / +16176; ours
+    skeleton center of mass (retail `[skater+0x24]`, written by 0x82BE1AE8 from Skeleton +16144 / +16176; ours
     `board_frames.centre_of_mass` / `com_velocity`, the same values our port publishes as `reckoning.vector_64 /
     _16`). In an air the apex keeps the highest height and the air's distance is the apex less this tick's height;
     each finished air adds it (a fall height, not a horizontal length). On ground ticks the speed times the step adds
@@ -2315,7 +2315,7 @@ window shown at 10 s with the splash gone; `STARTUP_LOADING done in 5170 ms`, no
   exactly the documented tables and addresses (36 rows, 13 screens, 5 categories, 49 items, 56 keys, 9 modes,
   Career Main, park rows 9 slots, Free Play 4 tabs); the user's disc `default.xex` (a different build) gives the same
   content at its own addresses, minus TU3's additions (above), compared entry by entry against TU3.
-- `cargo test -p skate-core menus`: greyed by default, a handler enables, dirty-park confirmation intercepts, hidden
+- `cargo test -p skate-core menus`: grayed by default, a handler enables, dirty-park confirmation intercepts, hidden
   rules (Project10, SFX pack), links and the Video choice, mod add / hide / reorder / relabel and exact revert,
   owner stacking.
 - `cargo test -p skate-mods menus`, `cargo test -p skate-game retail_menus`: options and rule validation, mod
@@ -2323,14 +2323,14 @@ window shown at 10 s with the splash gone; `STARTUP_LOADING done in 5170 ms`, no
 - `python -m unittest tools.asset_pipeline.test_menu_tables`: the setup step through the real spawn path.
 
 ## Open questions
-- Decoded 2026-10-29 (research b673): Career IsItemEnabled `8261F850` greys SkateReel / SkateWith when `82511168`
+- Decoded 2026-10-29 (research b673): Career IsItemEnabled `8261F850` grays SkateReel / SkateWith when `82511168`
   says the current world row has `IsSkatePark`; EnterSkatePark while ProgressionManager +0x3A is set and neither DLC
   CCF0003 nor the `film_skpk_univ_01` challenge is known; PartyPlay without the San Van pack (CCF000C, `82518AD0`).
   The Free Play twin is `82620320` (only SkateReel / SkateWith, same world check); `826205C8` is the Free Play PARK
   twin of `8261FB18` (SavePark = flag `[0x83084690]+0x23` only; RatePark / FlagSkatePark = world state 11, flag set and
   `82516C18` returning 0). Ported as retail rules on new facts (`world_is_skate_park`, `skate_park_locked`,
   `party_pack_owned`; skate-core menus 11 pass). Open: the game publishes no menu facts yet (context always
-  "FreePlay"), so the world fact needs the current map's world row; PartyPlay stays greyed until the pack fact is
+  "FreePlay"), so the world fact needs the current map's world row; PartyPlay stays grayed until the pack fact is
   published from the DLC unlocks.
 - Mode keys are ours (retail has no names); the online / lobby menus are extracted but not decoded further (online
   is a custom implementation later).
@@ -2342,7 +2342,7 @@ window shown at 10 s with the splash gone; `STARTUP_LOADING done in 5170 ms`, no
 ## Challenge Map: movie export and hooks for every map node (2026-10-18, in progress)
 
 Todo (user): implement the retail challenge map teleports (DownTown, University and so on); like the rest of
-the retail menus, unusable menu items are greyed out for now, and every menu item gets its hooks even if nothing
+the retail menus, unusable menu items are grayed out for now, and every menu item gets its hooks even if nothing
 uses them yet.
 
 Retail (research b244 to b244d, b255; Ghidra + the exported movie): one movie `source/screens/map/challengemap`
@@ -2359,7 +2359,7 @@ Done so far:
 - Hooks: `skate_core::menus::EntryKind` has one kind per vault class (`map_listing` ... `code_unlocks`), and
   `MenuData::map_nodes` holds the tree (entry, parent, label, sort order). Every node is an entry from the start, so
   each has its hooks (handlers, visible / enabled rules, interceptors) with the hook id `<class>:<key>`
-  (`fe_locations:dist_downtown_aletown`). Greying is the existing rule: no handler, greyed; a tab or folder is
+  (`fe_locations:dist_downtown_aletown`). Greying is the existing rule: no handler, grayed; a tab or folder is
   enabled when something inside it is. `Hide` edits drop a node with everything under it. Test
   `challenge_map_nodes_have_hooks_and_stay_greyed_until_handled`.
 
@@ -2376,7 +2376,7 @@ guard went to 16384 (it pre-allocates 11 picker rows, ~2838 clips; research b260
 header flag (`!(child vt+0x28)`), not the greying: the movie adds a `true` row as a picker header (bytecode of
 UpdateStuffMenuItems: `Not; If` jumps to `AddItem` when false, else `AddSpecificItem(text, mHeaderItem)`), and the
 picker skips headers when it places its highlight; sending the greying there made Downtown a header and A landed on
-the greyed Industrial row. Greyed rows come from `Game.OnMenuGetItemEnabled` only. Test
+the grayed Industrial row. Grayed rows come from `Game.OnMenuGetItemEnabled` only. Test
 `retail_challenge_map_screen_opens_and_picks_a_location` (data-gated) opens Downtown and picks its first location
 through the movie's picker. B returns to the folder's row and each tab keeps its row (research b261: pop
 `sub_82D0D378` selects the folder it left; the per-tab slot `mgr+0x118 + 4*tab` saved by `D100` at the root and
@@ -2394,7 +2394,7 @@ never the white fallback. Which picture: the highlighted location's `world` reco
 export resolves each world record's own name (word 0 of `Sk8::FE::tMapInfo` = the name's offset in
 skatercollections.bin, read through `vlt.vault`) into the manifest's `world_maps`, and
 `skate_data::challenge_map::location_maps` walks location -> district world -> parents. (A first version put this in
-the vault converter `vlt.py`; that file is in the core, living world and customiser fingerprints, so every install
+the vault converter `vlt.py`; that file is in the core, living world and customizer fingerprints, so every install
 would have redone those stages: moved to the menu stage, which re-runs for version 7 anyway.) The icon pack
 `fe/source/images/icons/minimap` is exported per texture (`texture/<name>`, 43) for the markers. Folders, the root and
 `map_portcarverton` use the default `map1024`; a change posts SetState 34. Mods: `RetailMenuMovies::set_named_image`
@@ -2410,7 +2410,7 @@ draws as a placeholder carrying its transform; the stage expands it into 32 x 32
 icon pack `texture/<icon>`; an icon the pack lacks draws nothing (retail draws `missingtexture` from
 globaltextures.rx2, not exported). The cursor (`IsCursorVisible` / `GetCursorCoordinates`) sits on the highlighted
 marker; the movie places its own cursor clip. Not yet: the park screenshot (`LoadAssetByName`), challenge markers
-(their locator field 0xF1C6D5FA4A23951E; challenges are greyed anyway). Research files: b257 / b258 / b259
+(their locator field 0xF1C6D5FA4A23951E; challenges are grayed anyway). Research files: b257 / b258 / b259
 (fedynamic.big map textures, the image renderer natives, the export plan).
 
 Out-of-date menus force the refresh (user, 2026-10-18): the asset check's menu movie / table findings restart the game
@@ -2430,7 +2430,7 @@ working.
   - `retail_menu_stage.rs` `drop_reopen_and_close`: an Open and a later Close of the same screen in one batch are
     both dropped (the screen ends closed either way; other effects keep their order). NOT RETAIL (mechanism), same
     outcome.
-  - `apt_stage.rs` `unload_into`: a load still queued for a clip being unloaded is cancelled (any movie, mods'
+  - `apt_stage.rs` `unload_into`: a load still queued for a clip being unloaded is canceled (any movie, mods'
     included).
   - Collector: triggers on slots in use (`live_objects`), not the slot vector's high-water mark (which made it
     collect every update once passed), and `collect_at` is capped at 3/4 of the guard.
@@ -2529,7 +2529,7 @@ Follow-up (laptop 2026-10-19 12:32): the start-up check said "game files current
 
 Problem (PR #52 next item 8): the Free Play pause row Extras opened our PC overlay's EXTRAS page; retail opens FE 18,
 whose first row takes a cheat code (the zombie cheat). User choices (2026-10-19): cheat entry = "On-screen keyboard";
-rows 1-3 (console shoe / pre-sell codes) = "Unlock directly"; Licenses / Credits = "Our licenses + greyed credits".
+rows 1-3 (console shoe / pre-sell codes) = "Unlock directly"; Licenses / Credits = "Our licenses + grayed credits".
 
 Root cause / evidence (research b320, `b304-retail-cheat-screen.md`,
 `b305-retail-text-entry.md`, `b321-extras-code-unlocks.md`; verified the template and screen records):
@@ -2560,7 +2560,7 @@ Change:
   set the menus load (`SKATE3_MENU_MOVIES` when set).
 - NOT RETAIL YET / ours: the keyboard look (since 2026-10-22 the Extras popup frame, see "The cheat entry in the menus' popup style"); who posts retail's first SetState(10); the zombie mode gate (retail's mode
   values 0 / 3 / 4 not decoded; ours: Free Play). Rows 1-3 (the code unlocks) unlock directly (`ExtrasRules::default`
-  in `skate-core/src/extras.rs`); Credits / Licenses / Skate Reel stay greyed until FE 25 / FE 3 / FE 24 are ported
+  in `skate-core/src/extras.rs`); Credits / Licenses / Skate Reel stay grayed until FE 25 / FE 3 / FE 24 are ported
   (Licenses: the FE 3 viewer work is kept, WIP, user 2026-10-19). The other retail cheat codes change things the engine does not have and are not listed.
 
 Verification: skate-core `extras`, `text_entry`, `cheats` tests (10); `extras_host` test;
@@ -2587,24 +2587,24 @@ looked at in the running game (keyboard look, popup over the keyboard).
 - **Retail:** FE 46 opened the Xbox system keyboard (b305), so the look is ours. The user chose "Skate 3 popup style" (2026-10-22).
 - **Change (`text_entry_ui.rs`, `retail_menu_stage.rs` render, `retail_menu_movies.rs` `shared_text_assets`, `fe_backdrop.rs`):**
   - The keyboard is now drawn on the menu stage's layer as stage draws, not a Bevy UI panel.
-  - The frame is the Extras popup's own `controls/panel` frame rebuilt at the keyboard's size: 16 px paper corners, 8 px edges, cream inner paper, the title band, the body, the tinted inner corners and side strips, the paper grain at 0.325, the cream footer. Pieces, UV turns and colours are copied from the Extras movie's draws (`SKATE3_DUMP_DRAWS=1` on `retail_extras_screen_lists_its_rows_and_opens_cheat_entry` prints them, with the UVs of the panel pieces).
+  - The frame is the Extras popup's own `controls/panel` frame rebuilt at the keyboard's size: 16 px paper corners, 8 px edges, cream inner paper, the title band, the body, the tinted inner corners and side strips, the paper grain at 0.325, the cream footer. Pieces, UV turns and colors are copied from the Extras movie's draws (`SKATE3_DUMP_DRAWS=1` on `retail_extras_screen_lists_its_rows_and_opens_cheat_entry` prints them, with the UVs of the panel pieces).
   - The title is in Futura Overprint (tan), the keys and the field in Futura Std Medium, and the highlighted key in the settings rows' selected blue (0x37A5FF).
   - The prompts (A Select, X Delete, Y Shift, Start Done, B Back) are the connected pad's glyphs (`prompt/<button>`, as the movies' CustomButtons) with futuraheavy labels, right-aligned on the paper footer like the Extras popup.
   - The game blurs behind FE 46 like behind the menus (ours; mods can turn it off per screen).
   - Input is unchanged: pad grid, A type, X delete, Y shift, Start done, B back; PC typing, Backspace, Enter, Escape. The PC key map only binds arrows, F8, Enter and Backspace, so typed letters and Space never double as pad keys.
 - **Verification:** `keyboard_draws_frame_keys_and_prompts_on_the_stage` (frame pieces, every key, five prompts, all on the stage, one lit key, nothing while hidden or closed). Automated runs (`SKATE3_RETAIL_MENUS_KEYS`, pause menu > Options > Extras > Enter Cheat Code): the panel draws in the retail look; "zombie" typed on the pad grid and Start gives "Zombie Mode Enabled". Not yet seen by the user in play.
 - **Open:** PC typing on the laptop (ask 110) is not confirmed: the `TEXT_ENTRY typed` lines will show it in the next session.
-## Credits (FE 25): WIP, row greyed (2026-10-22)
+## Credits (FE 25): WIP, row grayed (2026-10-22)
 
-- **Retail [code / data, research b489, template and screen record verified]:** template 30 `Credits` (`extras/credits.swf`, only in fedynamic.big), screen `0bdb6ab1cb803a1b` (suspends gameplay, no blur, no movie input). The lines come from `data\credits\credits.txt` in miscload.big (Latin-1, `<font> <size> <spacing> "<text>"`, `#ID_` ids localised, `\n` / `^` splits); the movie asks for them through `FECredits` (GetNumCredits, GetFontSize, GetLineSpacing, GetLineOffset, GetLine, ExitCredits), scrolls them itself and calls ExitCredits after the last; B pops the screen.
+- **Retail [code / data, research b489, template and screen record verified]:** template 30 `Credits` (`extras/credits.swf`, only in fedynamic.big), screen `0bdb6ab1cb803a1b` (suspends gameplay, no blur, no movie input). The lines come from `data\credits\credits.txt` in miscload.big (Latin-1, `<font> <size> <spacing> "<text>"`, `#ID_` ids localized, `\n` / `^` splits); the movie asks for them through `FECredits` (GetNumCredits, GetFontSize, GetLineSpacing, GetLineOffset, GetLine, ExitCredits), scrolls them itself and calls ExitCredits after the last; B pops the screen.
 - **Done (uncommitted parts committed 2026-10-22):** skate-core `credits` (parser, Latin-1 / UTF-8 decode, the six answers, mod sections; tests), `extras_host::CreditsHost` / `CreditsMods`, the stage's FE 25 open / close / Back / Rolling / ExitCredits, `sdk.menus.credits(key, lines)` (skate-mods `MenuCredits`, cleared on mod disable), the exporter's narrow fedynamic cache for the movie and `credits.txt` in the set; menu movie set version 13.
-- **Not working yet:** the screen opens and loads 979 lines, but no line draws (the movie's `createTextField` lines; next: dump the tree / draws after SetState(1)), and the Back label shows its raw tag `<B:B_hud>`: inline button tags in APT text are not laid out (research b491: parser 82CA14D0 turns each tag into `||`, drawn by 82808708 as a white icon, pen advance 48 x scale - 2; 194 strings use them). The Extras Credits row stays greyed until both work.
+- **Not working yet:** the screen opens and loads 979 lines, but no line draws (the movie's `createTextField` lines; next: dump the tree / draws after SetState(1)), and the Back label shows its raw tag `<B:B_hud>`: inline button tags in APT text are not laid out (research b491: parser 82CA14D0 turns each tag into `||`, drawn by 82808708 as a white icon, pen advance 48 x scale - 2; 194 strings use them). The Extras Credits row stays grayed until both work.
 ## SpawnSkater (FE 62)
 
 2026-10-23. The Free Play pause rows Free Play (SoloFreeskateOptions) and Call Skater (SkateWith).
 
 - **Retail [code / data, research b543 / b544 / b545 / b562; key and modes verified]:** FE 62 (info record 0x83026088 + 62 x 24, key `6abd6ed78ce7e627`, disc index 60; suspends gameplay, no blur, movie input) opens template 107 `SpawnSkater` (`cas/spawnskater.swf`). The crossbar sets FE 62 +0x40 before the push: 200 for Free Play, 100 for Call Skater (b307); the movie's prototype has `eScreenMode_SkateWith` 100, `_Freeskate` 200, `_DemoPublic` 300 and states `State_UpdateList` 1, `State_UpdateButtonHelp` 2 [data]. Host object `SkaterSpawner`: `GetSkatersData` returns `[rowCount, names[], isHeader[], spawned[]]` (one header per group, then its rows; raw names as `#name`), `GetScreenMode`, `GetLastMenuHighlightIndex`. Groups (b544): You (Free Play only), Teammates, Community (online), Pros, IP. A in Call Skater calls the skater into one of 3 companion slots (limit popup `ID_CALL_SKATER_LIMIT_REACHED` when full); A in Free Play makes it the player's skater (flow 0x89: fade, reload the player record, close FE 62; position, board and stats stay). B closes; X dismisses a called skater (Call Skater) or opens the Free Play options FE 34 (Free Play). Highlight previews the skater (flow 0x8D) outside Call Skater.
-- **Ours:** `skate_core::spawn_skater` (modes, groups, rows, select / highlight / back / X, companion limit; rules are data), `spawn_skater_host.rs` (`SkaterSpawner` natives and the picker callbacks; groups from our character library `custom_models.rs`: You = the stock skater with the saved outfit (`request_stock` only, the customiser stays as it is; independent of upstream PR #67, which makes the PC overlay's Use stock skater take the outfit off), Pros = roster category Pro, IP = Special, then the player's own imported characters as an extra group `#Custom`, ours), the stage's FE 62 open / close / keys / actions (`retail_menu_stage.rs`). A Free Play pick swaps the character through `CustomModels::request_character` (the same path as the PC picker, so it is saved in `selection.json`) and closes FE 62 and the pause menu. Every action also goes out as `SpawnSkaterRequest` for the systems that own them and for mods. Menu movie set version 14 adds the movie.
+- **Ours:** `skate_core::spawn_skater` (modes, groups, rows, select / highlight / back / X, companion limit; rules are data), `spawn_skater_host.rs` (`SkaterSpawner` natives and the picker callbacks; groups from our character library `custom_models.rs`: You = the stock skater with the saved outfit (`request_stock` only, the customizer stays as it is; independent of upstream PR #67, which makes the PC overlay's Use stock skater take the outfit off), Pros = roster category Pro, IP = Special, then the player's own imported characters as an extra group `#Custom`, ours), the stage's FE 62 open / close / keys / actions (`retail_menu_stage.rs`). A Free Play pick swaps the character through `CustomModels::request_character` (the same path as the PC picker, so it is saved in `selection.json`) and closes FE 62 and the pause menu. Every action also goes out as `SpawnSkaterRequest` for the systems that own them and for mods. Menu movie set version 14 adds the movie.
 - **Fade around the swap (2026-10-24, USER-ASKS 299):** A in Free Play holds the FE fader bit 7 (0x89 state 82706938 -> 825E6B30, about 0.42 s at the 60 Hz FE tick); at black the callback (82706AE8) requests the character from the library; when the swap is done (loaded, failed or timed out) FE 62 closes with the pause menu and the bit is released, so the game fades back in with the new skater (`retail_menu_stage.rs` `FADE_SWAP`, `swap_due` / `swap_loading`; `CustomModels::swapping`).
 - **NOT RETAIL YET:** the pause menu closing with FE 62 (inferred: Free Play resumes); the select / X fe sound keys (0xF26173CBBC2075B4, 0x17472B6D55E36C95) are not named, the A sound stands in; the You row label; header rows not pickable (inferred); the first State_UpdateList is posted on load (its retail poster is not read); no Teammates or Community groups (no source in the engine); the preview is not ported; Call Skater lists only pros in the living world's skater pool (pool membership stands in for retail's attribute 0xCABC362B1B05CA19). Called skaters are served by the living world: docs/hails-additions/26b-living-world-population.md#called-skaters-fe-62-call-skater.
 - **Preview placement (2026-10-24, USER-ASKS 326; recomp trace b585 run1 / run2, hooks
@@ -2637,14 +2637,14 @@ Demo (not Call Skater): the player's character is unloaded, the highlighted one 
 above the map at (-1.0, 200.0, -7.05), heading -100 degrees, playing `MARQUEE_STAND` from
 `sk83_marquee_viewer.abin` (loops by its own flag); the camera sits at (-4.0, 200.48, -7.4), aimed about 0.86 m above
 the feet, 60 degree FOV. Leaving FE 62 shuts the viewer down and restores the player's character and the camera.
-The stage is the Create-a-Skater set `DIST_CreateSakter` (miscload.big), modelled in place at x -7.4..0.4, y 200..215,
+The stage is the Create-a-Skater set `DIST_CreateSakter` (miscload.big), modeled in place at x -7.4..0.4, y 200..215,
 z -14.9..0.3 [data]: the concrete wall and ledge of the recomp's shots (b585 `run1_shots`).
 
 **Change.** `marquee_preview.rs`: the menu stage sets `MarqueeView.open` (FE 62 on top, not Call Skater); each 0x8D
 preview swaps the player's character through `CustomModels::request_preview` (a swap that does not become the saved
 selection), the player rig plays the stand clip at the stage through the Trick Guide's clip pose (`SceneClip::
 parse_named` reads a named clip from a bank), and the gameplay camera sits at the traced eye looking along the traced
-forward (0.989, 0.127, -0.076) (b585 `MQSET`), which puts the skater right of centre as in retail. The first highlight
+forward (0.989, 0.127, -0.076) (b585 `MQSET`), which puts the skater right of center as in retail. The first highlight
 is posted in the frame FE 62 opens, before the stage reports the screen open, so it is kept until the viewer closes;
 the rig is bound again when outfit parts spawn after a swap. Closing puts the player's own
 character back unless FE 62 made a real pick. Setup's hud group exports the stage (`scene_clips.py`, its decal and
@@ -2679,8 +2679,8 @@ is now set on every open frame (`stage_camera`), the swap frames included.
 2026-10-23 (user: build it for the Call Skater icon, and wire it to the retail Minimap setting).
 
 - **Retail [code / data / video, research b565 / b568 / b569; template, texture and video frames verified]:** a HUD movie `hud2/hudminimap.swf` (template 53 MiniMap) draws the frame: a 128 px round dark glass disc at (1063, 46) with a tick ring; the C++ HUD component draws a north needle over it (82665848, `north_pointer` of `icons/minimap.rx2`, 16 x 128), turned by the smoothed heading (82665388: above 1 m/s `normalize(0.85 x old + 0.15 x travel direction)` per update, else the skater's facing; heading-up), then the icon groups of `Sk8ChallengeSystem::MiniMapManager` (8268CB40: size = item scale x 32 px, alpha 1 to 71.28, `1 - (d - 60) / 290` beyond, 0 past the row's max distance, default 1000). There is NO map picture: the `MiniMapTexture` resource type and the `minimap` material exist in the code, but no shipped data uses them (b569), and the retail video (2026-10-21 08-45-27.mp4, 0:40 and 1:30) shows the empty glass disc. Shown (82665278): never with the HUD off; game modes 1 / 6 on, 2 off, else the Game Settings Minimap row (settings +158, default on).
-- **Ours:** `skate_core::minimap` (visibility rule, heading smoothing; tests), `hud_minimap.rs` (the movie on its own VM, Show on changes; `MinimapHeading` stepped at the console's 30 updates a second from the player's motion), the scoring HUD draws it (`scoring_hud.rs`, own draw layer, the needle quad from the menu set's `texture/north_pointer`); the Minimap settings row is no longer greyed and decides it (`retail_menus.rs` `NO_EFFECT_YET`). Setup: `prepare_hud.py` exports the movie (with placement clip events, as the menu movies), `install_prepared_hud.py` installs it as optional; a minimap that does not load leaves the rest of the HUD running.
-- **Needle and heading (b571, constants verified):** north is world -z (82665848 measures the heading against (0, 0, -1): 0x82165A10 = 0, 0x8216DEE0 = -1; our importers keep retail's axes); the needle eases once more towards the heading (0.85 / 0.15, 0x822250F8 / 0x820994B4) and is the pointer quad of +-16 x +-100 map units (0x8232F9C0..F9FF), 16 x 100 px at the 0.5 scale. The heading eases towards the travel direction above 1 m/s (normalised) and towards the camera's forward below it (not normalised); retail freezes it under a skater state bit (R+0x94 0x20) we do not have.
+- **Ours:** `skate_core::minimap` (visibility rule, heading smoothing; tests), `hud_minimap.rs` (the movie on its own VM, Show on changes; `MinimapHeading` stepped at the console's 30 updates a second from the player's motion), the scoring HUD draws it (`scoring_hud.rs`, own draw layer, the needle quad from the menu set's `texture/north_pointer`); the Minimap settings row is no longer grayed and decides it (`retail_menus.rs` `NO_EFFECT_YET`). Setup: `prepare_hud.py` exports the movie (with placement clip events, as the menu movies), `install_prepared_hud.py` installs it as optional; a minimap that does not load leaves the rest of the HUD running.
+- **Needle and heading (b571, constants verified):** north is world -z (82665848 measures the heading against (0, 0, -1): 0x82165A10 = 0, 0x8216DEE0 = -1; our importers keep retail's axes); the needle eases once more towards the heading (0.85 / 0.15, 0x822250F8 / 0x820994B4) and is the pointer quad of +-16 x +-100 map units (0x8232F9C0..F9FF), 16 x 100 px at the 0.5 scale. The heading eases towards the travel direction above 1 m/s (normalized) and towards the camera's forward below it (not normalized); retail freezes it under a skater state bit (R+0x94 0x20) we do not have.
 - **Icon groups (2026-10-24, USER-ASKS 299; research b574; 8254E2E8 and the fe_map_icons values verified):** retail's MiniMapManager has five groups, drawn in the order they were added (82644BB0 appends). Mode 4 (vt+0x0C 8254E2E8) adds the challenge group (challenges in the current location, minus types 4 / 9 / 0x2A / 0x33, the challenge's icon field 0xE616ACDF5A36BFAC, rebuilt every update by 8254DF70) and the skater group; mode 8 adds only the skater group with show-all set (every AI skater, not only called ones); any other mode adds only the skater group. A running challenge adds its own group (8254DB30, removed by 8254E258), filled by the challenge scripts (Lua 82849B78: icon by name, default `race_gate`; 82849DE8: the friend-film `mini_teleport`); challenge discovery adds one in mode 4 (8255B740); a message-driven group (82577338, handler 82577560) shows / hides the movie and adds / removes icons by name. Teleporters, pools, properties and shops (fe_locations) are on the pause Challenge Map only, not the HUD minimap. Max distances are fe_map_icons data (teleport and spot 500, property 400, pools 300, else 1000).
 - **Ours:** groups keep retail's add order (`MinimapIcons::set` appends a new group, keeps an existing one's place). fe_map_icons records are read from the vault (`skate_data::challenge_map::map_icons`, a name also matches its hash64 key as the scripts' lookup). Mods get retail's script path as `sdk.minimap.icon(key, {position, icon="race_gate", ...})` / `sdk.minimap.remove(key)` (`modding/minimap.rs`, sdk/ENGINE_API.md "Minimap icons"): one group per mod, 32 icons per mod, gone when the mod is disabled. The message-driven group's show / hide (msg 0 / 1 set the `minimap` element of movie `main` visible) is `MinimapIcons::set_hidden` / `element_shown`, ANDed with the visibility rule (2026-10-24, USER-ASKS 301; [inferred] the element flag and 82665278's decision both have to allow the draw); mods reach it as `sdk.minimap.show(false / true)`, one hide per mod, gone with the mod.
 - **Minimap mode (2026-10-24, USER-ASKS 326; research b585 (A), the
@@ -2694,7 +2694,7 @@ is now set on every open frame (`stage_camera`), the swap frames included.
 - **NOT RETAIL YET:** the challenge, running-challenge and discovery groups (our game has no challenge system yet; the
   career mode would show them); the message-driven group's senders and message ids (0x830B7E78 is filled at run
   time).
-- **Map matrix and rim (recomp trace 2026-10-23, a local trace, hooks MMDRAW / MMQUAD in the recomp's `hooks_hud.cpp`):** the minimap draw 82665388 gets a constant matrix: 0.6291 px per map unit on x, 0.6293 on y, centre (1128, 110) on the 1280 x 720 HUD (88 samples, one value all run); map units are metres. Far icons are held on a rim of 71.281 units (760 of 984 icon quads had their centre at exactly 71.28, none beyond; 0x821E956C), 44.8 px. Icons are 32 units (20 px), the needle 32 x 200 units (20 x 126 px). These replace the video estimates (0.5, 45 px) and are the `IconRules` defaults.
+- **Map matrix and rim (recomp trace 2026-10-23, a local trace, hooks MMDRAW / MMQUAD in the recomp's `hooks_hud.cpp`):** the minimap draw 82665388 gets a constant matrix: 0.6291 px per map unit on x, 0.6293 on y, center (1128, 110) on the 1280 x 720 HUD (88 samples, one value all run); map units are meters. Far icons are held on a rim of 71.281 units (760 of 984 icon quads had their center at exactly 71.28, none beyond; 0x821E956C), 44.8 px. Icons are 32 units (20 px), the needle 32 x 200 units (20 x 126 px). These replace the video estimates (0.5, 45 px) and are the `IconRules` defaults.
 - **Icons (b570, constants verified):** each icon is placed heading-up around the player (`skate_core::minimap::place`: `R(yaw) x (R(angle) x corner x 32 x scale + (icon - player))`, then the scale; the fade 1 up to 71.281 m, `1 - (d - 60) / 290`, 0 past the max distance, default 1000; turned with the map plus its own angle; tint per icon). Groups are data (`hud_minimap::MinimapIcons`, drawn in order, the needle last); the called skaters' group puts `mini_skater` on each Call Skater companion. Automated run: Atiba Jefferson called, his icon on the rim.
 - **Check:** automated Downtown run with the FPS counter off: the disc and the turned needle draw at the retail spot. Not play-tested by the user.
 ## Challenge Map: tab rules, row counts and Debug Menus (2026-10-21)
@@ -2760,7 +2760,7 @@ Detail moved out of the code comments of `crates/skate-data/src/challenge_map.rs
 
 The retail Challenge Map tree (FE screen 17) from the vault collections (skatercollections), as menu map nodes.
 
-[data] (research b244 / b255): `map_listing` rows form the tree by parent (the root is the mode key, `progression` for career and free skate, `online` online; its children are the tabs `progression_locations` / `_active` / `_completed` / `_all`). Each row names its folder's filter (`Hash_E0762EA3F90C9EEB`, a RefSpec of class + key, a `map_filter` or a `map_category`) and a sort order (`Hash_982BD1EAE2334504`, u16 in the high half). Retail fills a folder by running its filter's Lua over the item classes; the location filters (`downtown` ...) keep the `fe_locations` rows whose World (`Hash_7565CD2A80E93A5E`, inherited) is the filter's world (`LocationFilterHelpers.IsLocationInWorld(item, "dist_downtown")`; research b447: the disc Maloof filter names `dist_maloofmoneycup`, its rows' World, not their District `dist_maloof`; the DLC folders do the same). Those are ported as data ([`LocationRules`], retail defaults incl. the DLC packs' folders, mod-overridable). The skate.Park folder's filter (`skatepark`) lists `world` rows with `IsSkatePark` and `AllowInSkateParksTab` (b447), as`World` leaves labelled by the world's own text. Other filters (challenges) are not ported yet, so their folders have no leaves and stay greyed. Retail's unlock test (`Unlock.IsLocationUnlocked`, b450) is ported over [`LocationUnlocks`] (no unlock store yet).
+[data] (research b244 / b255): `map_listing` rows form the tree by parent (the root is the mode key, `progression` for career and free skate, `online` online; its children are the tabs `progression_locations` / `_active` / `_completed` / `_all`). Each row names its folder's filter (`Hash_E0762EA3F90C9EEB`, a RefSpec of class + key, a `map_filter` or a `map_category`) and a sort order (`Hash_982BD1EAE2334504`, u16 in the high half). Retail fills a folder by running its filter's Lua over the item classes; the location filters (`downtown` ...) keep the `fe_locations` rows whose World (`Hash_7565CD2A80E93A5E`, inherited) is the filter's world (`LocationFilterHelpers.IsLocationInWorld(item, "dist_downtown")`; research b447: the disc Maloof filter names `dist_maloofmoneycup`, its rows' World, not their District `dist_maloof`; the DLC folders do the same). Those are ported as data ([`LocationRules`], retail defaults incl. the DLC packs' folders, mod-overridable). The skate.Park folder's filter (`skatepark`) lists `world` rows with `IsSkatePark` and `AllowInSkateParksTab` (b447), as`World` leaves labeled by the world's own text. Other filters (challenges) are not ported yet, so their folders have no leaves and stay grayed. Retail's unlock test (`Unlock.IsLocationUnlocked`, b450) is ported over [`LocationUnlocks`] (no unlock store yet).
 
 ### Location unlocks
 
@@ -2792,7 +2792,7 @@ Retail ScreenManagerReady handler (825D9450), in its order, with values as "%d" 
 
 ### Replay timeline strip
 
-The replay editor's timeline strip (retail 82509B80 -> 82508E08 bands, 82509298 keys; b403), in the strip clip's space (x = fraction x 817): one band from y 3 to 30 (the band bottom is the clip height, [guess]) coloured by the clip's camera type, brighter while "selected" (no key under the playhead, not instant mode); one 13 x 51 key quad per key after the first, `key_glow` under the playhead (within 0.00889), `key_default` else; in the camera edit modes the key under the playhead is not drawn. Values are retail's (data, `TimelineLook`).
+The replay editor's timeline strip (retail 82509B80 -> 82508E08 bands, 82509298 keys; b403), in the strip clip's space (x = fraction x 817): one band from y 3 to 30 (the band bottom is the clip height, [guess]) colored by the clip's camera type, brighter while "selected" (no key under the playhead, not instant mode); one 13 x 51 key quad per key after the first, `key_glow` under the playhead (within 0.00889), `key_default` else; in the camera edit modes the key under the playhead is not drawn. Values are retail's (data, `TimelineLook`).
 
 ## Code reference: extras.rs
 
@@ -2804,7 +2804,7 @@ Free Play pause row Extras (doc 31 "Extras and cheat codes"): retail FE screen 1
 - Back (input 0x82655658, never consumed): in the sub-list plays core_b_button, goes back to the main rows and posts SetState(10); in the main rows plays core_b_button and pops the screen;
 - select (0x826558E8): row 0 opens text entry FE 46 for a cheat code, rows 1-3 redeem console codes, row 4 pushes Credits FE 25, row 5 shows the licenses in the text viewer FE 3, row 6 opens the Skate Reel sub-list.
 
-What the console-only rows do on PC is ours: rows 1-3 unlock their content directly, Licenses shows this project's licenses, Credits (retail FE 25, b489) is WIP and greyed. Rows are data (`ExtrasRules`), retail's the defaults; a mod adds or hides rows.
+What the console-only rows do on PC is ours: rows 1-3 unlock their content directly, Licenses shows this project's licenses, Credits (retail FE 25, b489) is WIP and grayed. Rows are data (`ExtrasRules`), retail's the defaults; a mod adds or hides rows.
 
 ### Unlock list entry
 
@@ -2831,7 +2831,7 @@ Detail moved out of the code comments of `crates/skate-game/src/prompt_glyphs.rs
 Button prompt glyphs for the connected pad (doc 31, "Button prompts"): the retail menus draw a native "CustomButton" component for the Xbox 360 button named by `_test`; we draw the same button as the connected pad prints it. Every retail button name has an equivalent on every family (retail's name list, TU3 0x82204614: Back, Start, R_Trigger, L_Trigger, L_Bumper, R_Bumper, L3_Click, R3_Click, Stick_Right(_Up/_Down/_L/_R), DPad(_Up/_Down/_Left/_Right), Stick_Left(...), plus A / B / X / Y):
 - face buttons: SDL's label for the pad type (`ControllerKind::face_labels`): A / B / X / Y, Cross / Circle / Square / Triangle, Nintendo letters;
 - shoulders, triggers, Start, Back, stick clicks: the family's printed name (LB / L1 / L, LT / L2 / ZL, START / MENU / OPTIONS / +, BACK / VIEW / SELECT / SHARE / CREATE / -, LS / L3);
-- sticks and the d-pad: a stick or a cross with the direction marked (the same on every family). The glyphs are generated in retail's prompt style (a coloured ball or a dark pill, a light symbol, a dark outline), not console art; mods replace them through the menu bitmap path later. Size: retail's glyph spans about 0.83 of the CustomButton placeholder box (10 of 480 px in a recomp shot of the Trick Guide help row, local screenshots; the box is 32 of 1280), centred in it; placement is the movie's own (button_item2 lays the box out).
+- sticks and the d-pad: a stick or a cross with the direction marked (the same on every family). The glyphs are generated in retail's prompt style (a colored ball or a dark pill, a light symbol, a dark outline), not console art; mods replace them through the menu bitmap path later. Size: retail's glyph spans about 0.83 of the CustomButton placeholder box (10 of 480 px in a recomp shot of the Trick Guide help row, local screenshots; the box is 32 of 1280), centered in it; placement is the movie's own (button_item2 lays the box out).
 
 ## Code reference: cheats.rs
 
@@ -2854,7 +2854,7 @@ Detail moved out of the code comments of `crates/skate-core/src/camera_track.rs`
 
 ICE camera tracks (the cutscene Scene system's cameras, e.g. the Trick Guide demo's 21 ViewScene tracks in scene.big `data/scene/ice_000.bin`; parsed by `skate_data::ice_camera`). A track keys the camera elements of key group 0: EYE and LOOK (scene space, Z-up), DUTCH (roll), TANGENT_EYE / TANGENT_LOOK and LENS_LENGTH (mm).
 
-Sampling ports the TU3 segment setup sub_828F0BB0 and the tangent sub_828F0990: each element is a cubic Hermite per segment, `((a*u + b)*u + c)*u + d` with u the segment fraction, a = m0 + m1 - 2D, b = 3D - m1 - 2*m0, c = m0, d = p0, D = p1 - p0. The tangent at a segment end is the non-uniform Catmull-Rom tangent in the segment's own parameter, `D*dt_n/(dt+dt_n) + D_n*(dt/dt_n)*dt/(dt+dt_n)` with the neighbour segment n (previous for m0, next for m1; none at the track ends: D), scaled by the element's TANGENT value at that key. Each element names its spline switch and tangent element (descriptor +60 / +64, read live in the recomp): EYE, DUTCH and LENS_LENGTH use CUBIC_EYE (87) / TANGENT_EYE (7), LOOK uses CUBIC_LOOK (88) / TANGENT_LOOK (8). A switch is a per-segment value; when it is 0 the tangents are D (linear). Each segment also carries the eye and look space (SPACE_EYE / SPACE_LOOK, 89 / 90) and the followed object (AVATAR_EYE / AVATAR_LOOK, 91 / 92), applied by the scene player (sub_828F2C38 -> sub_828F36B0). Data-driven: tracks come from the disc; a mod can replace or add tracks by index, segment settings included.
+Sampling ports the TU3 segment setup sub_828F0BB0 and the tangent sub_828F0990: each element is a cubic Hermite per segment, `((a*u + b)*u + c)*u + d` with u the segment fraction, a = m0 + m1 - 2D, b = 3D - m1 - 2*m0, c = m0, d = p0, D = p1 - p0. The tangent at a segment end is the non-uniform Catmull-Rom tangent in the segment's own parameter, `D*dt_n/(dt+dt_n) + D_n*(dt/dt_n)*dt/(dt+dt_n)` with the neighbor segment n (previous for m0, next for m1; none at the track ends: D), scaled by the element's TANGENT value at that key. Each element names its spline switch and tangent element (descriptor +60 / +64, read live in the recomp): EYE, DUTCH and LENS_LENGTH use CUBIC_EYE (87) / TANGENT_EYE (7), LOOK uses CUBIC_LOOK (88) / TANGENT_LOOK (8). A switch is a per-segment value; when it is 0 the tangents are D (linear). Each segment also carries the eye and look space (SPACE_EYE / SPACE_LOOK, 89 / 90) and the followed object (AVATAR_EYE / AVATAR_LOOK, 91 / 92), applied by the scene player (sub_828F2C38 -> sub_828F36B0). Data-driven: tracks come from the disc; a mod can replace or add tracks by index, segment settings included.
 
 ## Code reference: text_entry.rs
 
@@ -2890,7 +2890,7 @@ Stock RAW ("DR", codec word 0x00004452) SQT decoding: the uncompressed packed fr
 
 ### RAW packed rotation
 
-32-bit packed rotation, TU3 RAW sampler sub_82D1E658: an axis in spherical angles times the vector length, w = sqrt(1 - r^2) (never negative). Azimuth A = bits 21..31 * 2pi/2047 - pi, latitude M = bits 11..20 * pi/1023 - pi/2, r = bits 0..10 / 2047. Verified: the header reads, the pi constant 0x82060C44 and the reciprocal square root; the cos/sin order of A and the signs come from the data (a symmetric T-pose, a local research note). No normalisation here (the engine normalises after nlerp).
+32-bit packed rotation, TU3 RAW sampler sub_82D1E658: an axis in spherical angles times the vector length, w = sqrt(1 - r^2) (never negative). Azimuth A = bits 21..31 * 2pi/2047 - pi, latitude M = bits 11..20 * pi/1023 - pi/2, r = bits 0..10 / 2047. Verified: the header reads, the pi constant 0x82060C44 and the reciprocal square root; the cos/sin order of A and the signs come from the data (a symmetric T-pose, a local research note). No normalization here (the engine normalizes after nlerp).
 
 ## Code reference: hud_central.rs
 
@@ -2898,9 +2898,9 @@ Detail moved out of the code comments of `crates/skate-game/src/hud_central.rs`;
 
 ### Central message HUD
 
-The central message HUD: retail's `hud2/hudcentral` movie (centre-screen lines such as the chase's "ZAP!" / "BAM!"), run on the same APT VM as the scoring HUD.
+The central message HUD: retail's `hud2/hudcentral` movie (center-screen lines such as the chase's "ZAP!" / "BAM!"), run on the same APT VM as the scoring HUD.
 
-Retail posts a message through `82663F38` (from the chase manager `826B4FC0` and other callers): it stores the formatted, localised text, a style (`+0x34`, 0 here) and an audio hook (`+0x280`, 0 = the movie's `kAUDIOHOOK_DEFAULT`), then sends the screen event 4. The movie's `SetState(4)` calls `ShowMessage` with `HUDComponents.Central_GetMessageData()` = `[text, style]` (style 0 off-white, 1 red, other = the celebratory banner) and `Central_GetAudioHook()`, which plays `FE_SOUND_CENTRAL_MESSAGE_DEFAULT` and the clip's intro. The getters' bodies are not decoded; their values are what `82663F38` stores [inferred from the stores].
+Retail posts a message through `82663F38` (from the chase manager `826B4FC0` and other callers): it stores the formatted, localized text, a style (`+0x34`, 0 here) and an audio hook (`+0x280`, 0 = the movie's `kAUDIOHOOK_DEFAULT`), then sends the screen event 4. The movie's `SetState(4)` calls `ShowMessage` with `HUDComponents.Central_GetMessageData()` = `[text, style]` (style 0 off-white, 1 red, other = the celebratory banner) and `Central_GetAudioHook()`, which plays `FE_SOUND_CENTRAL_MESSAGE_DEFAULT` and the clip's intro. The getters' bodies are not decoded; their values are what `82663F38` stores [inferred from the stores].
 
 Engine-facing: [`CentralMessage`]. Mod-facing: `sdk.ui.central_message(text)` (the same message).
 
@@ -2947,7 +2947,7 @@ Detail moved out of the code comments of `crates/skate-core/src/fe_popup.rs`; ea
 
 The front end's popups (doc 31 "Popups"): retail's popup list on the FE stack object (TU3, a local research note). A caller fills an sPopupInfo (defaults `sub_82D0B0B0`) and pushes it (`sub_82D0A8D0`): it gets the next id and joins a list sorted by priority, ascending; ties keep arrival order, so the newest of the highest priority is last, and the last one is shown (FE vt+24 `sub_825EC530`). The player's choice goes to the popup's callback as (id, choice, user) (host vt+64 `sub_825EF698`), then, with auto-remove on (the default), the popup leaves the list (`sub_82D0A628`) and the next last one shows. Clear-all (`sub_82D0A738`) calls back every popup not marked to survive it with choice -2 and drops it.
 
-Callbacks are stable string ids (never code pointers), so requests and events are plain data a mod can send and receive, and a multiplayer build could serialise them.
+Callbacks are stable string ids (never code pointers), so requests and events are plain data a mod can send and receive, and a multiplayer build could serialize them.
 
 ## Code reference: fe_input.rs
 
@@ -2957,7 +2957,7 @@ Detail moved out of the code comments of `crates/skate-core/src/fe_input.rs`; ea
 
 Front-end pad input (doc 31, "Pad input"): retail's `input.cfg` Apt actions (`AptUp = LStickU.repeat || DPadU.repeat;` ...) evaluated over the 24 native pad slots (`input::xbox::convert`), giving the key indices the FE poll (sub_825DFDC8) passes to the screen stack's input handler, in the order of the Apt key table (0x83027BF0, extracted at setup). A local research note.
 
-The edges are retail's channel update sub_82966F30 (a local research note, pass 2; constants verified): held when the value is above 0.5; after each change the next 3 ticks keep it frozen and report no press or release; repeat fires with the press, 24 ticks later, then every 12. Suffixes (parser sub_829674F0): held, pressed, released, repeat. NOT RETAIL YET: the tick rate is not proven; the console's 30 Hz cadence is assumed (0.8 s to the first repeat, then every 0.4 s), normalised so any frame rate gives the same timing.
+The edges are retail's channel update sub_82966F30 (a local research note, pass 2; constants verified): held when the value is above 0.5; after each change the next 3 ticks keep it frozen and report no press or release; repeat fires with the press, 24 ticks later, then every 12. Suffixes (parser sub_829674F0): held, pressed, released, repeat. NOT RETAIL YET: the tick rate is not proven; the console's 30 Hz cadence is assumed (0.8 s to the first repeat, then every 0.4 s), normalized so any frame rate gives the same timing.
 
 ## Code reference: fe_language.rs
 
@@ -3035,7 +3035,7 @@ Detail moved out of the code comments of `crates/skate-game/src/text_entry_ui.rs
 
 ### On-screen keyboard look
 
-The on-screen keyboard (ours; doc 31 "Extras and cheat codes"): drawn while retail FE 46 (text entry) is on top, where retail showed the Xbox system keyboard. The state is `extras_host::TextEntryView` (the stage owns the input); this only builds its draws for the menu stage's layer, in the retail menus' own popup style: the frame of the Extras popup rebuilt at the keyboard's size from the same `controls/panel` pieces (corners, edges, fills, paper grain, with their UV turns and colours as the Extras movie draws them), the title in Futura Overprint, the selected-row blue (0x37A5FF) for the highlighted key and the connected pad's button prompts (`prompt/<button>`, resolved like the movies' CustomButtons) on the paper footer.
+The on-screen keyboard (ours; doc 31 "Extras and cheat codes"): drawn while retail FE 46 (text entry) is on top, where retail showed the Xbox system keyboard. The state is `extras_host::TextEntryView` (the stage owns the input); this only builds its draws for the menu stage's layer, in the retail menus' own popup style: the frame of the Extras popup rebuilt at the keyboard's size from the same `controls/panel` pieces (corners, edges, fills, paper grain, with their UV turns and colors as the Extras movie draws them), the title in Futura Overprint, the selected-row blue (0x37A5FF) for the highlighted key and the connected pad's button prompts (`prompt/<button>`, resolved like the movies' CustomButtons) on the paper footer.
 
 ## Code reference: settings_host.rs
 
@@ -3053,7 +3053,7 @@ Detail moved out of the code comments of `crates/skate-game/src/graphics_menu/vi
 
 ### PC overlay look
 
-The PC overlay's look and motion, ported from the recomp's settings overlay (skate3recomp's rexglue-sdk, `src/ui/overlay/simple_settings_overlay.cpp`, `SimpleSettingsDialog::OnDraw` and `GatherInput`): a frosted teal category rail with a pinned Close Game, white setting rows under a sliding black focus fill with a lime ring, magenta steppers and sliders, lime section bars, a description panel and a pad / keyboard legend, over the blurred and tinted world. Metrics, colours, easing rates and repeat timing are the recomp's (authored for 1080p, scaled by the window height); the scene blur is `fe_backdrop`'s pass at the recomp's strength. The rows are ours (`Menu::page`, `Menu::describe`).
+The PC overlay's look and motion, ported from the recomp's settings overlay (skate3recomp's rexglue-sdk, `src/ui/overlay/simple_settings_overlay.cpp`, `SimpleSettingsDialog::OnDraw` and `GatherInput`): a frosted teal category rail with a pinned Close Game, white setting rows under a sliding black focus fill with a lime ring, magenta steppers and sliders, lime section bars, a description panel and a pad / keyboard legend, over the blurred and tinted world. Metrics, colors, easing rates and repeat timing are the recomp's (authored for 1080p, scaled by the window height); the scene blur is `fe_backdrop`'s pass at the recomp's strength. The rows are ours (`Menu::page`, `Menu::describe`).
 
 ### Challenge Map teleports
 
@@ -3174,7 +3174,7 @@ Manifest version setup writes (3: textured units carry their bitmap id, Mileston
 
 ### Oldest menu manifest
 
-The oldest version this engine still reads: 6, 8, 9, 10, 11, 13 and 14 only add a movie (a 12 set keeps Credits greyed), 7 an optional image table and 12 DLC text, so a 5 set works without the challenge map (its pause item keeps the PC overlay's MAPS until Refresh Game Files), a 6 set draws no map pictures and a 7 / 8 set keeps the SKATER / EXTRAS overlays for Skate Profile / Extras.
+The oldest version this engine still reads: 6, 8, 9, 10, 11, 13 and 14 only add a movie (a 12 set keeps Credits grayed), 7 an optional image table and 12 DLC text, so a 5 set works without the challenge map (its pause item keeps the PC overlay's MAPS until Refresh Game Files), a 6 set draws no map pictures and a 7 / 8 set keeps the SKATER / EXTRAS overlays for Skate Profile / Extras.
 
 ## Code reference: menu_values.rs (fork additions)
 
@@ -3190,4 +3190,4 @@ Detail moved out of the fork-added code comments of `crates/skate-game/src/hud_r
 
 ### HUD blend space
 
-The layer target holds display (gamma) values and blends them there, like the console's front end: retail's APT draw state is straight SRC_ALPHA / INV_SRC_ALPHA (`sub_827E4AF0`, bound by `sub_825D4490`) on a display-value image (research menus-m6 "Retail blend state", medium-high confidence: the 2D pass's format is inferred). Blending in linear made the soft low-alpha glow layers of a selected menu row far too bright. The composite (`hud_composite.wgsl`) converts the layer to linear once. mode.x = 1 (the retail menus and the gameplay HUD, one APT player in retail): the colour transform applies to the display value of the texel. mode.x = 0 keeps the linear transform for any other user, stored as display values.
+The layer target holds display (gamma) values and blends them there, like the console's front end: retail's APT draw state is straight SRC_ALPHA / INV_SRC_ALPHA (`sub_827E4AF0`, bound by `sub_825D4490`) on a display-value image (research menus-m6 "Retail blend state", medium-high confidence: the 2D pass's format is inferred). Blending in linear made the soft low-alpha glow layers of a selected menu row far too bright. The composite (`hud_composite.wgsl`) converts the layer to linear once. mode.x = 1 (the retail menus and the gameplay HUD, one APT player in retail): the color transform applies to the display value of the texel. mode.x = 0 keeps the linear transform for any other user, stored as display values.

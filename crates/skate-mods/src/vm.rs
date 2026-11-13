@@ -91,7 +91,7 @@ pub struct TeleporterOptions {
     /// A `ribbon_indicator` key (`teleport`) for the floating icon; none without it.
     #[serde(default)]
     pub indicator: Option<String>,
-    /// Where the icon's anchor sits (default: the volume's centre).
+    /// Where the icon's anchor sits (default: the volume's center).
     #[serde(default)]
     pub indicator_position: Option<[f32; 3]>,
     /// A `visualindicators` row (`smallarrow`, `gates`, ...) in place of the indicator row's own style.
@@ -908,7 +908,7 @@ pub enum Command {
         n: u32,
         id: String,
     },
-    /// Teammate `n`'s look: a customiser profile; absent clears it.
+    /// Teammate `n`'s look: a customizer profile; absent clears it.
     CareerTeammateLook {
         n: u32,
         #[serde(default)]
@@ -2419,7 +2419,7 @@ mod graphics_mesh_buffer_tests {
             .eval::<mlua::Value>()
             .unwrap();
         // `uvs = {}` reads as an empty list (`lua_list`), so the 3-vertex write fails validation
-        // (two UVs per vertex) instead of deserialisation; `_submit` rejects it either way.
+        // (two UVs per vertex) instead of deserialization; `_submit` rejects it either way.
         assert!(lua.from_value::<Command>(value).is_ok_and(|c| !c.validate()));
     }
 
@@ -3256,7 +3256,7 @@ mod empty_table_lists {
     use serde_json::json;
 
     /// One case per callback (the sandbox has no `pcall`): `ok` cases must submit; `rejected`
-    /// cases must deserialise and then fail validation, never with a serde "expected a sequence".
+    /// cases must deserialize and then fail validation, never with a serde "expected a sequence".
     #[test]
     fn every_list_field_takes_an_empty_table_and_a_list() {
         let root = std::env::temp_dir().join(format!("skate-empty-lists-{}", std::process::id()));

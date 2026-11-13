@@ -233,7 +233,7 @@ fn replay_cursor_rides_every_exported_line() {
         };
         for &id in lines.keys() {
             let (c, branches, frames, max_jump) = run(id);
-            // A recorded line moves at most a few metres per 60 Hz frame (p90 speed 16 m/s [data]).
+            // A recorded line moves at most a few meters per 60 Hz frame (p90 speed 16 m/s [data]).
             assert!(max_jump < 3.0, "{district} {:02x?}: {max_jump} m in one frame", &id[..8]);
             total.0 += 1;
             total.1 += branches;

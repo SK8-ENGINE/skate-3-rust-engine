@@ -18,7 +18,7 @@ pub(crate) enum Dir {
 /// What a prompt shows.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Prompt {
-    /// A face button drawn in the family's look: Xbox a coloured ball, PlayStation a dark ball with the coloured
+    /// A face button drawn in the family's look: Xbox a colored ball, PlayStation a dark ball with the colored
     /// symbol, Nintendo a dark ball with a light letter.
     Face(PromptLabel, PromptStyle),
     /// A dark pill with the printed name.
@@ -140,7 +140,7 @@ pub(crate) fn render(prompt: &Prompt) -> Vec<u8> {
 
 enum Stroke {
     Line([f32; 2], [f32; 2]),
-    /// Centre, radius, angle range in degrees (y down: 0 right, 90 down, -90 up), increasing from the first.
+    /// Center, radius, angle range in degrees (y down: 0 right, 90 down, -90 up), increasing from the first.
     Arc([f32; 2], f32, f32, f32),
 }
 
@@ -217,7 +217,7 @@ fn coverage(d: f32) -> f32 {
     (0.5 - d * SIZE as f32).clamp(0.0, 1.0)
 }
 
-/// Coverage of `text` centred on `centre`, fitted into `max_w` x `max_h` (box units).
+/// Coverage of `text` centered on `centre`, fitted into `max_w` x `max_h` (box units).
 fn text_ink(p: [f32; 2], text: &str, centre: [f32; 2], max_w: f32, max_h: f32) -> f32 {
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len().max(1) as f32;
@@ -261,7 +261,7 @@ fn raster(mut pixel: impl FnMut([f32; 2]) -> ([f32; 3], f32)) -> Vec<u8> {
     out
 }
 
-/// A body colour inside an outline, lit from the top, with ink on top.
+/// A body color inside an outline, lit from the top, with ink on top.
 fn body(fill: [f32; 3], inner: f32, ink: f32, y: f32) -> [f32; 3] {
     std::array::from_fn(|i| {
         let b = OUTLINE[i] + (fill[i] * shade(y) - OUTLINE[i]) * inner;
@@ -312,14 +312,14 @@ fn face_shape(label: PromptLabel) -> (Vec<Stroke>, [f32; 3]) {
     }
 }
 
-/// An Xbox-style face button: a coloured ball with a light symbol (retail's look).
+/// An Xbox-style face button: a colored ball with a light symbol (retail's look).
 pub(crate) fn glyph(label: PromptLabel) -> Vec<u8> {
     face(label, PromptStyle::Xbox)
 }
 
 fn face(label: PromptLabel, style: PromptStyle) -> Vec<u8> {
     let (strokes, colour) = face_shape(label);
-    // PlayStation: the colour is the symbol's; Nintendo: no colour.
+    // PlayStation: the color is the symbol's; Nintendo: no color.
     let (ball, ink_colour) = match style {
         PromptStyle::Xbox => (colour, [INK; 3]),
         PromptStyle::Playstation => (DARK, colour.map(|c| (c * 1.15).min(1.0))),
@@ -561,7 +561,7 @@ mod tests {
         assert_eq!(resolve("L_Trigger", switch, switch.prompt_style().labels()), Some(Prompt::Pill("ZL")));
         assert_eq!(resolve("Back", switch, switch.prompt_style().labels()), Some(Prompt::Pill("-")));
         assert_eq!(resolve("A", switch, switch.prompt_style().labels()), Some(Prompt::Face(PromptLabel::B, PromptStyle::Nintendo)));
-        // PlayStation: a dark ball with a coloured symbol.
+        // PlayStation: a dark ball with a colored symbol.
         let circle = render(&resolve("B", ps5, ps5.prompt_style().labels()).unwrap());
         let (centre, ring) = (rgb(&circle, 0.5, 0.5), rgb(&circle, 0.5 + 0.19 * 0.415 / 0.46, 0.5));
         assert!(centre[0] < 90 && ring[0] > 180, "dark ball {centre:?}, red ring {ring:?}");

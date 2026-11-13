@@ -116,7 +116,7 @@ pub fn without_steering(state: &SteerState) -> ExternalPhysicsInput {
     ExternalPhysicsInput { vectors, flags: u32::from(state.on_board_steering) << 25 }
 }
 
-/// 8246DB50 gate for 8246DE38: on path and past the start nodes, or no on-board steering (partly modelled).
+/// 8246DB50 gate for 8246DE38: on path and past the start nodes, or no on-board steering (partly modeled).
 pub fn steers(state: &SteerState, on_path: bool, past_start: bool) -> bool {
     !state.on_board_steering || (on_path && past_start)
 }

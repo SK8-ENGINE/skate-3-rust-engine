@@ -163,7 +163,7 @@ mod tests {
         assert!(load_proxy_package(std::path::Path::new("does-not-exist"), "Industrial").is_none());
     }
 
-    /// Asset-backed: Industrial's backdrop holds the harbour sea where the
+    /// Asset-backed: Industrial's backdrop holds the harbor sea where the
     /// district has none (the black void at the docks, x -400..-560,
     /// z -70..-270). `SKATE3_ASSET_ROOT=<assets>`.
     #[test]

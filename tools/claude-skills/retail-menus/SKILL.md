@@ -39,7 +39,7 @@ The foundation went upstream as #59; the rest is part of #52.
   `SKATE3_MENU_MOVIES=<dir>/runtime` points the game and the data tests at the dev export (useful before a refresh).
 - Tests: `cargo test -p skate-game --locked -- apt_ menu hud core_menu fe_language` (data tests skip when the installed
   set is an older version); `cargo test -p skate-core crossbar`. `SKATE3_DUMP_DRAWS=1` on
-  `retail_screen_manager_opens_a_screen` prints the level tree and every draw (bounds, colour, texture).
+  `retail_screen_manager_opens_a_screen` prints the level tree and every draw (bounds, color, texture).
 - Automated screenshots: `SKATE3_RETAIL_MENUS_OPEN=1` opens the pause menu at once; `SKATE3_RETAIL_MENUS_KEYS` injects
   key indices one per frame (`_` = a frame without a key, `_xN` = N frames): 2 A, 3 B, 5 X, 7 RT, 10 LT, 12 Up, 13 Down,
   14 Left, 15 Right. Example, the Challenge Map's Locations list: `SKATE3_RETAIL_MENUS_OPEN=1

@@ -30,6 +30,10 @@ pub struct PedEntity {
     pub model: Option<String>,
     /// `livingworld_entity_animation` set (`default`, `female`, `bum`, `jock`, ...).
     pub anim_set: Option<String>,
+    /// `livingworld_entity_animation_postadjust` record (the head look-at's limits, b1019) and
+    /// `livingworld_entity_headtracking` record (its on / off byte).
+    pub postadjust: Option<String>,
+    pub head_tracking: Option<String>,
 }
 
 /// The tables the choice reads, keyed by retail record names.
@@ -39,6 +43,9 @@ pub struct PedCatalog {
     pub categories: BTreeMap<String, Vec<String>>,
     pub entities: BTreeMap<String, PedEntity>,
     pub models: BTreeMap<String, PedModel>,
+    /// `livingworld_entity_animation_postadjust` records (parents resolved) and `livingworld_entity_headtracking`.
+    pub head_look: BTreeMap<String, super::head_look::HeadLookSettings>,
+    pub head_tracking: BTreeMap<String, bool>,
 }
 
 /// Mod / engine overrides by key (empty = retail).

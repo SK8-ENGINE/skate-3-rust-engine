@@ -76,7 +76,7 @@ Detail moved out of the code comments of `crates/skate-game/src/physics/world_ha
 The static collision world as the physics step sees it: the geometry shared behind an `Arc`, plus this step's own query scratch. The player's `GamePhysics` and every simulated NPC skater's worker hold a handle to the same world, so their steps can run on separate threads (a query only reads the world). Reads go through `Deref`; the few writes (map load, prop streaming, tests) need the world not to be shared at that moment.
 
 ## NPC and replay per-frame allocations, first pass (2026-10-28, research b620)
-Behaviour-identical by construction, each change with a reference test or no arithmetic moved:
+Behavior-identical by construction, each change with a reference test or no arithmetic moved:
 - `npc_skaters.rs` advance: the Mirror decider borrows `branches` / `tricks` instead of cloning the whole history each
   tick; `others` / `in_use` built once per NPC per tick, not per step (the loop only moves this NPC's own entry,
   which `others` leaves out); `npc_trick_profile` returns a `Cow` (borrowed unless a mod override applies; still read
@@ -230,7 +230,7 @@ Change:
   shader, so its shadow pass never read the alpha (`prepass/mod.rs` `fragment_required`); StandardMaterial's blended
   shadows discard below 0.05 alpha, so the prepass gets the same substitution.
 - Opaque sources (2026-11-08, ask 540): a StandardMaterial that drew opaque sends its fade negated
-  (`FadeMaterial::fade_opaque`); both PBR shaders take the absolute value and, after the base colour texture, set the
+  (`FadeMaterial::fade_opaque`); both PBR shaders take the absolute value and, after the base color texture, set the
   alpha to the fade alone. Before, the blended copy multiplied the fade by the texture's alpha, which opaque retail
   textures use for other data: during a fade an NPC skater's clothes and board vanished and only skin (head, hands)
   showed (laptop burst 2026-11-08, race_indu_01). Retail's fade is the output alpha (`i_params.x`), so the outcome now
@@ -268,7 +268,7 @@ a local research note.
 The recoloured ped materials were cached by weak id, so when the last ped with a (source material, tint pair)
 despawned its texture went, and the next ped with that pair recoloured and uploaded it again: every ped spawn in the
 bench missed. `PedTintKeep` now holds the most recently used ones strongly (`SKATE_PED_TINT_CACHE=<n>`, default 32
-entries, about 32 to 64 MB of kept textures; 0 = the old behaviour); entries whose source material is gone (a map
+entries, about 32 to 64 MB of kept textures; 0 = the old behavior); entries whose source material is gone (a map
 change) are dropped. Same pixels: the recolour is a pure function of the source texture and the tint pair, and the key
 is both. Bench with the cache: half of the tint lookups hit. Test `ped_tint_keep_holds_the_most_recently_used_and_evicts_the_oldest`.
 Not helped: the start of a map, when the first population (15 peds) binds within a second and every tint misses
@@ -319,7 +319,7 @@ Tuning (one build, `SKATE_TRANSFORM_YIELD_SPINS` only, interleaved, 2 runs of 15
 64 is the best in every column, the median included: the earlier median difference was between two builds, not the
 yields' cost.
 
-Laptop (second PC, 16 threads, automated, same A/B on its build of 1307e0aa): the upstream behaviour shows almost no
+Laptop (second PC, 16 threads, automated, same A/B on its build of 1307e0aa): the upstream behavior shows almost no
 stalls there (frames of 20 ms or more after the start 2 / 0 with the setting 0, 0 / 1 with 64, both near the start but
 one 92 ms frame), p99.9 11.1 to 11.6 ms either way, p50 3.89 / 3.93 against 3.95 / 3.99 ms: the stall depends on the
 machine (the desktop runs about 20 compute workers), and the yield costs nothing measurable where it does not occur.

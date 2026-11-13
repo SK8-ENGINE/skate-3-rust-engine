@@ -23,7 +23,7 @@ class SetupBudgetTests(unittest.TestCase):
             self.assertEqual(setup_budget.cores(cpus, {}), budget, cpus)
         self.assertEqual(setup_budget.cores(28, {'SKATE_SETUP_CORES': '4'}), 4)
         self.assertEqual(setup_budget.cores(28, {'SKATE_SETUP_CORES': '0'}), 21)
-        # Every pool stays inside the budget: three map jobs' threads plus the customiser's workers.
+        # Every pool stays inside the budget: three map jobs' threads plus the customizer's workers.
         for cpus in (2, 4, 8, 16, 28, 64):
             budget = setup_budget.cores(cpus, {})
             self.assertLessEqual(setup_budget.decode_workers(cpus, {}), budget)

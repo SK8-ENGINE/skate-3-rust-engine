@@ -1374,7 +1374,7 @@ mod tests {
                 if std::env::var_os("SKATE_VERIFY_VERBOSE").is_some() && (d > 60.0 || (rel - b.5).abs() > 0.5) {
                     eprintln!("  {:.1}s span {span:.3} speed {:.2}->{:.2} rpm {:.0}->{:.0} ours {:.0} | rel {:.2}->{:.2} ours {rel:.2} lv {:?}", b.0 / 1000.0, a.4, b.4, a.2, b.2, e.rpm, a.5, b.5, lv);
                 }
-                // Resynchronise (the log is the truth at each sample).
+                // Resynchronize (the log is the truth at each sample).
                 e.rpm = b.2;
                 rel = b.5;
             }

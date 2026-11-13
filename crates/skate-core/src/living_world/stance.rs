@@ -110,7 +110,7 @@ pub fn retail_table() -> Vec<StanceRow> {
     parse_table(RETAIL_TABLE).expect("the shipped stance table parses")
 }
 
-/// Normalise a mod override key: a record id (16 hex digits, any case, optional `0x`) becomes
+/// Normalize a mod override key: a record id (16 hex digits, any case, optional `0x`) becomes
 /// upper-case hex; anything else is a record name.
 pub fn override_key(key: &str) -> String {
     let hex = key.strip_prefix("0x").or_else(|| key.strip_prefix("0X")).unwrap_or(key);

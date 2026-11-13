@@ -79,7 +79,7 @@ audio region export) and `data/big/db.big` (skaterschema / skatercollections + b
   loaded from save slot table 0x8309A800 + index x 23904 when word +8192 != 0 (`sub_827CE490` via `sub_82461550`).
 - So `native_roster.npc_pool` marks each pool member's look source: `marquee` (converted by `prepare()`, same identity
   `sha256('native-marquee-v1:'+key)`), `save` (teammate), `online` (community: no data, never spawned without a mod).
-- Teammate hook (designed, not faked): the save slot's equivalent is the player's customiser library. A runtime
+- Teammate hook (designed, not faked): the save slot's equivalent is the player's customizer library. A runtime
   binding file `settings/living_world_teammates.json` = `{ "teammate_01": "<library entry id>" | null, ... }`;
   `bind_teammates()` returns the bound entries whose `library/entries/<id>/character.glb` exists. Unbound = an empty
   save slot = not eligible (retail parity: unrecruited teammates never spawn). Who writes the file is open (a menu

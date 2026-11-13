@@ -97,14 +97,14 @@ pub struct HandPropSettings {
     /// The intercept solve's epsilon (`sub_82E15CD0`); the image word at `0x82195100` does not read as a float, the
     /// value is [inferred] (1.19e-7, the constant the same code uses elsewhere, b93 B1).
     pub intercept_epsilon: f32,
-    /// The aim jitter's length range, metres (`sub_82E17508`: `0x82165A10` 0.0, `0x820C6D98` 0.25).
+    /// The aim jitter's length range, meters (`sub_82E17508`: `0x82165A10` 0.0, `0x820C6D98` 0.25).
     pub jitter_min: f32,
     pub jitter_max: f32,
     /// The lift added to the aim point after the jitter (`0x82139A20` (0, 1, 0) x `0x8231A844` 1.0).
     pub aim_lift: f32,
     /// Half the launch solve's gravity (`sub_82E16AB0`, `0x822F8FA4` 4.9).
     pub half_gravity: f32,
-    /// The unlink box half sizes around the ped, metres x / y (up) / z (`82E3F090`: 0.5, 2.0, 0.5).
+    /// The unlink box half sizes around the ped, meters x / y (up) / z (`82E3F090`: 0.5, 2.0, 0.5).
     pub unlink_box: [f32; 3],
     /// The unlink stops whatever clip the ped channel plays with this fade (`82E3FAE0`, `DAT_82099280` 0.2 s, b649).
     pub unlink_fade: f32,

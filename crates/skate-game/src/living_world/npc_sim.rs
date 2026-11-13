@@ -211,7 +211,7 @@ pub(crate) struct NpcSim {
     takeoff_logged: bool,
     /// The last GroundAnimation launch speed since the dispatch (`82D93618`), for NPC_TAKEOFF.
     takeoff_launch: f32,
-    /// `pc+944` / `pc+945` (centred, rejoining): written on ground ticks before the record (`sub_8246FA30` calls
+    /// `pc+944` / `pc+945` (centered, rejoining): written on ground ticks before the record (`sub_8246FA30` calls
     /// `sub_8246AA00` then `sub_8246DB50`), kept through the air.
     lane_flags: (bool, bool),
     /// The spawn push set by the replay -> sim handover (m/s), until the first measured speed after its teleport is
@@ -324,7 +324,7 @@ fn projected_point(sim: &NpcSim, state: PhysicalStateId) -> ([f32; 3], [f32; 3])
         let root = effective_root(&sim.body.runtime);
         ([root[3][0], root[3][1], root[3][2]], [root[2][0], root[2][1], root[2][2]])
     } else {
-        // On the board retail projects `Reckoning+144`, the deck rigid body's position (its centre of mass), not the
+        // On the board retail projects `Reckoning+144`, the deck rigid body's position (its center of mass), not the
         // deck part's origin (b674).
         (GamePhysics::context_deck_position(&sim.context), effective_deck_forward(sim))
     }
@@ -496,6 +496,10 @@ impl NpcSim {
     pub(crate) fn deck_position(&self) -> [f32; 3] {
         let t = GamePhysics::context_deck(&self.context).translation;
         [t.x, t.y, t.z]
+    }
+
+    pub(crate) fn deck_velocity(&self) -> [f32; 3] {
+        GamePhysics::context_deck_velocity(&self.context)
     }
 
     /// The full audio-state record of the last step, when it has stepped since its placement.
@@ -698,6 +702,31 @@ pub(crate) struct ChainScratch {
     others: Vec<([u8; 16], u32)>,
     in_use: Vec<[u8; 16]>,
     out: Vec<skate_core::living_world::replay::CursorEvent>,
+    /// Per contest rider, the lines it has ridden this round (`contest_lines`).
+    contest_done: std::collections::HashMap<super::LivingWorldId, Vec<[u8; 16]>>,
+    allowed: Vec<[u8; 16]>,
+    /// Contest riders riding over to the start node of the line they chained to, until within the line end's lost
+    /// radius of it.
+    riding_over: std::collections::HashMap<super::LivingWorldId, (u32, u64)>,
+}
+
+/// Fixed ticks a contest rider has to ride over to its next line before it is placed on it.
+const RIDE_OVER_TICKS: u64 = 12 * 60;
+
+/// A contest rider's choice at a line end (ours, the user's contest spec): the lines of `base` (sorted) it has not
+/// ridden this round and no other rider is on; with none left, the ones it has not ridden; with none of those, any but
+/// its own. The nearest start among them is then taken by the usual mode 1 search, and the rider rides there on the
+/// board (no walk-back). Riders sharing a line keep apart with the avoider, as retail's do.
+fn contest_lines(base: &[[u8; 16]], done: &[[u8; 16]], current: [u8; 16], others: &[[u8; 16]], out: &mut Vec<[u8; 16]>) {
+    for pass in 0..3 {
+        out.clear();
+        out.extend(base.iter().copied().filter(|l| {
+            *l != current && (pass == 2 || !done.contains(l)) && (pass != 0 || !others.contains(l))
+        }));
+        if !out.is_empty() {
+            return;
+        }
+    }
 }
 
 /// One simulated NPC's step this tick, run after the per-NPC preparation (`run_steps`).
@@ -980,7 +1009,12 @@ pub(crate) fn simulate(
     let mut count = npcs.iter().filter(|n| n.3.is_some()).count();
     // The line end's inputs, as `advance` builds them: the players and every NPC's (line, node) by serial order; a chain
     // moves its own entry, so a later NPC at the same line end this tick sees the line in use (b620).
-    let ChainScratch { players, order, others, in_use, out } = &mut *chain_scratch;
+    let ChainScratch { players, order, others, in_use, out, contest_done, allowed, riding_over } = &mut *chain_scratch;
+    // Kept while a contest runs: the riders' and the autopilot's (ask 613) ridden lines.
+    if state.contest_riders.is_empty() {
+        contest_done.clear();
+    }
+    riding_over.retain(|id, _| state.contest_riders.contains(id));
     players.clear();
     players.extend(observers.observers.iter().map(|o| o.position));
     order.clear();
@@ -1158,15 +1192,25 @@ pub(crate) fn simulate(
                 let mut walk_intents: Vec<(String, f32)> = Vec::new();
                 // The stuck tracker's stage actions (`sub_8246F818`, b111), on the stage the previous tick set.
                 let (mut stuck_resnap, mut stuck_respawn) = (false, false);
+                // A contest rider that has not reached its next line in RIDE_OVER_TICKS is placed on it (the stuck
+                // respawn; retail's walk-back would carry it there). One stopped 15 m short with the line held at its
+                // start node and stood for the rest of the round (desktop 2026-11-12).
+                if riding_over.get(&npc.id).is_some_and(|&(_, since)| *calls - since > RIDE_OVER_TICKS) {
+                    riding_over.remove(&npc.id);
+                    stuck_respawn = true;
+                    info!("NPC_CONTEST_LINE #{} {} did not reach its next line in {} s: placed on it", npc.id.serial, npc.character, RIDE_OVER_TICKS / 60);
+                }
                 // The walk-back's inputs; it starts after the follow block, which raises its request (b701 2g).
                 let mut reposition: Option<(bool, u32)> = None;
+                // A contest rider never walks back (ours, the user's contest spec): it rides on the board to its next line.
+                let walk_back = rules.walk_back && !state.contest_riders.contains(&npc.id);
                 if rules.walk_back && sim.walker.is_none() {
                     use skate_core::living_world::{ai_controller, avoid::AvoidMode};
                     let a = &mut replay.avoid;
                     let mode_7 = a.last.mode == AvoidMode::StepOff;
                     let prop_node = a.last.steer_target.and_then(|id| a.last.entries.iter().find(|x| x.id == id)).and_then(|x| x.path).map_or(replay.cursor.node, |p| p.node);
                     let airborne = matches!(state_now as u32, 200..300);
-                    if let Some(w) = ai_controller::step_off(&mut a.controller, &rules.controller, mode_7, airborne, false, prop_node) {
+                    if let Some(w) = walk_back.then(|| ai_controller::step_off(&mut a.controller, &rules.controller, mode_7, airborne, false, prop_node)).flatten() {
                         walk_intents.push(("WipeOutRequest".into(), w));
                         info!("NPC_STEP_OFF #{} {} wipe-out request (still blocked, node {prop_node})", npc.id.serial, npc.character);
                     }
@@ -1176,7 +1220,9 @@ pub(crate) fn simulate(
                         ai_controller::StuckAction::Respawn => stuck_respawn = true,
                         ai_controller::StuckAction::None => {}
                     }
-                    reposition = Some((mode_7, prop_node));
+                    if walk_back {
+                        reposition = Some((mode_7, prop_node));
+                    }
                 }
                 if let Some(w) = sim.walker.as_mut() {
                     use skate_core::living_world::controller_b::BTick;
@@ -1327,14 +1373,54 @@ pub(crate) fn simulate(
                             });
                             // The line end (`sub_8246D3C0`, b701): on the trigger tick chain from the body (`sub_8246C7F8`, mode 1
                             // fallback), reset onto the new line, then the 4.5 m lost test on whichever line it is on.
-                            if f.search(line, pos, speed, &rules.path) {
+                            // A contest rider riding over to the line it chained to keeps its follower on that line's start
+                            // node until its body is within the line end's lost radius of it. The windowed search otherwise
+                            // crept along the new line towards the body (4 nodes a tick) and reached the line's end, which
+                            // chained again (desktop 2026-11-12: the round's lines end where the rider stood; 28 of 121 chains
+                            // within 1 s). Retail's follower does not run while the walk-back has the skater.
+                            if let Some(&(node, _)) = riding_over.get(&npc.id) {
+                                // Joining the line further along counts too (desktop 13:22: 15 of 61 rode onto the line's
+                                // 4th or 5th segment, never passed near its start, and were placed after 12 s).
+                                let arrived = (f.on_path && f.a.0 >= node) || line.nodes.get(node as usize).is_none_or(|n| {
+                                    let d = [n.position[0] - pos[0], n.position[1] - pos[1], n.position[2] - pos[2]];
+                                    d[0] * d[0] + d[1] * d[1] + d[2] * d[2] <= rules.path.line_end_lost_radius * rules.path.line_end_lost_radius
+                                });
+                                if arrived {
+                                    riding_over.remove(&npc.id);
+                                    info!("NPC_CONTEST_LINE #{} {} reached its next line at node {node}", npc.id.serial, npc.character);
+                                }
+                            }
+                            let riding = riding_over.contains_key(&npc.id);
+                            let at_end = !riding && f.search(line, pos, speed, &rules.path);
+                            if at_end {
                                 super::npc_skaters::fill_others(order, npc.id, others, in_use);
                                 let profile = super::npc_skaters::npc_trick_profile(&state.npc.tricks, &settings.skater_trick_profiles, &npc.character);
                                 let tricks = skate_core::living_world::npc_tricks::TrickContext { mode: settings.npc_tricks.mode, params: settings.npc_tricks.params, profile: profile.as_deref(), seed: npc.seed, slot_tricks: state.npc.tricks.slot_tricks_for(&npc.character) };
                                 let ctx = skate_core::living_world::replay::BranchContext { position: pos, forward: heading, speed: speed.abs(), players, others, in_use, preferred_skill: -1, online: observers.online, chain: line_chain, tricks, body: replay.body_gate, valid_lines: valid.as_ref().and_then(|v| v.per_character.get(&npc.character)).map(Vec::as_slice) };
                                 out.clear();
                                 // The path filter hides the other lines from the search (82458860 skips them, b972 / 82458968).
-                                let filtered = filter.map(|f| skate_core::living_world::replay::FilteredLines { inner: &*lines, ids: f.0.as_slice() });
+                                // OURS (ask 613): in a contest the autopilot picks its next line like a contest rider (lines it
+                                // has not ridden this round), so it moves on instead of riding the same lines back and forth.
+                                let contest = state.contest_riders.contains(&npc.id) || (sim.own_speed && !state.contest_riders.is_empty());
+                                if contest {
+                                    let done = contest_done.entry(npc.id).or_default();
+                                    if !done.contains(&replay.cursor.line) {
+                                        done.push(replay.cursor.line);
+                                    }
+                                    let base: Vec<[u8; 16]> = match (filter, scripted_lines.as_deref()) {
+                                        (Some(f), _) => f.0.to_vec(),
+                                        (None, Some(s)) => s.clone(),
+                                        (None, None) => lines.keys().copied().collect(),
+                                    };
+                                    let riders: Vec<[u8; 16]> = order.iter().filter(|o| o.0 != npc.id && state.contest_riders.contains(&o.0)).map(|o| o.1).collect();
+                                    contest_lines(&base, done, replay.cursor.line, &riders, allowed);
+                                    allowed.sort_unstable();
+                                }
+                                let filtered = if contest {
+                                    Some(skate_core::living_world::replay::FilteredLines { inner: &*lines, ids: allowed.as_slice() })
+                                } else {
+                                    filter.map(|f| skate_core::living_world::replay::FilteredLines { inner: &*lines, ids: f.0.as_slice() })
+                                };
                                 let search: &dyn skate_core::living_world::replay::LineSource = match &filtered { Some(f) => f, None => &*lines };
                                 if let Some((to, node)) = replay.cursor.line_end_chain(search, &ctx, out) {
                                     for ev in out.drain(..) {
@@ -1344,6 +1430,12 @@ pub(crate) fn simulate(
                                         }
                                     }
                                     info!("NPC_SKATER_CHAIN #{} {} line end: next line at node {node} (A {}+{:.2})", npc.id.serial, npc.character, f.a.0, f.a.1);
+                                    if contest {
+                                        let done = contest_done.entry(npc.id).or_default();
+                                        done.push(to);
+                                        info!("NPC_CONTEST_LINE #{} {} rides on to a new line ({} done, {} to choose from)", npc.id.serial, npc.character, done.len(), allowed.len());
+                                        riding_over.insert(npc.id, (node, *calls));
+                                    }
                                     if race.is_some() {
                                         log_far_chain(&*lines, npc, pos, &to, line_chain.radius);
                                     }
@@ -1389,13 +1481,15 @@ pub(crate) fn simulate(
                             // next tick hands the skater to controller B, which walks it back (b115).
                             // OURS: the autopilot pushes off from its race slot and steers onto its line; retail's player slot can lie past the
                             // 4.5 m line-start lost radius, and the walk-back had it run on foot at GO (laptop race-gates, University).
-                            if f.lost && rules.walk_back && sim.walker.is_none() && !(sim.own_speed && sim.start_ticks > 0) {
+                            if f.lost && walk_back && sim.walker.is_none() && !(sim.own_speed && sim.start_ticks > 0) {
                                 if !was_lost {
                                     info!("NPC_SKATER_LOST #{} {} at node {} ({:.1} m from the path, {speed:.1} m/s) at=[{:.1}, {:.1}, {:.1}]", npc.id.serial, npc.character, f.search_start, f.dist, pos[0], pos[1], pos[2]);
                                 }
                                 replay.avoid.controller.reposition_request = true;
                             }
-                            replay.follow_target = Some(replay.cursor.frames + f.frames_to_b(line, replay.cursor.node, replay.cursor.frame_in_segment));
+                            // Riding over: the line waits at its start node until the rider gets there.
+                            let riding = riding_over.contains_key(&npc.id);
+                            replay.follow_target = Some(replay.cursor.frames + if riding { 0 } else { f.frames_to_b(line, replay.cursor.node, replay.cursor.frame_in_segment) });
                             if f.on_path != was_on {
                                 left_path = was_on;
                                 info!("NPC_SKATER_PATH #{} {} {} at node {} (A {}+{:.2}, {:.2} m, lane {})", npc.id.serial, npc.character, if f.on_path { "rejoined the path" } else { "left the path" }, replay.cursor.node, f.a.0, f.a.1, f.dist, f.inside_lane);
@@ -1793,7 +1887,8 @@ pub(crate) fn simulate(
                         if sim.own_speed {
                             let rules = autopilot_brain::JumpRules::default();
                             let jump = autopilot_brain::jump_ahead(line, node, into, &rules);
-                            input.target = autopilot_brain::push_target(input.target, jump);
+                            let ahead = autopilot_brain::approach_speed(line, node, into, &autopilot_brain::BrakeRules::default());
+                            input.target = autopilot_brain::push_speed(input.target, ahead, jump);
                             if !autopilot_brain::trick_cuts_push(input.speed, jump, &rules) {
                                 input.trick_frames = None;
                             }
@@ -1823,7 +1918,7 @@ pub(crate) fn simulate(
                             let b = autopilot_brain::BrakeRules::default();
                             let need = autopilot_brain::jump_ahead(line, node, into, &autopilot_brain::JumpRules::default()).map_or(0.0, |j| j.speed);
                             let ahead = autopilot_brain::approach_speed(line, node, into, &b).unwrap_or(input.target);
-                            (ai_push::PushInput { target: ahead.max(need), ..input }, ai_push::BrakeSettings { factor: b.factor, ..rules.brake })
+                            (ai_push::PushInput { target: ahead.max(need), ..input }, ai_push::BrakeSettings { factor: b.factor(sim.braking), ..rules.brake })
                         } else {
                             (input, rules.brake)
                         };
