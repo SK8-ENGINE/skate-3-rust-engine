@@ -56,6 +56,8 @@ pub struct SkaterFacts {
     /// The body tweak pose the last bail closed in (Hall of Meat P+0x3540; ObjectiveHOM.DidSpecificBodyTweakThisFrame
     /// 82C68880 compares its argument with it).
     pub bail_pose: Option<usize>,
+    /// The last closed bail's Hall of Meat total (ObjectiveHOM.GetScore reads the record's P+0x34DC).
+    pub bail_score: u32,
     pub off_board: bool,
     pub went_off_board: bool,
     pub went_on_board: bool,
@@ -80,7 +82,7 @@ impl Default for SkaterFacts {
     fn default() -> Self {
         Self {
             in_air: false, right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pump_acceleration: 0.0, last_pump_user: false,
-            grind_rail: None, in_sequence: false, sequence_completed: false, wiping_out: false, wipeout_over: false, bail_pose: None, off_board: false,
+            grind_rail: None, in_sequence: false, sequence_completed: false, wiping_out: false, wipeout_over: false, bail_pose: None, bail_score: 0, off_board: false,
             went_off_board: false, went_on_board: false, grinding: false, on_board: false, on_ground: false,
             air_completed: false, time_to_grind: NO_GRIND_TIME, board_adjust: 0, competitor_distances: [None; 4],
         }
@@ -113,7 +115,7 @@ pub enum FlowCommand {
 /// The functions this API answers (last name segment). A group whose programs call anything else does not run:
 /// an unported call errors, and an erroring completion condition defaults to true (retail), so it would complete
 /// at once.
-pub const PORTED: [&str; 54] = ["IsWipeoutOver", "ResetAllObjectives", "DidSpecificBodyTweakThisFrame", "GetDistanceToNearestAISkater", "GetDistanceToSkater", "AddFollowIndicator", "RemoveFollowIndicator","BeganTrick", "BeganTrickGroup", "GetTimeToGrind", "IsDoingSpecificBoardAdjust", "EnteredVolume", "IsInVolume", "IsSequenceNewlyCompletePoints", "GetGroupAccumulatedPoints",
+pub const PORTED: [&str; 55] = ["IsWipeoutOver", "ResetAllObjectives", "DidSpecificBodyTweakThisFrame", "GetScore", "GetDistanceToNearestAISkater", "GetDistanceToSkater", "AddFollowIndicator", "RemoveFollowIndicator","BeganTrick", "BeganTrickGroup", "GetTimeToGrind", "IsDoingSpecificBoardAdjust", "EnteredVolume", "IsInVolume", "IsSequenceNewlyCompletePoints", "GetGroupAccumulatedPoints",
     "GetGroupPointsRequirement", "GetAccumulatedPoints", "ActivateObjective", "DeactivateObjective", "ResetObjective",
     "GetObjectiveStatus", "GetTotalNumCompletedObjectives", "IsInSequence", "SequenceCompleted", "IsWipingOut",
     "IsOffBoard", "WentOffBoard", "WentOnBoard", "JustUsedSessionMarker", "JustSetSessionMarker", "SetFractionValue",
@@ -198,6 +200,7 @@ impl Api for ObjectiveApi<'_> {
             }
             "IsWipeoutOver" => Value::Bool(self.skater.wipeout_over),
             "DidSpecificBodyTweakThisFrame" => Value::Bool(self.skater.bail_pose == Some(index(args)?)),
+            "GetScore" if name.starts_with("ObjectiveHOM.") => num(self.skater.bail_score as i32),
             "GetObjectiveStatus" => self.statuses.get(index(args)?).map_or(Value::Nil, |s| num(*s as i32)),
             "GetTotalNumCompletedObjectives" => num(self.statuses.iter().filter(|s| **s == State::Complete).count() as i32),
             "IsInSequence" => Value::Bool(self.skater.in_sequence),

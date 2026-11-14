@@ -433,6 +433,8 @@ pub(crate) struct FeedInput<'a> {
     pub wipeout_over: bool,
     /// The body tweak pose the last bail closed in (ObjectiveHOM.DidSpecificBodyTweakThisFrame).
     pub bail_pose: Option<usize>,
+    /// The last closed bail's Hall of Meat total (ObjectiveHOM.GetScore).
+    pub bail_score: u32,
     /// Leader.* distances to competitors 1..4 (follow the leader).
     pub competitor_distances: [Option<f32>; 4],
 }
@@ -479,6 +481,7 @@ impl ObjectiveFeed {
             wiping_out: input.state_id == 300,
             wipeout_over: input.state_id == 300 && input.wipeout_over,
             bail_pose: input.bail_pose,
+            bail_score: input.bail_score,
             off_board: off,
             went_off_board: off && !self.was_off_board,
             went_on_board: !off && self.was_off_board,

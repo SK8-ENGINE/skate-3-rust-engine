@@ -592,6 +592,7 @@ fn update(
         board_adjust: skater.animation_input.fields.board_adjust,
         wipeout_over: skater.player_input.physical.skeleton.over_599 != 0,
         bail_pose: shared.and_then(|c| c.last_bail_pose),
+        bail_score: shared.and_then(|c| c.last_bail_score).map_or(0, |s| s.total),
         competitor_distances: distances,
     };
     let killed_of: Vec<bool> = state.groups.iter().map(|g| g.killed).collect();

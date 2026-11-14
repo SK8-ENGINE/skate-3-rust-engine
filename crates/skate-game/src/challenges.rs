@@ -411,6 +411,8 @@ pub(crate) struct Challenges {
     pub pushes_this_frame: u32,
     /// The body tweak pose the last bail closed in (Hall of Meat P+0x3540, latched by career_stats_host at close).
     pub last_bail_pose: Option<usize>,
+    /// The last closed bail's Hall of Meat score (P+0x34DC, final at bail close; Trick.GetHOMScore).
+    pub last_bail_score: Option<skate_core::hall_of_meat::BailScore>,
     pub retail: Vec<Challenge>,
     pub loaded: bool,
     pub generation: Option<u64>,
@@ -799,6 +801,7 @@ fn update(
             board_adjust: skater.animation_input.fields.board_adjust,
             wipeout_over: skater.player_input.physical.skeleton.over_599 != 0,
             bail_pose: challenges.last_bail_pose,
+            bail_score: challenges.last_bail_score.map_or(0, |s| s.total),
             end_choice: end_dialog.choice.take() };
         let actions = if std::mem::take(&mut challenges.mods.abort) { tutorial.abandon(&mut presenter) } else { tutorial.step(&input, &mut presenter) };
         crate::hud_challenge::take_callout(&mut hud, &presenter, guide.as_deref());

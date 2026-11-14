@@ -254,6 +254,12 @@ fn track(
     } else if let Some(bail) = host.bail.take() {
         if let Some(mut c) = challenges {
             c.last_bail_pose = bail.poses.pose_at_close();
+            let settings = physics.as_ref().map(|p| &p.settings);
+            if let Some(scoring) = settings.and_then(|s| s.hall_of_meat_scoring.as_ref()) {
+                let score = bail.score(settings.and_then(|s| s.hall_of_meat.as_ref()), scoring);
+                bevy::log::info!("HALL_OF_MEAT bail closed: {score:?}");
+                c.last_bail_score = Some(score);
+            }
         }
         for (i, v) in bail.rows() {
             host.record(i, v);

@@ -168,6 +168,14 @@ pub struct BailRecord {
     pub poses: crate::hall_of_meat::Poses,
     /// New entity hits while the pose is the judo kick (M+0x878).
     pub judo_kicks: u32,
+    /// Each finished air's (time s, fall m): the score applies its graphs per air (0x82DAECB8 / 0x82DAEBC0).
+    pub airs: Vec<(f32, f32)>,
+    /// |body velocity| on the bail's first tick (M+0x180, latched by 0x82DAD2C0).
+    pub start_speed: Option<f32>,
+    /// The most rotation the bail reached (M+0x820), degrees.
+    pub max_rotation: f32,
+    /// The response strength summed over push-off ticks (M+0x82C), per 1/60 s tick.
+    pub push_off_strength: f32,
 }
 
 /// One tick of the bail for [`BailRecord::tick`].
@@ -195,6 +203,7 @@ impl BailRecord {
     pub fn tick(&mut self, t: &BailTick, peds: impl IntoIterator<Item = u64>, vehicles: impl IntoIterator<Item = u64>) {
         let (dt, counting) = (t.dt, !t.frozen);
         let (height, speed) = t.centre;
+        self.start_speed.get_or_insert(speed);
         let new_air = t.airborne && self.air_apex.is_none();
         if new_air {
             self.poses.air_start();
@@ -210,6 +219,9 @@ impl BailRecord {
                 self.poses.air_tick(table, t.stick, self.rotation.total, t.frozen, t.dt);
             }
         } else {
+            if self.air_apex.is_some() {
+                self.airs.push((self.air_open, self.air_open_distance));
+            }
             self.air_seconds += std::mem::take(&mut self.air_open);
             self.air_distance += std::mem::take(&mut self.air_open_distance);
             self.air_apex = None;
@@ -218,11 +230,13 @@ impl BailRecord {
             }
         }
         self.rotation.tick(&t.hips, counting && !t.over);
+        self.max_rotation = self.max_rotation.max(self.rotation.total);
         if counting && !t.over {
             self.active_seconds += dt;
         }
         if t.response_strength > 0.0 {
             self.push_off_ticks += dt * Self::TICK_RATE;
+            self.push_off_strength += t.response_strength * dt * Self::TICK_RATE;
         }
         let mut new_hits = 0;
         for (list, ids) in [(&mut self.peds, peds.into_iter().collect::<Vec<_>>()), (&mut self.vehicles, vehicles.into_iter().collect())] {
@@ -236,6 +250,29 @@ impl BailRecord {
         if self.poses.judo() {
             self.judo_kicks += new_hits;
         }
+    }
+
+    /// The Hall of Meat score at bail close (0x82DADC48 = damage 0x82DAD448 + bonus 0x82DADA30, b880 §1.3 / §1.4).
+    /// Each graph caps itself; parts truncate to integers, the body tweak graphs summed as floats first. The open
+    /// air counts too. NOT RETAIL YET: the alternate rotation graph (skater mode 2 / 7, M+0x8B5) and the entity points.
+    pub fn score(&self, tuning: Option<&crate::hall_of_meat::Tuning>, scoring: &crate::hall_of_meat::HomScoring) -> crate::hall_of_meat::BailScore {
+        use crate::hall_of_meat::graph as k;
+        let g = |slot: usize, x: f32| scoring.graphs[slot].eval(x);
+        let damage = tuning.map_or(0, |t| {
+            t.bones.iter().zip(self.injuries.level).filter_map(|(b, l)| usize::try_from(l).ok().and_then(|l| b.levels.get(l)))
+                .map(|(points, _)| *points).sum()
+        });
+        let rolls = |pose: usize| ((self.poses.rotation[pose] + 90.0) / 360.0).floor().max(0.0);
+        let body = (g(k::JUDO_KICKS, self.judo_kicks as f32) + g(k::SWAN_DIVE, self.poses.time[1]) + g(k::BARREL, rolls(3))
+            + g(k::CANNONBALL, rolls(0))) as u32 + self.poses.points;
+        let rotation = g(k::ROTATION, self.max_rotation) as u32;
+        let start_speed = g(k::START_SPEED, self.start_speed.unwrap_or(0.0)) as u32;
+        let open = self.air_apex.map(|_| (self.air_open, self.air_open_distance));
+        let air = self.airs.iter().copied().chain(open).map(|(time, fall)| g(k::AIR_TIME, time) as u32 + g(k::AIR_FALL, fall) as u32).sum();
+        let time = g(k::TIME_IN_BAIL, self.active_seconds) as u32;
+        let push_off = g(k::PUSH_OFF, self.push_off_strength) as u32;
+        let total = damage + body + rotation + start_speed + air + time + push_off;
+        crate::hall_of_meat::BailScore { total, damage, body, rotation, start_speed, air, time, push_off, hits: 0 }
     }
 
     /// The rows 0x8250F820 adds at bail end; the injury counts come from 0x82510990.
@@ -468,6 +505,37 @@ mod tests {
     fn tick(dt: f32, over: bool, response_strength: f32, airborne: bool, height: f32) -> BailTick<'static> {
         let hips = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
         BailTick { dt, over, frozen: false, response_strength, airborne, centre: (height, 3.0), hips, stick: [0.0; 2], poses: None }
+    }
+
+    /// Every graph y = 1000 x on 0..7, so each part reads back its input.
+    fn linear() -> crate::hall_of_meat::HomScoring {
+        let g = crate::hall_of_meat::Graph { xs: std::array::from_fn(|i| i as f32), ys: std::array::from_fn(|i| i as f32 * 1000.0) };
+        crate::hall_of_meat::HomScoring { graphs: [g; 12] }
+    }
+
+    #[test]
+    fn the_bail_score_is_damage_plus_the_graphed_bonus_parts() {
+        let mut b = BailRecord { judo_kicks: 2, max_rotation: 3.0, start_speed: Some(2.0), active_seconds: 4.0,
+            push_off_strength: 0.5, airs: vec![(1.0, 2.0)], ..Default::default() };
+        b.poses.time[1] = 1.5;
+        b.poses.points = 500;
+        let s = b.score(None, &linear());
+        assert_eq!((s.body, s.rotation, s.start_speed, s.air, s.time, s.push_off), (4000, 3000, 2000, 3000, 4000, 500),
+            "body = judo 2000 + swan dive 1500 + 500 pose points");
+        assert_eq!(s.total, 16500);
+    }
+
+    #[test]
+    fn an_air_still_open_at_close_scores_and_each_air_is_graphed_on_its_own() {
+        let mut b = BailRecord::default();
+        b.tick(&tick(1.0, false, 0.0, true, 2.0), [], []);
+        b.tick(&tick(1.0, false, 0.0, true, 1.0), [], []);
+        b.tick(&tick(0.5, false, 0.0, false, 0.0), [], []);
+        assert_eq!(b.airs, vec![(2.0, 1.0)], "a finished air keeps its own time and fall");
+        b.tick(&tick(1.0, false, 0.0, true, 3.0), [], []);
+        let s = b.score(None, &linear());
+        assert_eq!(s.air, 2000 + 1000 + 1000, "the open air (1 s, no fall yet) counts at close");
+        assert_eq!(s.start_speed, 3000, "the speed of the first tick");
     }
 
     #[test]

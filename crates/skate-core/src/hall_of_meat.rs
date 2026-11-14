@@ -206,6 +206,84 @@ fn wrap_pi(a: f32) -> f32 {
     }
 }
 
+/// One PointNegGraphData8 (0x50 bytes: xs at +0x10, ys at +0x30, 8 knots each).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Graph {
+    pub xs: [f32; 8],
+    pub ys: [f32; 8],
+}
+
+impl Graph {
+    pub fn from_bytes(b: &[u8]) -> Option<Self> {
+        let f = |o: usize| b.get(o..o + 4).map(|w| f32::from_be_bytes([w[0], w[1], w[2], w[3]]));
+        let mut g = Self::default();
+        for i in 0..8 {
+            g.xs[i] = f(0x10 + i * 4)?;
+            g.ys[i] = f(0x30 + i * 4)?;
+        }
+        Some(g)
+    }
+
+    /// 0x82481E10 (b880 §1.2): below the first knot its y, from the last knot on its y, else linear between the
+    /// knots around x; a segment of no width gives its upper y.
+    pub fn eval(&self, x: f32) -> f32 {
+        if x < self.xs[0] {
+            return self.ys[0];
+        }
+        if x >= self.xs[7] {
+            return self.ys[7];
+        }
+        let i = (1..8).find(|&i| x < self.xs[i]).unwrap_or(7);
+        let (x0, x1, y0, y1) = (self.xs[i - 1], self.xs[i], self.ys[i - 1], self.ys[i]);
+        if x1 - x0 <= 0.0 {
+            return y1;
+        }
+        y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+    }
+}
+
+/// The `scoring_wipeouts/default` graphs by slot (layout +0x834 + k * 0x50, b880 §1.2).
+pub mod graph {
+    pub const SWAN_DIVE: usize = 0;
+    pub const PUSH_OFF: usize = 1;
+    pub const ROTATION_ALTERNATE: usize = 2;
+    pub const JUDO_KICKS: usize = 3;
+    pub const AIR_TIME: usize = 5;
+    pub const AIR_FALL: usize = 6;
+    pub const CANNONBALL: usize = 7;
+    pub const BARREL: usize = 8;
+    pub const START_SPEED: usize = 9;
+    pub const ROTATION: usize = 10;
+    pub const TIME_IN_BAIL: usize = 11;
+    /// The field hash of each slot, in slot order.
+    pub const FIELDS: [&str; 12] = ["Hash_A9B81D5BF44762E4", "Hash_95AE883C533FC1EB", "Hash_2E61C1BB9D8A8A95",
+        "Hash_05B6EAA1D6A19CCE", "Hash_C2D28EFB70B37684", "Hash_96CDCC590988982E", "Hash_32B1A3C2961F4E6E",
+        "Hash_36274FBAE087E832", "Hash_1D49983B40C59E5A", "Hash_B2A997F8579B1998", "Hash_6CD9F0CD7675949C",
+        "Hash_2451424AD330B08F"];
+}
+
+/// The Hall of Meat score table (the twelve graphs; retail values from the disc, a mod can replace any).
+#[derive(Clone, Debug, PartialEq)]
+pub struct HomScoring {
+    pub graphs: [Graph; 12],
+}
+
+/// A closed bail's score and its parts (P+0x34DC and the breakdown beside it, b880 §1.3 to §1.5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BailScore {
+    pub total: u32,
+    pub damage: u32,
+    pub body: u32,
+    pub rotation: u32,
+    pub start_speed: u32,
+    pub air: u32,
+    pub time: u32,
+    pub push_off: u32,
+    /// Ped / vehicle / prop points: NOT RETAIL YET (the entity points table, attrib class 0xF4C9F7FF78B8F653, is not
+    /// loaded), so 0.
+    pub hits: u32,
+}
+
 /// One BodyTweak element (`scoring_wipeouts` `Hash_5717CFCCCA59BD47`): the pose slot, its stick direction, the held
 /// ticks that count a tweak and its points.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -321,6 +399,26 @@ impl Poses {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The stock judo kick and time in bail graphs (scoring_wipeouts/default).
+    fn judo() -> Graph {
+        Graph { xs: [0.0, 0.99, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0], ys: [0.0, 0.0, 10000.0, 12000.0, 14000.0, 16000.0, 18000.0, 20000.0] }
+    }
+
+    #[test]
+    fn a_graph_holds_its_ends_and_interpolates_between_knots() {
+        let g = judo();
+        assert_eq!((g.eval(-1.0), g.eval(0.0), g.eval(1.0), g.eval(1.5), g.eval(6.0), g.eval(40.0)), (0.0, 0.0, 10000.0, 11000.0, 20000.0, 20000.0));
+        assert!((g.eval(0.995) - 5000.0).abs() < 1.0, "the steep step between 0.99 and 1");
+        let time = Graph { xs: [0.0, 5.0, 5.0, 5.25, 5.5, 6.0, 8.0, 9.0], ys: [0.0, 0.0, 750.0, 1250.0, 2500.0, 5000.0, 10000.0, 15000.0] };
+        assert_eq!(time.eval(5.0), 750.0, "a knot repeated at 5 s: the step lands on the second one");
+        let mut bytes = vec![0u8; 0x50];
+        for i in 0..8 {
+            bytes[0x10 + i * 4..0x14 + i * 4].copy_from_slice(&g.xs[i].to_be_bytes());
+            bytes[0x30 + i * 4..0x34 + i * 4].copy_from_slice(&g.ys[i].to_be_bytes());
+        }
+        assert_eq!(Graph::from_bytes(&bytes), Some(g));
+    }
 
     fn tuning() -> Tuning {
         let mut words = vec![0u32; BONES * 21];

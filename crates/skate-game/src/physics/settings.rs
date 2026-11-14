@@ -54,6 +54,8 @@ pub(crate) struct PhysicsSettings {
     pub hall_of_meat: Option<skate_core::hall_of_meat::Tuning>,
     /// The same record's BodyTweak poses and gesture dead zone; None leaves the pose stats unfed.
     pub hall_of_meat_poses: Option<skate_core::hall_of_meat::PoseTable>,
+    /// The same record's twelve score graphs; None scores no bail.
+    pub hall_of_meat_scoring: Option<skate_core::hall_of_meat::HomScoring>,
 }
 
 impl PhysicsSettings {
@@ -177,6 +179,7 @@ impl PhysicsSettings {
             }),
             hall_of_meat: load_hall_of_meat(data).map_err(|error| bevy::log::warn!("HALL_OF_MEAT: no scoring_wipeouts tuning ({error})")).ok(),
             hall_of_meat_poses: load_hall_of_meat_poses(data).map_err(|error| bevy::log::warn!("HALL_OF_MEAT: no BodyTweak poses ({error})")).ok(),
+            hall_of_meat_scoring: load_hall_of_meat_scoring(data).map_err(|error| bevy::log::warn!("HALL_OF_MEAT: no score graphs ({error})")).ok(),
         })
     }
 }
@@ -188,6 +191,18 @@ pub(crate) fn load_hall_of_meat(data: &Collections) -> Result<skate_core::hall_o
     let words = data.words::<525>(CLASS, "default", "Hash_1F9B5EA147CBEEE9")?;
     let scale = data.float(CLASS, "default", "Hash_B7514DE7EBDE9D01")?;
     skate_core::hall_of_meat::Tuning::from_words(&words, scale).ok_or_else(|| "BoneSet size".to_owned())
+}
+
+/// `scoring_wipeouts/default` score graphs (PointNegGraphData8 fields, slot order of layout +0x834.., b880 §1.2).
+pub(crate) fn load_hall_of_meat_scoring(data: &Collections) -> Result<skate_core::hall_of_meat::HomScoring, String> {
+    const CLASS: &str = "Hash_9E4C471BC6EAB615";
+    let mut graphs = [skate_core::hall_of_meat::Graph::default(); 12];
+    for (slot, name) in skate_core::hall_of_meat::graph::FIELDS.iter().enumerate() {
+        let field = data.field(CLASS, "default", name)?;
+        let bytes: Vec<u8> = (0..field.data.len() / 2).filter_map(|i| u8::from_str_radix(&field.data[i * 2..i * 2 + 2], 16).ok()).collect();
+        graphs[slot] = skate_core::hall_of_meat::Graph::from_bytes(&bytes).ok_or_else(|| format!("graph {name} size {}", bytes.len()))?;
+    }
+    Ok(skate_core::hall_of_meat::HomScoring { graphs })
 }
 
 /// `scoring_wipeouts/default` BodyTweak elements (`Hash_5717CFCCCA59BD47`, 24 bytes each) and the gesture dead zone
@@ -220,5 +235,9 @@ mod hall_of_meat_tests {
         let p = super::load_hall_of_meat_poses(&data).expect("BodyTweak");
         assert_eq!((p.poses.len(), p.dead_zone), (4, f32::from_bits(0x3F19_999A)));
         assert_eq!((p.poses[1].pose, p.poses[1].direction, p.poses[1].frames, p.poses[1].points), (2, [1.0, 0.0], 15, 500));
+        let s = super::load_hall_of_meat_scoring(&data).expect("score graphs");
+        let judo = &s.graphs[skate_core::hall_of_meat::graph::JUDO_KICKS];
+        assert_eq!((judo.xs[2], judo.ys[2], judo.ys[7]), (1.0, 10000.0, 20000.0), "one judo kick is worth 10000");
+        assert_eq!(s.graphs[skate_core::hall_of_meat::graph::ROTATION].xs[2], 720.0);
     }
 }
