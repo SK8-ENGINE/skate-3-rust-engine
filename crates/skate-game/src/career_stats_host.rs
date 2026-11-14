@@ -221,7 +221,10 @@ fn track(
         return;
     }
     host.record(row::TIME_PLAYED, dt);
-    let wiping = physics.as_ref().is_some_and(|p| p.board_wiping_out);
+    // In the bail: the skater's wipeout mode (retail in_bail = mode 4, 0x82DAE4F0, b880 §1.1; our WipeoutGround,
+    // state 300). The board's wiping flag stayed set across teleports into standing states and opened extra 0 point
+    // bails (laptop runs 2026-11-13). NOT RETAIL YET: in_bail's +0x44 / +0x45 bail-end flags are not mapped.
+    let wiping = s.physical_state_id() == 300;
     if wiping {
         let skeleton = &s.player_input.physical.skeleton;
         let (over, strength) = (skeleton.over_599 != 0, skeleton.response_strength_580);

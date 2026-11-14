@@ -135,6 +135,7 @@ fn update(
     mut end_dialog: Option<ResMut<crate::end_dialog_host::EndDialogScreen>>,
     time: Res<Time>,
     challenges: Option<Res<crate::challenges::Challenges>>,
+    mut autopilot: Option<ResMut<crate::autopilot::Autopilot>>,
 ) {
     let entered: Vec<u64> = entered.read().filter(|e| e.body == crate::trigger_volumes::PLAYER)
         .filter_map(|e| u64::from_str_radix(&e.volume, 16).ok()).collect();
@@ -248,6 +249,10 @@ fn update(
                 info!("SKATE_HOM {id} player to the start {:?}", &at[3][..3]);
                 if let Err(e) = skater.travel_ex(at, None, !state.data.spawn_offboard) {
                     warn!("SKATE_HOM teleport {e}");
+                }
+                // the test autopilot re-plans from the start instead of steering back to where it was
+                if let Some(a) = autopilot.as_mut() {
+                    a.host_teleported = true;
                 }
                 state.awaiting_teleport = true;
             }
