@@ -8,6 +8,7 @@ pub mod distance_meter;
 pub mod dpo;
 pub mod end_dialog;
 pub mod film_run;
+pub mod hom_run;
 pub mod lots;
 pub mod path_filter;
 pub mod objectives;

@@ -590,6 +590,7 @@ fn update(
             if air.flag_443 != 0 { air.collision_time_180 - air.time_in_state_176 } else { skate_core::challenges::api::NO_GRIND_TIME }
         },
         board_adjust: skater.animation_input.fields.board_adjust,
+        wipeout_over: skater.player_input.physical.skeleton.over_599 != 0,
         competitor_distances: distances,
     };
     let killed_of: Vec<bool> = state.groups.iter().map(|g| g.killed).collect();

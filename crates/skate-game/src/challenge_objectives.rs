@@ -331,6 +331,7 @@ impl DataObjectives {
                 FlowCommand::Activate(i) => self.group.activate(i, &mut events),
                 FlowCommand::Deactivate(i) => self.group.deactivate(i),
                 FlowCommand::Reset(i) => self.group.reset(i, true),
+                FlowCommand::ResetAll => self.group.reset_all(),
                 FlowCommand::Fraction(n, d) => self.fraction = Some((n, d)),
                 FlowCommand::FollowIndicator { competitor, on } => self.follow_indicator.push((competitor, on)),
             }
@@ -428,6 +429,8 @@ pub(crate) struct FeedInput<'a> {
     pub grind_rail: Option<[u64; 2]>,
     pub time_to_grind: f32,
     pub board_adjust: u32,
+    /// Wipeout.IsWipeoutOver: in the bail with the pose's over flag set.
+    pub wipeout_over: bool,
     /// Leader.* distances to competitors 1..4 (follow the leader).
     pub competitor_distances: [Option<f32>; 4],
 }
@@ -463,11 +466,16 @@ impl ObjectiveFeed {
         let off = crate::tutorial_run::off_board(input.state_id);
         let in_air = |s: u32| (200..=202).contains(&s);
         let air_completed = in_air(self.last_state) && !in_air(input.state_id) && input.state_id != 300;
+        // The bail opens and closes on the wipeout state's edges: Wipeout arms the mode 4 objectives, WipeoutOver
+        // re-arms them (b967 §5 step 1).
+        let bail_opened = input.state_id == 300 && self.last_state != 300;
+        let bail_closed = input.state_id != 300 && self.last_state == 300;
         self.last_state = input.state_id;
         let facts = SkaterFacts {
             in_sequence: input.in_sequence,
             sequence_completed: input.banked.iter().any(|(_, dirty)| !dirty),
             wiping_out: input.state_id == 300,
+            wipeout_over: input.state_id == 300 && input.wipeout_over,
             off_board: off,
             went_off_board: off && !self.was_off_board,
             went_on_board: !off && self.was_off_board,
@@ -497,6 +505,12 @@ impl ObjectiveFeed {
         messages.extend(input.entered.iter().map(|&volume| Message::TriggerEnter { volume }));
         if air_completed {
             messages.push(Message::AirCompleted);
+        }
+        if bail_opened {
+            messages.push(Message::Wipeout);
+        }
+        if bail_closed {
+            messages.push(Message::WipeoutOver);
         }
         messages.extend((0..input.pushes).map(|_| Message::SkaterPushed));
         messages.extend(input.tricks.iter().map(|&key| Message::TrickDone { key }));
@@ -548,6 +562,48 @@ impl ObjectiveFeed {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tick_row(key: &str, activation: u32, body: serde_json::Value) -> ObjectiveData {
+        let mut triggers = vec![false; 14];
+        triggers[12] = true;
+        ObjectiveData { key: key.into(), activation, triggers, condition: serde_json::json!({"locals": 0, "body": body}),
+            points_valid: None, failures: Vec::new(), failures_inline: Vec::new(), failure_first: false, hints: Vec::new(),
+            title_id: None, title_arg: None, display_in_hud: true }
+    }
+
+    /// Hall of Meat rows with activation mode 4 (b967): the bail opening arms them, `Wipeout.IsWipeoutOver` reads the
+    /// pose's over flag while bailing, and the bail closing re-arms them for the next one.
+    #[test]
+    fn a_wipeout_objective_arms_on_the_bail_and_reads_wipeout_over() {
+        use skate_core::challenges::objectives::State as S;
+        let row = tick_row("hom_a_0", 4, serde_json::json!([{"return": {"api": "Wipeout.IsWipeoutOver", "args": []}}]));
+        let mut d = DataObjectives::new("hom_a", &[row], Vec::new(), Default::default()).unwrap();
+        d.activate_flow();
+        let mut feed = ObjectiveFeed::default();
+        let mut step = |d: &mut DataObjectives, state_id: u32, wipeout_over: bool| {
+            feed.step(&mut [d], &FeedInput { ticks: 1, state_id, wipeout_over, ..Default::default() }, true)
+        };
+        step(&mut d, 100, false);
+        assert_ne!(d.states()[0], S::Active, "mode 4 waits for a bail");
+        step(&mut d, 300, false);
+        assert_eq!(d.states()[0], S::Active, "the bail opening arms it");
+        let events = step(&mut d, 300, true);
+        assert!(events.iter().any(|(_, e)| matches!(e, Event::Completed(0))), "{events:?}");
+        assert!(!step(&mut d, 100, true).iter().any(|(_, e)| matches!(e, Event::Completed(_))), "over only while bailing");
+    }
+
+    #[test]
+    fn reset_all_objectives_leaves_every_objective_inactive() {
+        use skate_core::challenges::objectives::State as S;
+        let reset = tick_row("hom_b_0", 0, serde_json::json!([{"call": {"api": "Reset.ResetAllObjectives", "args": [{"lit": true}]}},
+            {"return": {"lit": false}}]));
+        let other = tick_row("hom_b_1", 0, serde_json::json!([{"return": {"lit": false}}]));
+        let mut d = DataObjectives::new("hom_b", &[reset, other], Vec::new(), Default::default()).unwrap();
+        d.activate_flow();
+        let mut feed = ObjectiveFeed::default();
+        feed.step(&mut [&mut d], &FeedInput { ticks: 1, state_id: 100, ..Default::default() }, true);
+        assert!(d.states().iter().all(|s| *s == S::Inactive), "{:?}", d.states());
+    }
 
     /// The shape of retail's own the spot rows (b840): the spot (mode 5, byte 1, EnteredVolume, PointsValid
     /// IsSequenceNewlyCompletePoints) and the points objective (bytes 1 and 4, group points >= requirement).

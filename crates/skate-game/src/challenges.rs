@@ -795,6 +795,7 @@ fn update(
                 if air.flag_443 != 0 { air.collision_time_180 - air.time_in_state_176 } else { skate_core::challenges::api::NO_GRIND_TIME }
             },
             board_adjust: skater.animation_input.fields.board_adjust,
+            wipeout_over: skater.player_input.physical.skeleton.over_599 != 0,
             end_choice: end_dialog.choice.take() };
         let actions = if std::mem::take(&mut challenges.mods.abort) { tutorial.abandon(&mut presenter) } else { tutorial.step(&input, &mut presenter) };
         crate::hud_challenge::take_callout(&mut hud, &presenter, guide.as_deref());
