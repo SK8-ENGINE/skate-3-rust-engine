@@ -254,6 +254,8 @@ fn track(
     } else if let Some(bail) = host.bail.take() {
         if let Some(mut c) = challenges {
             c.last_bail_pose = bail.poses.pose_at_close();
+            c.bails_closed += 1;
+            c.last_bail = bail.summary();
             let settings = physics.as_ref().map(|p| &p.settings);
             if let Some(scoring) = settings.and_then(|s| s.hall_of_meat_scoring.as_ref()) {
                 let score = bail.score(settings.and_then(|s| s.hall_of_meat.as_ref()), scoring);

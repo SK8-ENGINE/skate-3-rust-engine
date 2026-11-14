@@ -268,6 +268,33 @@ pub struct HomScoring {
     pub graphs: [Graph; 12],
 }
 
+/// What the ObjectiveHOM record getters read of the last closed bail (the record P, b880 §3).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BailSummary {
+    /// P+0x3514: time in bail (not at rest), s (GetWipeoutDuration).
+    pub duration: f32,
+    pub peds: u32,
+    pub vehicles: u32,
+    /// Each bone's level, -1 none (GetNumBonesAtDamageLevel / GTOE).
+    pub levels: [i8; BONES],
+}
+
+impl Default for BailSummary {
+    fn default() -> Self {
+        Self { duration: 0.0, peds: 0, vehicles: 0, levels: [-1; BONES] }
+    }
+}
+
+impl BailSummary {
+    pub fn bones_at(&self, level: i8) -> u32 {
+        self.levels.iter().filter(|l| **l == level).count() as u32
+    }
+
+    pub fn bones_at_least(&self, level: i8) -> u32 {
+        self.levels.iter().filter(|l| **l >= level && **l >= 0).count() as u32
+    }
+}
+
 /// A closed bail's score and its parts (P+0x34DC and the breakdown beside it, b880 §1.3 to §1.5).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct BailScore {

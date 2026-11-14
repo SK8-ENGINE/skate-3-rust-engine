@@ -413,6 +413,9 @@ pub(crate) struct Challenges {
     pub last_bail_pose: Option<usize>,
     /// The last closed bail's Hall of Meat score (P+0x34DC, final at bail close; Trick.GetHOMScore).
     pub last_bail_score: Option<skate_core::hall_of_meat::BailScore>,
+    /// Bails closed so far (the Hall of Meat host turns a change into WipeoutOver).
+    pub bails_closed: u32,
+    pub last_bail: skate_core::hall_of_meat::BailSummary,
     pub retail: Vec<Challenge>,
     pub loaded: bool,
     pub generation: Option<u64>,
@@ -619,7 +622,7 @@ fn sign_up(
     if !popups.stage_ready {
         challenges.picking = None;
     }
-    let idle = challenges.run.is_none() && challenges.tutorial.is_none() && ftl.as_ref().is_none_or(|f| f.run.is_none())
+    let idle = challenges.run.is_none() && challenges.tutorial.is_none() && ftl.as_ref().is_none_or(|f| f.run.is_none() && f.hom.is_none())
         && races.as_ref().is_none_or(|r| r.run.is_none()) && contests.as_ref().is_none_or(|c| c.run.is_none());
     let near: Vec<Offer> = if gameplay && idle && popups.signup_title.is_none() && challenges.picking.is_none() {
         let path = map.path.as_deref();
@@ -802,6 +805,7 @@ fn update(
             wipeout_over: skater.player_input.physical.skeleton.over_599 != 0,
             bail_pose: challenges.last_bail_pose,
             bail_score: challenges.last_bail_score.map_or(0, |s| s.total),
+            bail: challenges.last_bail,
             end_choice: end_dialog.choice.take() };
         let actions = if std::mem::take(&mut challenges.mods.abort) { tutorial.abandon(&mut presenter) } else { tutorial.step(&input, &mut presenter) };
         crate::hud_challenge::take_callout(&mut hud, &presenter, guide.as_deref());

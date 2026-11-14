@@ -252,6 +252,12 @@ impl BailRecord {
         }
     }
 
+    /// What the ObjectiveHOM getters read of this bail once it closed.
+    pub fn summary(&self) -> crate::hall_of_meat::BailSummary {
+        crate::hall_of_meat::BailSummary { duration: self.active_seconds, peds: self.peds.len() as u32,
+            vehicles: self.vehicles.len() as u32, levels: self.injuries.level }
+    }
+
     /// The Hall of Meat score at bail close (0x82DADC48 = damage 0x82DAD448 + bonus 0x82DADA30, b880 §1.3 / §1.4).
     /// Each graph caps itself; parts truncate to integers, the body tweak graphs summed as floats first. The open
     /// air counts too. NOT RETAIL YET: the alternate rotation graph (skater mode 2 / 7, M+0x8B5) and the entity points.

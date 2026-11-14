@@ -123,6 +123,13 @@ pub(crate) struct FtlData {
     /// are not among the map's trigger volumes, so the run arms them.
     #[serde(default)]
     pub objective_volumes: Vec<crate::challenges::Volume>,
+    /// Hall of Meat rows (b1005): TimeLimit (s), DisableTimeLimitForSinglePlayer, DisableHOM.
+    #[serde(default)]
+    pub time_limit: Option<f32>,
+    #[serde(default)]
+    pub disable_time_limit_for_single_player: bool,
+    #[serde(default)]
+    pub disable_hom: bool,
 }
 
 #[derive(Deserialize)]
@@ -131,6 +138,19 @@ struct File {
     follow_the_leaders: Vec<serde_json::Value>,
     #[serde(default)]
     films: Vec<serde_json::Value>,
+    #[serde(default)]
+    hall_of_meats: Vec<serde_json::Value>,
+}
+
+/// Every Hall of Meat row (`hall_of_meats`, b1005), read like the films'; a row that does not parse is logged.
+pub(crate) fn load_hall_of_meat(assets: &std::path::Path) -> Vec<FtlData> {
+    let Some(file) = std::fs::read(assets.join("private/challenges.json")).ok().and_then(|b| serde_json::from_slice::<File>(&b).ok()) else {
+        return Vec::new();
+    };
+    file.hall_of_meats.into_iter().filter_map(|v| {
+        let id = v.get("id").and_then(|i| i.as_str()).unwrap_or("?").to_owned();
+        serde_json::from_value(v).map_err(|e| warn!("SKATE_HOM row {id} not readable: {e}")).ok()
+    }).collect()
 }
 
 /// Every follow the leader and film row. Rows are read one by one, so a row this host cannot run yet (an anywhere
@@ -187,13 +207,13 @@ pub(crate) fn params(d: &FtlData) -> Params {
 
 /// One objective group of the run: the owned it list or the killed it list.
 pub(crate) struct FtlGroup {
-    killed: bool,
-    objectives: DataObjectives,
+    pub killed: bool,
+    pub objectives: DataObjectives,
 }
 
 /// The run's groups from the row: the owned list (required), then the killed list when the row has one. None when
 /// the owned list does not load; a killed list that does not load is left out (logged by DataObjectives).
-fn load_groups(data: &FtlData, volumes: Vec<(String, u64)>) -> Option<Vec<FtlGroup>> {
+pub(crate) fn load_groups(data: &FtlData, volumes: Vec<(String, u64)>) -> Option<Vec<FtlGroup>> {
     let owned = DataObjectives::new(&data.id, &data.objectives.owned, volumes.clone(), Default::default())?;
     let mut groups = vec![FtlGroup { killed: false, objectives: owned }];
     if let Some(killed) = DataObjectives::new(&data.id, &data.objectives.killed, volumes, Default::default()) {
@@ -244,18 +264,21 @@ pub(crate) struct FollowTheLeader {
     pub run: Option<FtlState>,
     /// The last finished run's result line (tests, the autopilot).
     pub result: Option<String>,
+    /// Hall of Meat rows and the run (hom_host.rs).
+    pub hom_rows: Vec<FtlData>,
+    pub hom: Option<crate::hom_host::HomState>,
 }
 
 impl FollowTheLeader {
     /// The rows on `map` with a sign-up sphere, for the sign-up prompt (challenges.rs).
     pub(crate) fn offers<'a>(&'a self, map: Option<&'a std::path::Path>) -> impl Iterator<Item = crate::challenges::Offer> + 'a {
-        self.rows.iter().filter_map(move |r| r.sign_up.offer(&r.id, r.family.as_deref().unwrap_or("follow_the_leaders"), r.map.as_deref(),
+        self.rows.iter().chain(&self.hom_rows).filter_map(move |r| r.sign_up.offer(&r.id, r.family.as_deref().unwrap_or("follow_the_leaders"), r.map.as_deref(),
             r.title_id.as_ref(), r.title.as_ref(), map))
     }
 
     /// The player is held from the start until the countdown releases it (PinPlayer / UnpinAI(player)).
     pub(crate) fn player_pinned(&self) -> bool {
-        self.run.as_ref().is_some_and(|r| matches!(r.run.state(), State::PinPlayer | State::MakeObjectives | State::PrefilmDisplay
+        self.hom.as_ref().is_some_and(|h| h.pinned) || self.run.as_ref().is_some_and(|r| matches!(r.run.state(), State::PinPlayer | State::MakeObjectives | State::PrefilmDisplay
             | State::NisOverview | State::Setup | State::WaitForAssetLoad | State::SpawnPlayer | State::CheckAi | State::Wait | State::Countdown))
     }
 }
@@ -357,7 +380,7 @@ impl FtlState {
 /// The objective HUD's rows for a group (b844 / b947): the objectives with DisplayInHUD, in row order, each with its
 /// title text id (the movie localizes it; `#OBJECTIVE NOT VALID!` without one, as retail's 8264D130) and its state
 /// as the movie reads it: 0 failed, 1 complete, 2 not active yet, 3 active.
-fn objective_rows(rows: &[ObjectiveData], states: &[skate_core::challenges::objectives::State]) -> Vec<crate::hud_challenge::ObjectiveRow> {
+pub(crate) fn objective_rows(rows: &[ObjectiveData], states: &[skate_core::challenges::objectives::State]) -> Vec<crate::hud_challenge::ObjectiveRow> {
     use skate_core::challenges::objectives::State as S;
     rows.iter().zip(states).filter(|(r, _)| r.display_in_hud).map(|(r, s)| crate::hud_challenge::ObjectiveRow {
         state: match s {
@@ -593,6 +616,7 @@ fn update(
         wipeout_over: skater.player_input.physical.skeleton.over_599 != 0,
         bail_pose: shared.and_then(|c| c.last_bail_pose),
         bail_score: shared.and_then(|c| c.last_bail_score).map_or(0, |s| s.total),
+        bail: shared.map(|c| c.last_bail).unwrap_or_default(),
         competitor_distances: distances,
     };
     let killed_of: Vec<bool> = state.groups.iter().map(|g| g.killed).collect();
