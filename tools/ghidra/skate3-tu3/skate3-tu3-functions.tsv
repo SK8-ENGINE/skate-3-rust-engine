@@ -2899,7 +2899,7 @@
 824360E0	guess_Vt822FA408_DeletingDtor	Guess: sets vtable 822FA408, releases its members and frees itself when asked
 82436168	LocationTable_DeletingDtor	b3.txt 82446318: allocates 0x18 bytes tagged LocationTable (8225A4E4) then stores vtable 822FA410 (slot 0 = 82436168)
 824361E8	guess_Vt822FA418_DeletingDtor	Guess: sets vtable 822FA418, releases its members and frees itself when asked
-82436268	guess_OnlineRec_DtorBody82436268	Guess: first sets member vtable 82322378 and releases its members
+82436268	guess_OnlineRec_Ctor822FA420	Guess: decompile: run-59/d1.txt; stores base vtable 82322378 then 822FA420 and fills string members; only caller 8244DE30 right after a 0x84 byte alloc (a ctor, not a dtor body)
 824363A0	guess_Vt822FA420_DeletingDtor	Guess: sets vtable 822FA420, releases its members and frees itself when asked
 82436448	FeedMessageContainer_DeletingDtor	b3.txt 82446318: allocates 0x18 bytes tagged FeedMessageContainer (8225A500) then stores vtable 822FA428
 824364C8	guess_Vt822FA430_DeletingDtor	Guess: sets vtable 822FA430, releases its members and frees itself when asked
@@ -3345,7 +3345,7 @@
 824566C8	AIPath_NextLanding	first ground node after the next air section
 824567B8	AIPath_SegmentDistance	research/b729-line-end-trigger-cursor.md:46 (824567B8 is the sum of the node frames bytes (node+0x24) for node1+1..=node2, minus t1  frames(node1+1) when node1+1 )
 824568E0	AIPath_SignedCursorDistance	research/b729-line-end-trigger-cursor.md:8 (2. 824568E0 is signed: negative when the second cursor is behind the first. Ours (along) has the same sign and the s)
-82456970	guess_RaceAI_LegLineTest	Guess: rusty-trucks/crates/skate-core/src/challenges/race_ai.rs:134 (the leg part of the line test 82456970: a line whose flag bit 9 + leg is set is not used)
+82456970	RaceAI_LegLineTest	crates/skate-core/src/challenges/race_ai.rs:134 (the leg part of the line test, 82456970, b972)
 82456A38	guess_AIPath_ScanRegistry	Guess: walks the path registry at global +0xC4 through its count and get slots.
 82456B60	Aabb_Overlaps	research/b719-line-object-overlap-skip.md:40 (82456B60(line, obj+0x40): per axis inclusive min / max overlap; code)
 82456C40	guess_Aabb_DistanceSqToPoint	Guess: Squared distance from a point to an axis aligned box (sums the squared overshoot per axis)
@@ -3905,7 +3905,7 @@
 82481F90	AttribRef_GetFieldD675AF88AC03844D	Structural: returns Attrib_GetField(ref, 0xD675AF88AC03844D) or the shared default 830D0850; field name unknown (speech events).
 82481FE8	guess_Speech_BuildScriptedLineName	Stores two values in line slot n and builds a name starting with SPEECH_SCRIPTED_ (string 822FBC60)
 82482130	guess_Speech_TakeOrderCursor	Guess: rusty-trucks/crates/skate-game/src/presentation_run.rs:210 (per line: the take order this pass and the cursor (82482130))
-824821C0	guess_Speech_ShuffleTakes	Guess: rusty-trucks/crates/skate-game/src/presentation_run.rs:245 (count / 2 swaps of random pairs (824821C0))
+824821C0	Speech_ShuffleTakes	crates/skate-game/src/presentation_run.rs:245 (count / 2 swaps of random pairs, 824821C0)
 82482290	guess_SFXObj_ReadFlags	Guess: Reads byte flags +0xC..+0xF and +0x31..+0x33.
 82482360	guess_AudioSystem_CloseBankArchive	Guess: Calls guess_BigHandler_CloseArchive then frees.
 82482460	guess_AudioAssetList_FindLocked	Guess: Under a mutex looks up four asset lists (8302D6B4.. / 8302F038..) with guess_AudioAssetList_Find.
@@ -3931,7 +3931,7 @@
 824831A8	guess_MusicSystem_InitTrackRequest	Guess: run-47 b6.txt + rf1.txt: fills a small request record (kind +0, then per kind 3..10 the ids +8..+0x20 set to -1 or 0); its 12 callers are all MusicSystem / MissionMusic code, none is challenge code
 824832A8	guess_AudioAssetList_FindUnderLockA	Guess: locks the mutex and looks up several audio asset names (8302EF18..8302EF38)
 82483530	guess_AudioAssetList_FindUnderLockB	Guess: locks the mutex and looks up several audio asset names (8302EEC8..8302EEE8)
-824836B8	guess_SndVoiceGroup_StopAll	Guess: rusty-trucks/crates/skate-audio/src/splice/mod.rs:345 (the owners release (824836B8): stop every voice)
+824836B8	SndVoiceGroup_StopAll	crates/skate-audio/src/splice/mod.rs:345 (the owner release sub_824836B8: stop every voice)
 82483768	guess_PedTuning_GetCollection	Guess: inits an Attrib ref to collection D3B2C1F36DA3B433, default ref 830D0850 when missing
 824837D0	AttribRef_AssignClassD3B2	Assigns an Attrib reference (AttribRef_Assign) to a collection of class 0xD3B2C1F36DA3B433; used by Speech_Play.
 82483820	AttribRef_GetField6F9C8A27	Returns the Attrib field 0x6F9C8A27E4CD37DC of the record, or the empty record 830D0850 when absent.
@@ -4024,7 +4024,7 @@
 8248AF30	guess_MissionSpeech_StepVariationBit	Guess: binds the speech SED class and steps the variation bit at +0x354 (4 up to 0x2000, wraps to 4)
 8248B0D8	PostMsg_PlayMissionSpeech	Small function (156 bytes) that builds and posts cMsgPlayMissionSpeech (0x9703D2A4) through MsgBus_Post.
 8248B198	PostMsg_TriggerMissionMusic	Small function (172 bytes) that builds and posts cMsgTriggerMissionMusic (0xAA868679) through MsgBus_Post.
-8248B258	guess_MissionMusic_RaceTrigger	Guess: Race mission music trigger (eSk8MissionMusicTrigger 0 Countdown / 1 Start), calls 8249E498.
+8248B258	MissionMusic_RaceTrigger	crates/skate-game/src/game_audio/music_zones.rs:196 (a mission music trigger eSk8MissionMusicTrigger for a race, 8248B258 -> 8249E498)
 8248B7D0	guess_MusicSystem_MissionMusicRequest	Guess: Audio vtable slot +0x84: mission music trigger with a request row, state 6 push (music-challenges.md line 205).
 8248B918	MsgHandler_cMsgAbandonChallenge_8248A5C8	Handler subscribed for cMsgAbandonChallenge (0x85DA01E5) by 8248A5C8.
 8248B998	Speech_PostStopSpeechByChannel	Posts cMsgStopSpeechByChannel (0x75052452, record size 0x14) with the channel argument through MsgBus_Post under the lock +0x268.
@@ -4114,8 +4114,8 @@
 824972B0	guess_Audio_SpliceReadAttribs	Guess: Reads splice attrib fields (137C683B ..) for the splice steps
 82497418	guess_AudioAttrib_ReadFieldD40C914	Guess: reads field 9149686ADC031389 of collection D40CB4C0FFE45676
 824974F8	guess_AudioAttrib_ReadFieldD40C397	Guess: reads field 397202D0AA482601 of collection D40CB4C0FFE45676
-824975D8	guess_SFXObjOffBoard_LookupSurfaceEntry	Guess: b2: surface collection D40CB4C0FFE45676 by id (table 8302D6F0), only for 824940F8
-824977C8	guess_SFXObjOffBoard_GetSurfaceFloat	Guess: list: only caller 824940F8
+824975D8	SFXObjOffBoard_MaterialFootstepSound	crates/skate-audio/src/player/footsteps.rs:342 (sub_824975D8: bank and id of a material footstep, id -1 = none)
+824977C8	SFXObjOffBoard_MaterialFootstepGain	crates/skate-audio/src/player/footsteps.rs:371 (sub_824977C8: the slot gain of a material footstep, +48)
 82497910	guess_SfxObj_VoiceIdBySlot	Guess: reads field 0x4CA607558B1CF440 for slots 0x5F, 0x61, 0x63.
 82497BF8	SFXCollision_PickEqBus	crates/skate-audio/src/player/collision.rs:162 (doc line names the address; next port fn eq_bus)
 82497F48	guess_SfxOneShot_Ctor	Vtable 822FBF3C, base init 82498248, allocates a 0x5C voice from the pool and starts the voice group
@@ -4179,7 +4179,7 @@
 8249E090	guess_MusicSystem_ResumePath	Guess: validates the audio path and resumes music after it (field A8A0F38E15BE962C)
 8249E160	guess_MissionMusic_ClearTarget	Guess: sets the target fields (+0x10, +0x126) to 0xFF
 8249E1E8	guess_MusicSystem_OnRaceEvent	Guess: switch on race events 1 / 2 / 9 / 0xB: stop, set volume and ramp the race stream (+0x14 path, +0x1E4 / +0x4A0 flags)
-8249E498	guess_MusicSystem_OnMissionMusicTrigger	Guess: rusty-trucks/crates/skate-game/src/game_audio/music_zones.rs:196 (a mission music trigger eSk8MissionMusicTrigger for a race: 8248B258 -> 8249E498); not a challenge abandon
+8249E498	MusicSystem_OnMissionMusicTrigger	crates/skate-game/src/game_audio/music_zones.rs:196 (8248B258 -> 8249E498, the mission music trigger handler)
 8249E680	RaceAI_UpdateRaceState	retail name UpdateRaceState per our notes
 8249E8E8	guess_RaceMusic_Start	Binds the music collection class 0x4ADAC090BCE2A930, resumes the music and starts audio path 0x12000001
 8249E9B8	guess_MusicSystem_UpdateSpeedIntensity	Guess: run-35 b1: called by MusicSystem_UpdateRaceState; skater speed (+0x68) over a tuning max through an 8 knot Math_PiecewiseLinearEval curve from the music Attrib record +0x578
@@ -4192,7 +4192,7 @@
 8249F718	guess_MusicSystem_UpdateEnvironmentStateB	Guess: run-35 b3: takes the MusicSystem object (state +0x448, race state +0x450, same object as MusicSystem_UpdateRaceState); unit follows MusicSystem_Ctor 824984F8; one tag per class
 8249FA08	guess_MusicSystem_LoadRacePlaylist	Guess: on a race event loads the playlist from attrib and reads field 02B828CC (+0x656)
 8249FB70	guess_MissionMusic_RaceTriggerUpdate	Guess: in state 4 (+0x4B4) with target kind 9 (+0x448) reads attrib class 23DE04CAE39D003C and re-inits the challenge target ids when the key changed
-8249FCF0	guess_MusicSystem_UpdateChallengeState	Guess: run-35 b3: takes the MusicSystem object (state +0x448, race state +0x450, same object as MusicSystem_UpdateRaceState); unit follows MusicSystem_Ctor 824984F8; one tag per class
+8249FCF0	MusicSystem_UpdateChallengeState	crates/skate-game/src/game_audio/music_zones.rs:219 (UpdateChallengeState 8249FCF0)
 824A0040	guess_MusicSystem_UpdateTrackVolume	Guess: reads the track fields and zeroes the level when the title has control
 824A0118	guess_MusicSystem_ReadTrackFields	Guess: reads playlist fields F411 / E7CC at an index (+0x420..+0x4B4)
 824A02E0	guess_MusicSystem_GetStateClass	Guess: maps the state +0x470 (3..10) to a class, 5 otherwise
@@ -4277,7 +4277,7 @@
 824A95E0	guess_Speech_LoadBankFieldsB	Guess: reads the same speech attrib fields into +0x1BDB4..+0x1BDD8
 824A9778	guess_SpeechSystem_LoadVoiceCollections	Called from SpeechSystem_Ctor; clears 0x68 words at +0x1BE70 and collects Attrib collections of class 0xD3B2C1F36DA3B433.
 824A9900	guess_SFXObj_Dynamic_StepBody	Guess: dynamic object sound step.
-824A9A20	guess_Speech_RequestCollideLine	Guess: rusty-trucks/crates/skate-audio/src/world/skater_speech.rs:78 (a non local skaters collide line: 824BDA90 -> 824A9A20 -> 824DAC00)
+824A9A20	Speech_RequestCollideLine	crates/skate-audio/src/world/skater_speech.rs:78 (a non local skater collide line 824BDA90 -> 824A9A20 -> 824DAC00)
 824A9AF0	guess_SFXObj_PlayerSpeech_DelayBody	Guess: walks the speech table at +0x2A4.
 824A9D38	Speech_ShowSubtitle	Posts cMsgSetSubtitle 0x61363201 (hash, 1) when the subtitle string exists, stores the hash at +0x1BD34.
 824A9DC8	guess_CrowdState_ModeToStateId	Guess: run-42\b26.txt: pure map of mode 1..3 and a flag to ids 0x59..0x60 (0x5E/0x5F/0x5D/0x60 without flag, 0x5A/0x5B/0x5C/0x59 with it); only caller CrowdState_OnGameModeChange
@@ -4470,7 +4470,7 @@
 824BCEB0	guess_SFXObj_Contacts_QueueSpeech	Guess: queues a speech request for the contact event
 824BD000	guess_SFXObj_Contacts_DeckPoster	Guess: rusty-trucks/crates/skate-audio/src/player/contacts.rs:1708 (the deck poster sub_824BD000 on the console cadence)
 824BD358	SkaterSpeech_SkaterCollision	crates/skate-audio/src/world/speech_manager.rs:182 (collisions between skaters, sub_824BD358)
-824BDA90	guess_Speech_NpcSkaterCollideLine	Guess: rusty-trucks/crates/skate-game/src/game_audio/world_speech.rs:854 (sub_824BDA90: a bumped NPC skaters collide line in free skate)
+824BDA90	Speech_NpcSkaterCollideLine	crates/skate-audio/src/world/skater_speech.rs:78 (824BDA90 -> 824A9A20 -> 824DAC00) and player/contacts.rs:396 (collide lines due 824BDA90)
 824BE130	guess_SFXObj_Contacts_UpdateLate	slot 10: second update pass of the contact sounds when enabled
 824BE1B8	guess_SFXObj_Contacts_LateVoices	Guess: destroys idle voice groups and queues releases.
 824BEA80	guess_SfxObj_ReadVoiceParam	Guess: reads a float field of the voice record (slot 0x3C kind 3).
@@ -4529,7 +4529,7 @@
 824C39E0	guess_SFXObj_Rail_LateUpdate	slot 10 of SFXObj_Rail (run-4 slot meaning LateUpdate is a guess): rail sound late update over the grind state (+0x20 +0x155); Attrib 0x58070BF511809903
 824C3FC8	guess_SFXObj_Rail_StartOnSound	Guess: rusty-trucks/crates/skate-audio/src/player/components.rs:106 (one grind contact sound start: on, sub_824C3FC8, with the grind surface)
 824C4138	guess_SFXObj_Rail_StartOffSound	Guess: rusty-trucks/crates/skate-audio/src/player/components.rs:107 (off, sub_824C4138, reads the values back from the slot) and :220
-824C42A8	guess_SFXObj_Rail_UpdateEnd	Guess: rusty-trucks/crates/skate-game/src/game_audio/player_audio.rs:590 (the Rail updaters end sub_824C42A8: the grind on / off sounds)
+824C42A8	SFXObj_Rail_UpdateEnd	crates/skate-audio/src/player/components.rs:269 (sub_824C42A8, the end of the Rail updater: per slot the on and off sound)
 824C45D0	guess_SFXObj_Rail_Fields	Guess: reads rail fields 0xA1C441E16307FE2B, 0x400FFD5125CCBEC2 and 0xCAF506C5AE525B60.
 824C4C18	guess_SndParam_InitByNameD	Guess: sound parameter record (rate 0x1000) resolved by name in table 8302EF78.
 824C4D50	guess_SFXObj_SkateBoard_QueueStopCommands	guess: under the audio lock writes guess_AudioCmd_Run48F28 commands into the command buffer of the voice.
@@ -4793,17 +4793,17 @@
 824DDE50	guess_SFXObj_Reverb_Attach	slot 7: marks the owner's +0xC block active (+0x3C = 1) and sets up the class's handles
 824DDF58	guess_SFXObj_Reverb_FindZone	Guess: looks up class 0x4CDD7CDC1A955D5C and binds two collections.
 824DE140	guess_SFXObj_Reverb_PresetBody	Guess: preset body (no named callees).
-824DE400	guess_SFXObj_Reverb_BlendSlot	Guess: blends the 0xB8 byte reverb slot with defaults 82063B20 / 82256FD8.
+824DE400	SFXObj_Reverb_RepostBlendWeight	crates/skate-audio/src/bus/env.rs:260 (sub_824DE400 -> sub_8248D770: the per frame re-post of a side blend weight)
 824DE468	guess_SFXObj_Reverb_SetPreset	Stores the preset key +0x198, flips the bank index +0x1A4 and binds the preset collection
 824DE548	guess_SFXObj_Reverb_SetPresetTimed	Guess: rusty-trucks/crates/skate-game/src/game_audio/native.rs:1141 (the reverb preset SFXObj_Reverb sub_824DE548: the districts audio_reverb region) and skate-audio bus/env.rs:10 (824DE548 timed fade, re-posted per frame)
-824DE850	guess_SFXObj_Reverb_FadeStep	Guess: rusty-trucks/crates/skate-audio/src/bus/env.rs:391 (the per frame fade step sub_824DE850: weights new = x, old = 1 - x)
+824DE850	SFXObj_Reverb_FadeStep	crates/skate-audio/src/bus/env.rs:391 (the per frame fade step sub_824DE850)
 824DE970	SFXObj_Reverb_ZoneFade	crates/skate-audio/src/bus/zones.rs:264 (doc line names the address; next port fn zone_fade)
 824DEAE8	guess_SFXObj_Reverb_PickZone	Guess: finds another active zone and binds class F0CE.
 824DEDD8	guess_SFXObj_Reverb_LeaveZoneBlend	Guess: rusty-trucks/crates/skate-audio/src/bus/zones.rs:122 (sub_824DEDD8: leave the zone blend at once)
 824DEEF0	SFXObj_Reverb_BlendByAngle	crates/skate-audio/src/bus/zones.rs:139 (doc line names the address; next port fn blend)
 824DF220	guess_SFXObj_Reverb_UpdateReturns	Guess: rusty-trucks/crates/skate-game/src/game_audio/native.rs:935 (SFXObj_Reverbs update sub_824DF220: the FlangeSub return levels and the global env)
-824DF390	guess_SFXObj_Reverb_PresetToInput	Guess: rusty-trucks/crates/skate-audio/src/bus/env.rs:338 (sub_824DF390s jump table 0x824DF3D0: a presets number to the MixMap Reverb input)
-824DF468	guess_SFXObj_Reverb_RaisePresetInput	Guess: rusty-trucks/crates/skate-game/src/game_audio/native.rs:858 (SFXObj_Reverbs first step sub_824DF468: Reverb.in0..6 from the preset) and skate-audio bus/env.rs:339 (the MixMap Reverb input sub_824DF468 raises to 32767)
+824DF390	SFXObj_Reverb_PresetToInput	crates/skate-audio/src/bus/env.rs:338 (sub_824DF390 jump table 0x824DF3D0: a preset number to the MixMap Reverb input)
+824DF468	SFXObj_Reverb_RaisePresetInput	crates/skate-audio/src/bus/env.rs:339 (the MixMap Reverb input sub_824DF468 raises to 32767)
 824DF688	guess_SFXObj_Reverb_ResolveZoneNameA	Guess: Clamps an index to 0..0xFFFF and resolves its string in table 8302EEB8 under the audio mutex
 824DF880	guess_SFXObj_Reverb_ResolveZoneNameB	Guess: Same as 824DF688 for table 8302EEC0
 824DFC38	guess_SFXObj_Reverb_GetArrayEntry	Guess: Locked Attrib field lookup returning an array entry count
@@ -5190,7 +5190,7 @@
 824FE6E0	guess_MovieScreen_PostActionPopupC	Guess: Movie post action 3: builds a popup from text ids 82240968.. (b490).
 824FE7B8	guess_OnlineAudio_ApplyVoiceChat	Guess: applies the voice chat audio setting from the online service user
 824FE848	TextFormat_Distance	crates/skate-core/src/career_stats.rs:376 (doc line names the address; next port fn distance_text)
-824FE900	guess_ReplayMenu_FormatDistanceWithUnit	Guess: rusty-trucks/crates/skate-game/src/replay_menu_host.rs:173 (handler 824FE900: the number grouped by 3 +   + the metric unit text)
+824FE900	ReplayMenu_FormatDistanceWithUnit	crates/skate-game/src/replay_menu_host.rs:173 (handler 824FE900, b397: the number grouped by 3 plus the unit)
 824FE968	LangFormat_Speed	Formats a speed: value times the unit constant by setting, a space, then ID_COMMON_KMPH or the mph text.
 824FEA28	TextFormat_Points	Handler of the points typed text format.
 824FEA88	guess_LangFormat_WithTableString	Guess: formats into the buffer with the string at [8306707C] +0x28
@@ -5293,7 +5293,7 @@
 82506EC0	guess_ChallengeDiscovery_UpdateStreamPos	Guess: when the asset manager is idle copies the active stream position into +0x250 (atomic updates of +0x23F / +0x240)
 825071B8	ReplayEditor_TriggerScrub	Trigger scrub per console frame (82610F18 calls it, it calls 82C7EF90).
 82507438	ReplayEditor_ApplyEditedLaneValue	research/b377-replay-free-camera-markers.md:6 (82507438 applies the effect lane value being edited; code high; not a commit of camera controls)
-825079A0	guess_ReplayEditor_OpenEffectsMenu	Guess: rusty-trucks/crates/skate-game/src/replay/editor.rs:540 (the effects menu opens (retail state 0xB, 825079A0))
+825079A0	ReplayEditor_OpenEffectsMenu	crates/skate-game/src/replay/editor.rs:540 (the effects menu opens, retail state 0xB, 825079A0)
 82507E38	ReplayEditor_ApplyFrame	Per frame: under the lock, applies the editor accumulators by editor mode (E+0x30).
 82507EE8	guess_ReplayEditor_SetTagMode	Stores the mode +0x1B4 and sets the two tag cursors
 82507FC8	guess_ReplayEditor_SelectModeTab	Guess: Maps a mode 1..4 to a list selection id (5, 4, 0x12 ...) on the global list 83037410.
@@ -6215,7 +6215,7 @@
 82551490	guess_GameSession_ShutdownBody	Guess: large shutdown body freeing objects.
 82551E58	guess_TeamBrand_UpdateActivity	Guess: When the small update id changes from +300 dispatches and drains, then runs every activity and ticks +0x68
 82551EB0	guess_ChallengeArea_BuildHandlers	Guess: builds the presentation handlers for each key and creates the challenge area box volumes (+0x148..+0x1EC)
-825523E0	guess_PresFade_OwnerUpdate	Guess: rusty-trucks/crates/skate-game/src/presentation_run.rs:62 (the fade object steps its 60 Hz ticks first (the owners update 825523E0))
+825523E0	PresFade_OwnerUpdate	crates/skate-game/src/presentation_run.rs:62 (the fade object steps its 60 Hz ticks first, the owner update 825523E0)
 825525D8	guess_TeamBrand_ReloadEffects	Guess: reloads the effect buffer +0x134
 82552650	guess_TeamBrand_ForEachActivity	Guess: calls guess_ActivityManager_ForEach on +0x148
 82552750	SpawnerMgr_ComputeModeMask	research/b541-indicator-mode-gate.md:6 (the bitmask 82552750; code)
@@ -6273,7 +6273,7 @@
 825572B0	guess_CharacterManager_EraseSlotShiftDown	Guess: Moves every 0x40 byte character slot after the given one down by one (erase from the slot array)
 82557348	U64Vector_InsertShift	Inserts one 8-byte value at a position of a vector: shifts the tail up with CRT_MemMove when there is room, else grows the storage (tag 822FB850).
 825574D0	guess_CharacterManager_FillSlotFromTemplate	Guess: Copies the template slot fields (+0x4460..+0x4488 and its transform) into slot n + 1 and removes n from the free list
-82557600	guess_Triggers_DiffInsideSets	Guess: rusty-trucks/crates/skate-core/src/triggers.rs:17 (the new inside set is diffed with last frames (82557600))
+82557600	Triggers_DiffInsideSets	crates/skate-core/src/triggers.rs:17 (the new inside set is diffed with last frame set, 82557600)
 825576E8	guess_CharacterManager_SortSpawnList	Guess: inserts into the 0x14 byte spawn list and insertion sorts it
 82557818	guess_CharacterSlotVector_Insert	Guess: Vector insert of 0x40 byte character slot records (grows by doubling from pool C48)
 82557AB0	guess_FreeList32_InitFrom	Same free list setup from a buffer pointer argument
@@ -6336,7 +6336,7 @@
 8255A490	guess_PresetList_LoadCollectionsAndSort	Guess: When the list +8..+0xC is empty lists the Attrib collections of class 0x12BCDBD69BA7D33D, sorts them with 8256FE10 when asked, clears +0x18
 8255A518	guess_Preset_QueueCharacterLoad	Guess: Resolves preset n (Attrib class 12BCDBD69BA7D33D, field 3F1DD58F86CAAB1E) to a character id, creates a PresetCharacterLoader and queues it as a presentation event under the lock 830B7F90
 8255A660	guess_PresetList_SortRangeB	Guess: Sorts the pointer range +8..+0xC with 8256FE10
-8255A698	guess_Preset_LessByDisplayName	Guess: Sort predicate: compares two presets by their localized name field 8063E6A0DB33E680, ignoring case
+8255A698	Preset_LessByDisplayName	crates/skate-data/src/teammate_presets.rs:49 (retail list order by localized name, 8255A698)
 8255A830	cChallengeDynamicHullManager_DynamicHullTree_Ctor	Constructor of class 'cChallengeDynamicHullManager::DynamicHullTree': called on the new block right after guess_Mem_AllocNamed with that tag (in 82D50D00).
 8255A8A8	guess_cChallengeDynamicHullManager_DynamicHullTree_DeletingDtor	Guess: slot 0 of the cChallengeDynamicHullManager_DynamicHullTree vtable 822FF10C (stored last by cChallengeDynamicHullManager_DynamicHullTree_Ctor 8255A830); slot 0 is usually the deleting destructor here (slot0(obj, 1)); body not read.
 8255A920	guess_Vt822FF1B0_DtorBody	Guess: Destructor body (vtable 822FF1B0): clears the pool list, frees the inline buffers and the dynamic hull tree, unsubscribes its message
@@ -6435,11 +6435,11 @@
 8255FDF0	RaceStats_BuildCourse	Builds the race course geometry once per heat (from StartRaceStats).
 825600A0	guess_Race_GetCheckpointTime	Looks a checkpoint up in the map at +0x460 and returns its float +0x18, or 0
 82560108	guess_Race_GetCheckpointIndex	Looks a checkpoint up in the map at +0x460 and returns its index, or -1
-82560170	guess_RaceStats_Tick	Guess: rusty-trucks/crates/skate-core/src/challenges/race.rs:201 (one tick 82560170: ETA per racer from its position, then ranks and gaps)
+82560170	RaceStats_Tick	crates/skate-core/src/challenges/race.rs:201 (one tick sub_82560170: ETA per racer, then ranks and gaps)
 82560468	guess_RaceHud_UpdatePositions	Guess: every 30 ticks pushes each racer place and time to the HUD at +0x67C, then the timer widget at +0x680.
-82560790	guess_RacePath_DistanceAheadSkipPassed	Guess: rusty-trucks/crates/skate-core/src/challenges/race.rs:78 (82560790: split points already passed by projection are skipped)
-825608B8	guess_RacePath_LengthFromPoint	Guess: b4.txt: sums the segment lengths of the 16 byte point list from point n to the last point
-82560A88	guess_RacePath_SignedDistanceToPoint	Guess: rusty-trucks/crates/skate-core/src/challenges/race.rs:93 (82560A88: signed distance from the position to point t along the incoming segment)
+82560790	RacePath_DistanceAheadSkipPassed	crates/skate-core/src/challenges/race.rs:78 (sub_82560790: split points already passed by projection are skipped)
+825608B8	RacePath_LengthFromPoint	crates/skate-core/src/challenges/race.rs:109 (sub_825608B8: the polyline length from a point to the last point)
+82560A88	RacePath_SignedDistanceToPoint	crates/skate-core/src/challenges/race.rs:93 (sub_82560A88: the signed distance from position to point t along the path)
 82560BC8	guess_RaceCourse_BuildPointsAndLength	Guess: Fills a vector of 16-byte points with the start position then one point per checkpoint of collection 0x7CBD399D98BB0D37 field 0xDFF5E68633A18975 (DmoMan_FindByKey on 3 keys), then sums the segment lengths into +0x210.
 82561058	guess_ChallengeFlagsComp_DeletingDtor	Guess: Runs the body 825610C0 and frees the object when bit 0 of the flags is set
 825610C0	guess_ChallengeFlagsComp_DtorBody	Guess: Restores vtables 822FF3B0 / 822FF414, frees the buffer +0xB8, then sets the base vtable 822FEB44
@@ -6516,7 +6516,7 @@
 82566420	guess_ChallengeRunner_OnFlagEvent	Guess: handles the event when the flag argument is 1, loops over +0x14 / +0x368; slot at 822FF0A4
 825664B8	guess_ChallengeRunner_FlushPending	Guess: in state 0 runs 82BD2568 on the list +0x384 with +0x598 and +0x378; slot at 822FF0C0
 82566548	guess_ChallengeRunner_LoadChallengeAIPath	Guess: reads the challenge type field 0x02B828CCDB4785E4 and path fields of the challenge record, unloads the current AI path and starts an async AI path load; slot at 822FF0DC
-82566740	guess_ChallengeRunner_SinglePlayerLineup	Guess: rusty-trucks/crates/skate-core/src/challenges/race_ai.rs:78 (the single player line up 82566740: player id 0, AI ids 1..)
+82566740	ChallengeRunner_SinglePlayerLineup	crates/skate-core/src/challenges/race_ai.rs:78 (the single player line up 82566740, player id 0, AI ids from 1)
 82566B40	guess_AmbientChallenge_Enter	Guess: ambient skater challenge enter: resets lists, loads two attrib lists, flags DAT_830CFE5C +0x25E.
 82566D30	guess_ChallengeRunner_CollectSpawnerLines	Guess: appends the AI spawner line collection keys to +0x7A4; slot at 822FF0D4
 82566DF0	guess_ChallengeRunner_FindCompetitorCollectionA	Guess: finds a collection of Attrib class 0xE57478F796EBC28C; called by 82566740
@@ -6628,7 +6628,7 @@
 8256E2E0	guess_Telemetry_SendTimedRecord	Guess: writes elapsed time into record +0x44, the hashed user name (82743708, Hash_Lookup2) into +8, then sends it with 827428A0.
 8256E418	guess_TelemetryManager_InitListA	Guess: list init called twice by TelemetryManager_Ctor
 8256E438	guess_TelemetryManager_InitListB	Guess: list init called twice by TelemetryManager_Ctor
-8256E460	guess_PresSimController_Reset	Guess: rusty-trucks/crates/skate-game/src/presentation_run.rs:99 (controller reset (8256E460, the challenges cleanup): the rate goes back to normal)
+8256E460	PresSimController_Reset	crates/skate-game/src/presentation_run.rs:99 (controller reset 8256E460, the challenge cleanup: the rate goes back to normal)
 8256E4C0	guess_Vt822FF600_SetFlagBits	Guess: sets byte +0xD and ors the argument into +0x10; slot at 822FF604
 8256E4D8	guess_Vt822FF600_ClearFlagBits	Guess: clears bits of +0x10 (byte +0xD); slot at 822FF608
 8256E4F0	guess_PresSimController_SetSimRate	Guess: rusty-trucks/crates/skate-game/src/camera/runtime.rs:32 (the presentation sim controllers rate (SetSimRate), posted every frame (8256E4F0))
@@ -6861,7 +6861,7 @@
 8257DAB0	guess_PresEventQueue_SetEntryValue	Resolves a handle, stores a 64 bit value at +0x20, sets +0x28 and calls the entry callback
 8257DB40	guess_PresEventQueue_ResolveHandle	Guess: resolves a handle of the queue 830B7F90 and leaves the lock
 8257DBC8	guess_HandleTable_SetValueLocked	Guess: under lock 830B7F90 resolves a handle in the table at +0x1C and calls its slot 0x18 with the value.
-8257DC48	guess_Career_ApplyTeammatePresetLook	Guess: rusty-trucks/crates/skate-game/src/career.rs:137 (teammate n gets preset keys look: 8257DC48 -> 827D5288 copies it into slot n)
+8257DC48	Career_ApplyTeammatePresetLook	crates/skate-game/src/career.rs:137 (teammate n gets the preset look, retail 8257DC48 -> 827D5288)
 8257DCE0	guess_CharacterLoad_IsEntryReady	Resolves a handle in the queue and returns its ready flag
 8257DD50	guess_PresEventQueue_CollectEntries	Under the lock 830B7F90 collects the queued entries into a vector
 8257DE58	guess_MemCard_ReadCasSlots	Guess: reads a stream of CAS slot blocks and inits the skater slots.
@@ -7135,7 +7135,7 @@
 8258F420	guess_SkaterMotionGraph_DeletingDtor	Guess: slot 0 of the SkaterMotionGraph vtable 823006D0 (stored last by SkaterMotionGraph_Ctor 8258F488); slot 0 is usually the deleting destructor here (slot0(obj, 1)); body not read.
 8258F488	SkaterMotionGraph_Ctor	Constructor of class 'SkaterMotionGraph': called on the new block right after guess_Mem_AllocNamed with that tag (in 82590DC0).
 8258F638	guess_IntentMap_Ctor	Guess: rusty-trucks/crates/skate-core/src/animation/output/intents.rs:1 (fixed intent map specialization constructed by 8258F638)
-8258F6E0	guess_SkaterMotionGraph_AddMgAttribute	Guess: rusty-trucks/crates/skate-game/src/graph_host/motion_grind.rs:92 (8258F6E0 AddMgAttribute)
+8258F6E0	SkaterMotionGraph_AddMgAttribute	crates/skate-game/src/graph_host/motion_grind.rs:92 (Actor +1800 slot 16 -> 8258F6E0 AddMgAttribute, not InsertIntent)
 8258FC58	AttribRef_InitClassE34B3BACEEAF190B	Structural: binds an AttribRef to the collection of Attrib class 0xE34B3BACEEAF190B whose key is argument 2 with the shared default 830D0850
 8258FCC0	guess_Rumble_ChannelVec	Vector body setting a rumble channel
 8258FD90	Vec3_StoreZero	Stores 0.0 (82165A10) into three floats; shared by many SkaterValue vtable slots (never tag a class from it).
@@ -7188,7 +7188,7 @@
 82592510	SkaterActor_SetField774	Structural name: skater actor slot 32 stores its argument at +0x774.
 82592518	guess_SkaterActor_Part38_UnspawnOrReset	Guess: part +0x38 slot 57: for an AI skater in spawn state 2 calls AISpawner_UnspawnAI, else reads the driver path (8246E5C8) to reset.
 825926F8	SkaterActor_FadeInAfterSpawn	research/npc/fix2-cull.md:14 (sub_825926F8 sets +1868 = 0, spawn fade in; code)
-82592810	guess_ActorPacket_CopyExternalPayload	Guess: rusty-trucks/crates/skate-core/src/animation/output/actor_packet.rs:1 (actor field publication and external payload copy 82592810)
+82592810	ActorPacket_CopyExternalPayload	crates/skate-core/src/animation/output/actor_packet.rs:1 (external payload copy 82592810)
 825928F0	guess_SkaterActor_Part3C_GetStateVector1A0	Guess: skater part +0x3C slot 69: copies vector +0x1A0 of the physics state body (part +0x2C slot 5, +0x14).
 82592940	guess_SkaterActor_GetVelocity	Guess: skater actor slot 6 (the base velocity slot, default zero): returns the vector the +0x24 pointer of the physics part (+0x2C slot 5) points to.
 82592990	guess_AIRecord_ReadOwnerXform	Reads the owner transform through slot 0x14 of +0x2C
@@ -7196,7 +7196,7 @@
 82592A78	SkaterActor_GetSkeletonMatrix	research/npc/b116-path-follow-inputs.md:23 (sub_82592A78 copies the Skeleton matrix +368..+431 as one matrix; code)
 82592AF0	SkaterActor_CopyPhysicsTransform	Copies rows +0x1B0..+0x1E0 of the physics state body (part +0x2C slot 5, +0x14) to the output; SkaterActor_GetTransform (slot 7) forwards here.
 82592B68	guess_SkaterActor_LeadingFoot	Guess: rusty-trucks/crates/skate-game/src/skater_animation.rs:84 (82592B68: physical leading foot, including the fakie inversion)
-82592C08	guess_SkaterAnim_SaveStance	Guess: rusty-trucks/crates/skate-game/src/skater_animation.rs:90 (82592C08 / 82B97350 save +15200; ResetToGivenStance consumes it later)
+82592C08	SkaterAnim_SaveCheckpointStance	crates/skate-game/src/skater_animation.rs:90 (82592C08 / 82B97350 save +15200, consumed by ResetToGivenStance)
 82592C68	SkaterActor_SetTransform	Skater actor slot 8 (the actor base SetTransform slot): counts calls at +0x744 and forwards to slot 28 with the transform and flags 1, 0.
 82592C90	guess_CASViewer_PlayClipByKey	Guess: finds an anim channel by key and plays the clip (calls guess_AnimChannelSet_FindIndexByKey, guess_AnimChannel_PlayClip, guess_CASViewer_AdvanceFrame)
 82592FD8	SkaterActor_Phase1	research/b710-grab-touchdown-order.md:27 (sub_82592FD8 actor phase 1: 82594488(actor, dt), then the +1804 object vt+204, then the controller; code)
@@ -7262,7 +7262,7 @@
 825973D8	guess_SkaterMgr_ResetSkatersByMask	Guess: For each skater whose mask (slot 0x38) matches: updates zone / crumb, places the body, pops CAS playback, sets rumble channel
 825978C8	guess_SkaterMgr_IsSameAISpawn	guess: true when the skater already has an AI controller with the same kind (+0x9C), recipe and name, so command 10 is skipped
 82597A70	guess_SkaterMgr_HandleCommand	skater manager command switch (3..0xF): 10 spawn AI skater, 0xB remove, 0xC attach AI, 0xD drop AI, 0xE attach if none
-82598428	guess_SkaterMgr_TeleportGroundFit	Guess: rusty-trucks/crates/skate-core/src/physics/teleport_ground_fit.rs:1 (teleport arrival ground fit up 82598428: one ray down through the arrival point)
+82598428	SkaterMgr_TeleportGroundFit	crates/skate-core/src/physics/teleport_ground_fit.rs:1 (teleport arrival ground fit up, retail 82598428, b475: one straight ray down through the arrival point)
 82598600	SkaterMgr_SpawnAISkater	allocates a 0x780 skater (ctor 82590DC0) and gives it an AIController with the commanded kind
 82598748	SkaterMgr_SpawnActorSkater	allocates a 0x780 skater (alloc tag "Actor", ctor 82590DC0), adds it to the list +0x54 and the world list, then calls 82598B30
 825988A0	SkaterMgr_SpawnGhost	allocates a 0x51B0 ghost (alloc tag "Ghost", ctor 8266C540), stores it at +0x144 and adds it to both lists
@@ -7286,7 +7286,7 @@
 8259BA28	Intentions_ManualProducer	crates/skate-core/src/input/manual_intentions.rs:1 (TU3 Fill 825999F0 -> manual producer 8259BA28)
 8259BB18	guess_Intentions_FillTrick	Guess: rusty-trucks/crates/skate-core/src/input/trick_intentions.rs:89 (Fill calls 8259BB18 with the current RawControllerInput words 7..13)
 8259BC28	guess_Intentions_FillWipeout	Guess: rusty-trucks/crates/skate-core/src/input/wipeout_intentions.rs:1 (wipeout intention helper 8259BC28, called by Fill 825999F0 at 8259AA6C)
-8259BF50	guess_ActionGraphInput_FillDpadGestures	Guess: rusty-trucks/crates/skate-core/src/input/gameplay_gestures.rs:1 (gameplay D pad gestures, Fill helper 8259BF50)
+8259BF50	ActionGraphInput_FillDpadGestures	crates/skate-core/src/input/gameplay_gestures.rs:1 (Skate 3 TU3 gameplay D-pad gestures, Fill helper 8259BF50)
 8259C260	guess_OffboardInput_FillHelper	Guess: rusty-trucks/crates/skate-core/src/input/offboard_intentions.rs:1 (off board inputs from Fill 825999F0 and helper 8259C260)
 8259C4B0	guess_ActionGraphInput_ObjectMoveCurves	Guess: rusty-trucks/crates/skate-core/src/input/offboard_intentions.rs:122 (input listener curves of the object move producer 8259C4B0)
 8259C7D0	guess_HashMap_HashEntries	Folds every map entry (0x18 bytes key, 4 bytes value) into a running hash with factor 33 through the hash callback +0x1C.
@@ -8158,19 +8158,19 @@
 825C6C68	guess_FE_ParkObjectEdit_HandleBack	Guess: class tag: CopyCursorAndPlay 825C6458 shows ID_SKATEPARK_OBJECTLIMIT_WARNING / ID_SKATEPARK_TOO_MANY_OBJECTS (82219160 / 82219184, b10 / d12)
 825C70E0	guess_FE_ParkObjectEdit_HandleMode1B	Guess: class tag: CopyCursorAndPlay 825C6458 shows ID_SKATEPARK_OBJECTLIMIT_WARNING / ID_SKATEPARK_TOO_MANY_OBJECTS (82219160 / 82219184, b10 / d12)
 825C7480	guess_FE_ParkObjectEdit_SetMode	Guess: class tag: CopyCursorAndPlay 825C6458 shows ID_SKATEPARK_OBJECTLIMIT_WARNING / ID_SKATEPARK_TOO_MANY_OBJECTS (82219160 / 82219184, b10 / d12)
-825C7720	guess_FE_ParkPlaceScreen_Ctor	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
-825C78E8	guess_FE_ParkPlaceScreen_DeletingDtor	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
-825C79B0	guess_FE_ParkSetupScreen_RegisterInput	Guess: Slot 9 of 82301AE8: calls the owner +0x38 slot 0x1C with the global 8302C440 and 0x1E.
-825C79D0	guess_FE_ParkSetupScreen_SetReady	Guess: Slot 8 of 82301AE8: sets +0x2C4.
-825C79E0	guess_FE_ParkPlaceScreen_OnEnter	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
-825C8238	guess_FE_ParkPlaceScreen_PlaySound	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
+825C7720	guess_FE_ObjectDropperScreen_Ctor	Guess: research/fe-id-templates.md:77 names ctor 0x825C7720 for FE 53 (vtable 82301AE8, template 103 ObjectDropper)
+825C78E8	guess_FE_ObjectDropperScreen_DeletingDtor	Guess: slot 0 of FE 53 vtable 82301AE8 (ObjectDropper, template 103, fe-id-templates.md:77); only in that vtable
+825C79B0	guess_FE_ObjectDropperScreen_RegisterInput	Guess: slot 9 of FE 53 vtable 82301AE8 (ObjectDropper, template 103); only in that vtable
+825C79D0	guess_FE_ObjectDropperScreen_SetReady	Guess: slot 8 of FE 53 vtable 82301AE8 (ObjectDropper, template 103); only in that vtable
+825C79E0	FE_ObjectDropperScreen_Init	research/fe-id-templates.md:77 (FE 53, vtable 0x82301AE8, init 0x825C79E0, template 103 ObjectDropper, high: single li r4 + vt+56 open)
+825C8238	guess_FE_ObjectDropperScreen_PlaySound	Guess: slot 27 of FE 53 vtable 82301AE8 (ObjectDropper, template 103); only in that vtable
 825C8278	guess_Player_SpawnAtPosition	Name from the messages it posts (cMsgSpawnPlayerAtPosition; 1 MsgBus_Post calls, 408 bytes); the rest of the body not read.
-825C8410	guess_FE_ParkSetupScreen_Slot28	Guess: Slot 28 of 82301AE8: sets a music flag, clears +0x34 and pushes screen 0x38 when +0x2C5 is set.
-825C84A8	guess_FE_ParkPlaceScreen_StepCursor	Guess: slot +16 update of FE 53 ObjectDropper vtable 0x82301AE8, whose dtor / init are ParkPlace (fe-id-templates.md row 53)
+825C8410	guess_FE_ObjectDropperScreen_Slot28	Guess: slot 28 of FE 53 vtable 82301AE8 (ObjectDropper, template 103); only in that vtable
+825C84A8	guess_FE_ObjectDropperScreen_StepCursor	Guess: slot 4 of FE 53 vtable 82301AE8 (ObjectDropper, template 103); only in that vtable
 825C8CA8	guess_FEScreen_EnableBackdrop	Guess: clears +0x34, sets +0x2C4, turns on the front end flag +0x1CD with color words 0xFF and the default fade, then calls +0x38 slot 5 with id 0x1D (pause-blur.md lists 825C8CA8 as unchecked)
-825C8D38	guess_FE_ParkPlaceScreen_HandleButton	Guess: slot +40 input of FE 53 ObjectDropper vtable 0x82301AE8, whose dtor / init are ParkPlace (fe-id-templates.md row 53)
-825C8E20	guess_FE_ParkPlaceScreen_CopyCursorAndPlayB	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
-825C8F10	guess_FE_ParkPlaceScreen_CopyCursorAndPlay	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
+825C8D38	guess_FE_ObjectDropperScreen_HandleButton	Guess: slot 10 of FE 53 vtable 82301AE8 (ObjectDropper, template 103); only in that vtable
+825C8E20	guess_FE_ObjectDropperScreen_CopyCursorAndPlayB	Guess: same class tag as the FE 53 slots: the ParkPlaceScreen family is the ObjectDropper screen (template 103, fe-id-templates.md:77)
+825C8F10	guess_FE_ObjectDropperScreen_CopyCursorAndPlay	Guess: same class tag as the FE 53 slots: the ParkPlaceScreen family is the ObjectDropper screen (template 103, fe-id-templates.md:77)
 825C9000	guess_Player_ShowAbandonConfirmPopup	guess: builds a popup (sPopupInfo_Ctor, title / body / two button strings) whose confirm callback is guess_Player_UnspawnAndAbandon.
 825C9118	guess_Player_UnspawnAndAbandon	Name from the messages it posts (cMsgUnspawnPlayer, cMsgAbandonChallenge; 1 MsgBus_Post calls, 220 bytes); the rest of the body not read.
 825C91F8	guess_Player_SpawnAtPositionB	Name from the messages it posts (cMsgSpawnPlayerAtPosition; 1 MsgBus_Post calls, 344 bytes); the rest of the body not read.
@@ -8179,15 +8179,15 @@
 825C9580	guess_PresHudGroup_SyncFlag	Guess: clears bit 4 of the HUD flags +6000 unless flag 0x100000 of +0x218 is set.
 825C96E0	guess_PresHudGroup_ClearBit	Clears bit n of the 64 bit mask +0x218 and refreshes the HUD group by mode
 825C9780	guess_FE_ParkObjectEdit_InitPickRecord	Guess: class tag: CopyCursorAndPlay 825C6458 shows ID_SKATEPARK_OBJECTLIMIT_WARNING / ID_SKATEPARK_TOO_MANY_OBJECTS (82219160 / 82219184, b10 / d12)
-825C9818	guess_FE_ParkPlaceScreen_HandleModeA	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
-825C9F88	guess_FE_ParkPlaceScreen_CheckChildIdle	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
-825CA030	guess_FE_ParkPlaceScreen_OnDuplicate	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
-825CA178	guess_FE_ParkPlaceScreen_HandleModeB	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
+825C9818	guess_FE_ObjectDropperScreen_HandleModeA	Guess: same class tag as the FE 53 slots: the ParkPlaceScreen family is the ObjectDropper screen (template 103, fe-id-templates.md:77)
+825C9F88	guess_FE_ObjectDropperScreen_CheckChildIdle	Guess: same class tag as the FE 53 slots: the ParkPlaceScreen family is the ObjectDropper screen (template 103, fe-id-templates.md:77)
+825CA030	guess_FE_ObjectDropperScreen_OnDuplicate	Guess: same class tag as the FE 53 slots: the ParkPlaceScreen family is the ObjectDropper screen (template 103, fe-id-templates.md:77)
+825CA178	guess_FE_ObjectDropperScreen_HandleModeB	Guess: same class tag as the FE 53 slots: the ParkPlaceScreen family is the ObjectDropper screen (template 103, fe-id-templates.md:77)
 825CAA38	guess_FlowMsg_PostEdDlc	Guess: Posts a FlowMessage with code ed_dlc for the selected DLC row
 825CAB28	guess_FlowMsg_PostEdPrg	Guess: Posts a FlowMessage with code ed_prg when the argument is 0
-825CAC18	guess_FE_ParkPlaceScreen_HandleModeC	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
+825CAC18	guess_FE_ObjectDropperScreen_HandleModeC	Guess: same class tag as the FE 53 slots: the ParkPlaceScreen family is the ObjectDropper screen (template 103, fe-id-templates.md:77)
 825CB440	guess_Player_SpawnFeedback	Guess: plays an FE sound and activates the pin player.
-825CBB18	guess_FE_ParkPlaceScreen_HandleModeD	Guess: run-47 b22.txt: the 82301AE8 screen OnEnter 825C79E0 drives the park object placement (ParkSetup_ValidateCursor, ParkSetup_PlaceObjectUpdate, ParkSetup_SidecarInstanceCaps, ParkSetup_RefreshPieceSet, AISpawner_Unspawn...
+825CBB18	guess_FE_ObjectDropperScreen_HandleModeD	Guess: same class tag as the FE 53 slots: the ParkPlaceScreen family is the ObjectDropper screen (template 103, fe-id-templates.md:77)
 825CC4F8	guess_FE_ParkSetupScreen_SetMode	Guess: Mode change of the park setup screen (+0x44): pins the player, loads attrib collections, sets busy flags, plays the FE sound.
 825CCA18	guess_FE_ParkSetupScreen_SetPick	Guess: Stores the pick +0x80 and refreshes the item list +0x50.
 825CCAB0	guess_ParkSetup_CountUnlockedInSubCategory	Counts items of the sub category (+0x68) that pass guess_ParkSetup_HashItemNameA.
@@ -8211,15 +8211,15 @@
 825CDC08	guess_FE_ParkSetupCheckQueueEnd	Guess: when +0x1D4 is clear checks the park setup queue end and clears the flag
 825CDC78	AttribRef_GetCountFD2B	Structural: element count of the array field 0xFD2B311040A28477 of a collection, 0 when absent
 825CDCE8	guess_FE_ObjectQuickMenuScreen_Ctor	Guess: research/fe-id-templates.md:78 (the screen with this ctor opens the template ObjectQuickMenu)
-825CDE08	guess_FE_ParkSetupScreen_DeletingDtor	Guess: deleting destructor of the screen with vtable 82301C58 (park setup quick menu: spawner, color picker, placed objects)
-825CDE98	guess_FE_ParkSetupScreen_FreeBuffers	Guess: frees the two 0x50 byte buffers of the screen
-825CDF30	guess_FE_ParkSetupScreen_OnEnter	Guess: sets busy flags and session state, syncs the HUD group flag and reads the Attrib class 0xD7EDBD362D7D2152 with color picker counts
-825CE320	guess_FE_ParkSetupScreen_GetStateMan	Guess: returns the FE state manager singleton result
-825CE380	guess_FE_ParkSetupScreen_IsItemEnabled	Guess: forwards item +0x3C to guess_ParkSetup_IsQuickMenuItemEnabled
+825CDE08	guess_FE_ObjectQuickMenuScreen_DeletingDtor	Guess: slot 0 of FE 54 vtable 82301C58, which opens template 104 ObjectQuickMenu (run-59 t2.txt); only in that vtable
+825CDE98	guess_FE_ObjectQuickMenuScreen_FreeBuffers	Guess: only called by the FE 54 ObjectQuickMenu deleting dtor 825CDE08 (run-59 rf1.txt)
+825CDF30	FE_ObjectQuickMenuScreen_Init	decompile: run-59/d1.txt 825CDF30; FE 54 vtable 82301C58 slot 3 init opens template 0x68 = 104 through vt+0x38; template table 8302F1A8 entry 104 names ObjectQuickMenu / objectdropper/objectquickmenu.swf (run-59/t1.tx...
+825CE320	guess_FE_ObjectQuickMenuScreen_GetStateMan	Guess: slot 4 of FE 54 vtable 82301C58 (ObjectQuickMenu, template 104); only in that vtable
+825CE380	guess_FE_ObjectQuickMenuScreen_IsItemEnabled	Guess: slot 27 of FE 54 vtable 82301C58 (ObjectQuickMenu, template 104); only in that vtable
 825CE3E0	guess_FE_ParkSetupScreen_SetBusy	Guess: sets busy flags from +0x84 / +0x90
-825CE468	guess_FE_ParkSetupScreen_SetImportFlag	Guess: sets the CAS skater import flag for item +0x3C
-825CE510	guess_FE_ParkSetupScreen_GetStateManB	Guess: returns the FE state manager singleton result (second slot)
-825CE540	guess_FE_ParkSetupScreen_RegisterInputSlot9	Guess: Slot 9 of 82301C58 (park setup): calls the owner +0x38 slot 0x1C with 8302C4B8 and 0x1A.
+825CE468	guess_FE_ObjectQuickMenuScreen_SetImportFlag	Guess: slot 6 of FE 54 vtable 82301C58 (ObjectQuickMenu, template 104); only in that vtable
+825CE510	guess_FE_ObjectQuickMenuScreen_GetStateManB	Guess: slot 28 of FE 54 vtable 82301C58 (ObjectQuickMenu, template 104); only in that vtable
+825CE540	guess_FE_ObjectQuickMenuScreen_RegisterInputSlot9	Guess: slot 9 of FE 54 vtable 82301C58 (ObjectQuickMenu, template 104); only in that vtable
 825CE560	guess_FE_ParkSetupScreen_SelectItem	Guess: plays an FE sound when the item +0x3C is enabled (key 0x7F975D2B64259AC2)
 825CE5E0	guess_FE_ParkSetupScreen_NextItem	Guess: moves the item index +0x3C within +0x38
 825CE718	guess_FE_ParkSetupScreen_PrevItem	Guess: moves the item index +0x40 within +0x38
@@ -8231,10 +8231,10 @@
 825CF1A0	guess_ParkSetup_LoadItemListAttrib	Guess: Reads an Attrib collection (0x216767BBB9EF6CB5) and its list field for the item index +0x74.
 825CF360	guess_FE_ParkSetupScreen_HandleMode	Guess: Park setup mode handler that reads the global 830670A8.
 825CFE88	guess_FE_ParkSetupScreen_BeginPlace	Guess: Sets the loading busy flag 0x80, marks +0x84 and starts the place request with +0x7C / +0x80.
-825CFEE8	guess_FE_ParkSetupScreen_HandleButtonSlot10	Guess: Slot 10 of 82301C58: busy check +0x84, then dispatch by the mode +0x70 (0..4) with the FE sound.
-825D0120	guess_FE_ParkSetupScreen_OnListSelect	Guess: Slot 16 of 82301C58: in mode 4, when the style can change, stores the pick +0x88 and applies it.
-825D01C8	guess_FE_ParkSetupScreen_OnListSlot18	Guess: Slot 18 of 82301C58: mode 3 items 2..6, with online user and team checks.
-825D0288	guess_FE_ParkSetupScreen_OnTeamLogoPick	Guess: Slot 17 of 82301C58: in mode 3 stores the pick +0x94 into 830670A8 +0xADC and posts the team logo photo.
+825CFEE8	guess_FE_ObjectQuickMenuScreen_HandleButtonSlot10	Guess: slot 10 of FE 54 vtable 82301C58 (ObjectQuickMenu, template 104); only in that vtable
+825D0120	guess_FE_ObjectQuickMenuScreen_OnListSelect	Guess: slot 16 of FE 54 vtable 82301C58 (ObjectQuickMenu, template 104); only in that vtable
+825D01C8	guess_FE_ObjectQuickMenuScreen_OnListSlot18	Guess: slot 18 of FE 54 vtable 82301C58 (ObjectQuickMenu, template 104); only in that vtable
+825D0288	guess_FE_ObjectQuickMenuScreen_OnTeamLogoPick	Guess: slot 17 of FE 54 vtable 82301C58 (ObjectQuickMenu, template 104); only in that vtable
 825D02C0	guess_ParkSetup_IsQuickMenuItemEnabled	Quick menu item rule: index above 7 is enabled; item 0 depends on the color / style checks of the selected object.
 825D07C0	FE_ParkSetup_ShowApplyAllColorPopup	Opens the park setup warning popup that asks to apply a color to all objects (title ID_COMMON_WARNING, text ID_SKATEPARK_APPLY_ALL_COLOUR, buttons ID_COMMON_YES / ID_COMMON_NO).
 825D0890	FE_ParkSetup_ShowApplyAllStylePopup	Opens the park setup warning popup that asks to apply a style to all objects (ID_SKATEPARK_APPLY_ALL_STYLE with yes / no).
@@ -8265,7 +8265,7 @@
 825D1948	guess_ParkSetup_CheckParkState	Guess: Reads the park state +0x100 (not 0 or 4).
 825D1A18	guess_FE_ParkSelectScreen_DeletingDtor	Guess: Slot 0 of 82301BD0: frees the 8 byte list +0x40 and resets to the base vtable 82301CE0.
 825D1AD0	guess_FE_ReadWorldField	Guess: reads field E69A80EE0520102D of the world attrib BC69C54E6E102D88
-825D1BF8	guess_FE_ParkSelectScreen_OnEnter	Guess: Slot 3 of 82301BD0: sets +0x3C, binds screen id 0x69 and collects the park keys of an Attrib class.
+825D1BF8	FE_ParkSelectScreen_Init	research/fe-id-templates.md:82 (FE 58, vtable 0x82301BD0, init 0x825D1BF8, template 105 ParkSetup, high); decompile: run-59/d1.txt opens 0x69 through vt+0x38 and collects the park keys (the ParkSetup movie is the park...
 825D2108	guess_FE_ParkSelectScreen_OnExit	Guess: Slot 6 of 82301BD0: releases the 0x10 byte entries of the array +0x50.
 825D21E0	guess_FE_ParkSelectScreen_ClampIndex	Guess: Slot 13 of 82301BD0: keeps the index +0x5C within 0..1.
 825D2368	guess_FlowMsg_PostPkDlc	Guess: Looks up the DLC row from an Attrib field and posts a FlowMessage with code pk_dlc
@@ -8572,9 +8572,9 @@
 825ECB60	guess_ResultsHud_SetPlayerStatusText	Times-33 hash of the status text, formats it through 8290C8A8 and copies 0x16 bytes into player row n (0x4C each) of the table at +0x3C, offset 0x26.
 825ECBE8	guess_ResultsHud_SetSecondPlayerStatusText	Second table (+0x40) copy of guess_ResultsHud_SetPlayerStatusText.
 825ECC70	guess_ResultsHud_SetSubHeaderTime	Formats a time (Text_FormatDuration with format 82FDE25E) or a placeholder when negative into the sub header text at (+0x3C)+0x910.
-825ECD18	guess_EndDialog_ResetSlots	Guess: rusty-trucks/crates/skate-core/src/challenges/end_dialog.rs:18 (the slots after a reset 825ECD18)
+825ECD18	EndDialog_ResetSlots	crates/skate-core/src/challenges/end_dialog.rs:18 (the slots after a reset, 825ECD18)
 825ECDB0	Results_SetActiveMenu	results page: steps / sets the active results menu
-825ECF80	guess_EndDialog_ResolveOption	Guess: rusty-trucks/crates/skate-core/src/challenges/end_dialog.rs:77 (the option a slot shows: 10 / 11 resolve by the passed flag 825ECF80)
+825ECF80	EndDialog_ResolveOption	crates/skate-core/src/challenges/end_dialog.rs:77 (the option a slot shows, 10 / 11 resolve by the passed flag, 825ECF80)
 825ED020	FE_SignUpPosterScreen_Init	research/b930-lot-list-screen.md:13 ([code 825ED020 vt+0x38(this, 0x17) + data menu-tables templates[23], high]. It is the ordinary challenge sign-up)
 825ED160	guess_FE_SignUpPosterScreen_OnMovieLoaded	Guess: research/b935-poster-open-path.md:23 (2. The first SetState is posted by 825ED160, screen vtable slot +0x6C, when the movie finishes loading [code, high]:)
 825ED218	guess_FE_Screen82302860_OnListSlot18	Guess: Slot 18 of 82302860: in mode 3 finds the list entry with this index in +0x60.
@@ -8647,7 +8647,7 @@
 825F2150	guess_FE_Screen82302B20_Slot28	Guess: Slot 28 of 82302B20: clears the FE manager flag +0xC.
 825F2178	guess_FE_Screen82302B20_OnListSelect	Guess: Slot 16 of 82302B20: on item 0 posts message 0xE4A8382F.
 825F21E0	guess_FE_WebKit_DeletingDtor	Guess: class tag: slot 27 (825F2608) uses FrontEndState_WebKit::SkateProfileStartLoginProc (821FF9FC, b9 / d10)
-825F22B0	guess_FE_WebKit_OnEnter	Guess: class tag: slot 27 (825F2608) uses FrontEndState_WebKit::SkateProfileStartLoginProc (821FF9FC, b9 / d10)
+825F22B0	FE_WebKit_OnEnter	decompile: run-59/d7.txt 825F22B0; FE 60 init opens template 0x6E = 110 through vt+0x38; template table 8302F1A8 entry 110 names WebKit (run-59/t3.txt, t4.txt)
 825F2328	guess_FE_WebKit_OnExit	Guess: class tag: slot 27 (825F2608) uses FrontEndState_WebKit::SkateProfileStartLoginProc (821FF9FC, b9 / d10)
 825F23B0	guess_FE_BuildDlcInfo	Guess: reads the first user id and the first DLC pack name
 825F2608	guess_FE_WebKit_Slot27	Guess: class tag: slot 27 (825F2608) uses FrontEndState_WebKit::SkateProfileStartLoginProc (821FF9FC, b9 / d10)
@@ -8869,7 +8869,7 @@
 8260B6F0	FE_MusicPlayerScreen_Input	crates/skate-game/src/fe_backdrop.rs:59 (music player 0x8260B400, input 0x8260B6F0); slot +40 of FE 26 MusicPlayer vtable 0x82303418 (fe-id-templates.md row 26)
 8260BBD8	guess_FE_PlaylistScreen_OnListHilight	Guess: Slot 17 of 82303418: stores the hilighted item +0x4C.
 8260BBE0	Playlist_SetMusicMode	crates/skate-core/src/music_player.rs:8 (sub_8260BBE0: the Ambient tab 1, the Music Player tab 2)
-8260BC50	guess_Playlist_SetEditMode	Guess: rusty-trucks/crates/skate-game/src/music_player_host.rs:229 (SetEditMode (8260BC50))
+8260BC50	Playlist_SetEditMode	crates/skate-game/src/music_player_host.rs:229 (SetEditMode sub_8260BC50)
 8260BCF8	guess_FE_PlaylistScreen_Back	Guess: rusty-trucks/crates/skate-game/src/music_player_host.rs:40 (back: close the screen, save when anything changed (8260BCF8))
 8260BE18	guess_FEScreen_ClearAndPop	Guess: FE vtable 823034A4 slots 0 / 2: clears +0x20 and requests a state manager pop
 8260BE48	guess_FE_OptionsScreen_LoadValues	Guess: Copies the option values from the profile 8306707C (+0x80 ...) into the screen.
@@ -8904,7 +8904,7 @@
 8260E890	FE_VideoCalibrationScreen_HandleButton	research/fe-id-templates.md:75 (FE 51 VideoCalibration vtable 0x82303548 slot +40 input, only this vtable in run-52 vt.txt)
 8260E950	guess_VideoCalibration_NextStep	Guess: Advances the calibration step (slot 5 on +0x38) up to three times, then shows ID_VIDEO_CALIBRATION_FINISHED_DESC
 8260EA48	VideoCalibration_PopupCallback	Popup callback: choice 0 closes, any other starts over.
-8260EAB8	guess_FE_PartyPlayScreen_OnEnter	Guess: research/fe-id-templates.md:55 (FE 31, template PartyPlay, medium); class tag fixed from the placeholder vtable 82303710, slot meaning kept
+8260EAB8	FE_PartyPlayScreen_OnEnter	decompile: run-59/d7.txt 8260EAB8; FE 31 init opens template 0x43 = 67 through vt+0x38; template table 8302F1A8 entry 67 names PartyPlay (run-59/t3.txt, t4.txt)
 8260EB78	guess_FE_PartyPlayScreen_SetPage	Guess: research/fe-id-templates.md:55 (FE 31, template PartyPlay, medium); class tag fixed from the placeholder vtable 82303710, slot meaning kept
 8260ED48	guess_FE_PartyPlayScreen_Update	Guess: research/fe-id-templates.md:55 (FE 31, template PartyPlay, medium); class tag fixed from the placeholder vtable 82303710, slot meaning kept
 8260EF98	guess_FE_PartyPlayScreen_Slot28	Guess: research/fe-id-templates.md:55 (FE 31, template PartyPlay, medium); class tag fixed from the placeholder vtable 82303710, slot meaning kept
@@ -8945,7 +8945,7 @@
 82613878	ReplayEditor_AskDropClipInSoftKeys	Marker question popup: drop a clip marker inside soft keys (No / Yes).
 826138C0	ReplayEditor_AskDeleteKeyMarker	Marker question popup: delete a key marker (No / Yes).
 82613910	ReplayEditor_RemoveKeyAtCursor	D-pad Up released, Yes: removes the key at the cursor (calls 82C7FD60).
-82613988	guess_FE_ReplayEditor_OpenFromInstantReplay	Guess: rusty-trucks/crates/skate-game/src/replay/editor.rs:3 (instant replay opens it (82613988: leave instant, mode 6, SetState 21, 9))
+82613988	FE_ReplayEditor_OpenFromInstantReplay	crates/skate-game/src/replay/editor.rs:3 (instant replay opens it, 82613988: leave instant, mode 6, SetState 21, 9)
 82613ED8	guess_FE_ReplayEditor_OpenSubScreen	Guess: Unless FE screen 0xD is open, opens the replay sub screen.
 82613FE8	guess_Replay_GetHelpModeForState	Maps replay state 83067084 +0x30 (5..11) and the camera edit mode to a help mode number.
 82614148	ReplayEditor_ConfirmReplaceCamera	crates/skate-game/src/replay/camera_key.rs:111 (/// A pick of another camera on a clip with no keys gives the whole clip that camera (retail 82614148 replac)
@@ -8997,7 +8997,7 @@
 82616DF0	guess_FEScreen_ForwardPostChallengeChoice	Guess: FE vtable 8230367C slots 106 / 108: passes the flow object [state manager +8] +8 to guess_PostChallenge_HandleChoice
 82616E20	guess_FE_PhotoSelectScreen_DeletingDtor	Guess: slot +0 of FE 2 PhotoSelect vtable 0x82303830 (fe-id-templates.md row 2; run-52 vt.txt)
 82616E90	guess_FE_Screen82303830_Slot27	Guess: Slot 27 of 82303830: when +0x75 is set, registers the button id +0x54.
-82616EC0	guess_FE_PhotoSelectScreen_Init	Guess: research/fe-id-templates.md:26 (init of the FE screen with template PhotoSelect, medium)
+82616EC0	FE_PhotoSelectScreen_Init	decompile: run-59/d7.txt 82616EC0; FE 2 init opens template 0x59 = 89 through vt+0x38; template table 8302F1A8 entry 89 names PhotoSelect (run-59/t3.txt, t4.txt)
 82617100	guess_NISPhoto_MoveAvatarOrLens	Name from the messages it posts (cMsgNISPhotoAvatarMove, cMsgNISPhotoAdjustLens; 2 MsgBus_Post calls, 716 bytes); the rest of the body not read.
 826173D0	guess_FE_PhotoSelectScreen_OnExit	Guess: slot +24 close of FE 2 PhotoSelect vtable 0x82303830 (fe-id-templates.md row 2; run-52 vt.txt)
 82617458	guess_NISPhoto_AdjustDOF	Name from the messages it posts (cMsgNISPhotoAdjustDOFIntensity, cMsgNISPhotoSelect; 3 MsgBus_Post calls, 1916 bytes); the rest of the body not read.
@@ -9018,9 +9018,9 @@
 82618E98	TrickGuideScreen_OnSelectionChange	research/menus-m6/trick-guide-gestures.md:33 (sub_82618E98(S, _, index) selection change tail jumps to the slot fill; code)
 82618EF0	FEScreen14_BackCallback	Screen 14 back callback: closes it.
 82618F38	TrickGuideScreen_HandleButton	research/menus-m6/trick-guide-open.md:89 (C++ vt+40 0x82618F38(S, ?, action), action 3 = back; code)
-826190D8	guess_TrickGuideScreen_GetMenuItemCount	Guess: rusty-trucks/crates/skate-core/src/trick_guide.rs:448 (Game.GetMenuItems over vt+80 / vt+84, 0x826190D8 / 0x82619100)
-82619100	guess_TrickGuideScreen_GetMenuItemText	Guess: rusty-trucks/crates/skate-core/src/trick_guide.rs:448 (Game.GetMenuItems over vt+80 / vt+84, 0x826190D8 / 0x82619100)
-826191B0	guess_TrickGuideScreen_GetMenuItemDescription	Guess: rusty-trucks/crates/skate-core/src/trick_guide.rs:456 (the highlighted rows description, vt+88, 0x826191B0)
+826190D8	TrickGuideScreen_GetMenuItemCount	crates/skate-core/src/trick_guide.rs:448 (Game.GetMenuItems 825A52A8 over vt+80 / vt+84, 0x826190D8 / 0x82619100)
+82619100	TrickGuideScreen_GetMenuItemText	crates/skate-core/src/trick_guide.rs:448 (Game.GetMenuItems 825A52A8 over vt+80 / vt+84, 0x826190D8 / 0x82619100: the item names)
+826191B0	TrickGuideScreen_GetMenuItemDescription	crates/skate-core/src/trick_guide.rs:456 (the highlighted row description, vt+88, 0x826191B0)
 826192A0	TrickGuide_IsItemEnabled	crates/skate-core/src/trick_guide.rs:431 (sub_826192A0: categories always open a list, subcategories by their flag, tricks never)
 82619368	TrickGuide_FillList	research/menus-m6/trick-guide-gestures.md:73 (descend / list fill sub_82619368 builds the list from the category array; code)
 82619A20	FE_TrickGuideDemo_Update	research/menus-m6/trick-guide-demo.md:53 (per frame update sub_82619A20, state machine on S+192; code)
@@ -9072,7 +9072,7 @@
 8261DB48	Menu_GetNumSubOptions	retail name GetNumSubOptions per our notes
 8261DCF0	Progression_GetOptionText	Crossbar option text from table 8302755C (ID_START_HUB_SKATE_REPLAY_EDITOR, 5 per row) with online / platform overrides for ids 0 and 0xC.
 8261DE88	Progression_GetSubOptionText	Crossbar sub option text from table 83027958 (ID_CROSSBAR_NEW_PARK, 6 per row) with special cases such as ID_CROSSBAR_TRICK_ANALYZER_OFF.
-8261E208	guess_Crossbar_IsItemEnabled	Guess: rusty-trucks/crates/skate-core/src/crossbar.rs:10 (IsItemEnabled (8261E208))
+8261E208	Crossbar_IsItemEnabled	crates/skate-core/src/crossbar.rs:10 (IsItemEnabled sub_8261E208)
 8261E270	Progression_GetOptionHelperText	Crossbar helper text for the selected option: mode 2 indexes the ID_CROSSBAR_MY_PARKS_HELPER_TEXT table 83027A00 (6 per row), mode 1 the ID_CROSSBAR_REPLAY_EDITOR_HELPER table 83027568 (5 per row).
 8261E398	guess_PauseMenu_QueueFlowCallback	Guess: b11 + d6: stores +0x18C / +0x18B, queues a 0x18 byte FlowMessage event (822057BC) with id 0x84 and callback 8261D020 on the flow queue
 8261E4A0	guess_PauseMenu_OnItemSelect	Guess: b11: reads the selected row / column (+0x170 / +0x174) from the item table +0x1E0, switches on the item kind table 83027564 (0x14 bytes per id) and opens screens / friends UI / posts the ownership messages per item; a...
@@ -9363,18 +9363,18 @@
 82633678	guess_FE_InlineVectorOwner_Ctor	Guess: ref counted message base, +8 = 8301287C, then the vtable 82305190
 82633700	guess_FE_InlineVectorOwner_DeletingDtor	Guess: FE vtable 82305080 slot 68: frees the inline vector +0x18, restores 82322378 / 8230C738, frees through 83085410
 82633778	guess_ReturnConst15	Guess: returns 0x15; slot 1 of the type 0x15 net message vtable but sits far from net code, likely a shared stub
-82633788	guess_FE_EventStatsScreen_Slot13	Guess: Slot 13 of 82304938: when the active screen exists and +0x3C is 0x2775, registers a button.
+82633788	guess_FE_RankedCustomMatchScreen_Slot13	Guess: slot 13 of FE 39 vtable 82304938 (RankedCustomMatch, template 80); only in that vtable
 826337F8	guess_FE_RankedCustomMatchScreen_Ctor	Guess: research/fe-id-templates.md:63 (FE 39, template RankedCustomMatch, medium); class tag fixed from the placeholder vtable 82304938, slot meaning kept
-82633928	guess_FE_EventStatsScreen_DeletingDtor	Guess: deleting destructor of the screen with vtable 82304938 (event / overall stats, strings Transaction_GetEventStats / Transaction_GetOverallStats)
-82633990	guess_FE_EventStatsScreen_InitFields	Guess: small field init of the event stats screen
-82633A78	guess_FE_RankedCustomMatchScreen_Init	Guess: research/fe-id-templates.md:63 (FE 39, vtable 0x82304938, init 0x82633A78, template RankedCustomMatch, medium)
-82633BC0	guess_FE_EventStatsScreen_OnExit	Guess: removes itself from the update registry
-82633C28	guess_FE_EventStatsScreen_CloseIfOpen	Guess: requests a close through the FE state manager when the screen is open
-82633C68	guess_FE_EventStatsScreen_Slot27	Guess: Slot 27 of 82304938: clears 83083565 and stores the screen id into 83025EFC.
-82633C88	guess_FE_EventStatsScreen_LoadTeamHeader	Guess: reads the Attrib collection and the event select team header
-82633EB0	guess_FE_EventStatsScreen_RefreshHeader	Guess: rereads the event select team header
-82634058	guess_FE_EventStatsScreen_HandleInput	Guess: input handler: pop, popups, online port check, stats requests
-826343B0	guess_FE_EventStatsScreen_PlayNavSound	Guess: plays an FE sound for list navigation
+82633928	guess_FE_RankedCustomMatchScreen_DeletingDtor	Guess: slot 0 of FE 39 vtable 82304938, which opens template 80 RankedCustomMatch (run-59 t2.txt); only in that vtable
+82633990	guess_FE_RankedCustomMatchScreen_InitFields	Guess: only called by the FE 39 RankedCustomMatch deleting dtor 82633928 (run-59 rf1.txt)
+82633A78	FE_RankedCustomMatchScreen_Init	decompile: run-59/d1.txt 82633A78; FE 39 vtable 82304938 slot 3 init opens template 0x50 = 80 through vt+0x38; template table 8302F1A8 entry 80 names RankedCustomMatch / ranked/ranked_custom.swf (run-59/t1.txt, t2.txt)
+82633BC0	guess_FE_RankedCustomMatchScreen_OnExit	Guess: slot 6 of FE 39 vtable 82304938 (RankedCustomMatch, template 80); only in that vtable
+82633C28	guess_FE_RankedCustomMatchScreen_CloseIfOpen	Guess: slot 31 of FE 39 vtable 82304938 (RankedCustomMatch, template 80); only in that vtable
+82633C68	guess_FE_RankedCustomMatchScreen_Slot27	Guess: slot 27 of FE 39 vtable 82304938 (RankedCustomMatch, template 80); only in that vtable
+82633C88	guess_FE_RankedCustomMatchScreen_LoadTeamHeader	Guess: callers only the FE 39 RankedCustomMatch init / input / nav sound (run-59 rf1.txt)
+82633EB0	guess_FE_RankedCustomMatchScreen_RefreshHeader	Guess: callers only the FE 39 RankedCustomMatch init and input handler (run-59 rf1.txt)
+82634058	guess_FE_RankedCustomMatchScreen_HandleInput	Guess: slot 10 of FE 39 vtable 82304938 (RankedCustomMatch, template 80); only in that vtable
+826343B0	guess_FE_RankedCustomMatchScreen_PlayNavSound	Guess: only caller the FE 39 RankedCustomMatch input handler 82634058 (run-59 rf1.txt)
 826344A0	guess_EventSelect_GetEventNameField	Reads field 0xE2A50788B6C20C92 of the event record (class 0xA4F35B159D7432B5) at the selected index.
 82634580	guess_EventSelect_GetEventDescriptionText	Field 0x713D193371A2B4E6 of the event record, falling back to the mission description field.
 82634680	guess_FE_ReleaseScreenRefs	Guess: releases the refs +0x2C..+0x50
@@ -9478,7 +9478,7 @@
 8263A4E8	guess_FE_DlcScreen_Close	Guess: removes the screen by id (+0x3054 / +0x306C)
 8263A568	FE_TextViewerScreen_ReShow	research/b322-text-viewer.md:12 (FE 3 text viewer vtable 0x82304F10: +16 re-show 0x8263A568); not a DLC state getter
 8263A5A8	FE_TextViewerScreen_Input	research/b322-text-viewer.md:13 (FE 3 text viewer vtable: +40 input handler 0x8263A5A8)
-8263A6D8	guess_TextViewer_Setup	Guess: rusty-trucks/crates/skate-core/src/text_viewer.rs:29 (setup 8263A6D8: title and body, split into words)
+8263A6D8	TextViewer_Setup	crates/skate-core/src/text_viewer.rs:29 (Setup sub_8263A6D8: title and body split into words)
 8263A758	guess_FE_PostCloseFlowMessage	Guess: requests the FE state close and posts a "FlowMessage"
 8263A880	guess_FE_TextViewerOnChallengeMsg	Guess: on a kind 0xE message casts it and sets up the text viewer with its text
 8263A930	TermsOfServiceManager_Ctor	Constructor of class 'TermsOfServiceManager': called on the new block right after guess_Mem_AllocNamed with that tag (in 8263A6D8).
@@ -9569,6 +9569,7 @@
 8263FDE8	guess_RenderList_FreeNodes	Guess: frees the 0x10 byte nodes of a circular list to the system pool +0xD20.
 8263FE58	guess_TeamBrand_InlineVectorDtor	Guess: frees the heap buffer +8 unless it is the inline buffer +0x18
 8263FEC0	guess_RefPtrListArray_Grow	Guess: copies reference lists into a larger array.
+826401F8	guess_FE_RankedCustomMatchScreen_DeletingDtorThunk	Guess: slot 34 of FE 39 vtable 82304938 (RankedCustomMatch, template 80); only calls the deleting dtor 82633928 [decompile: run-59/d2.txt 826401F8]
 82640230	guess_SkaterPhotoA_FreeBufferB	Guess: frees a buffer through the default allocator
 82640290	FeNatives_RegisterImageList	Registers the ImageList group of front end script natives (82E62F00 then 82E62B40 per name; group label is ours, names in run-2/aptnat-map.txt).
 82640380	FeNative_ImageList_RefreshData	Front end script native 'RefreshData' registered by 82640290 (group label ImageList is ours).
@@ -9734,16 +9735,16 @@
 8264C908	guess_ParkObjective_GetTitleField	Binds a collection from a key and reads a named field (821F8ED4)
 8264C9C8	guess_ChallengeMap_CountObjectives	Guess: research/b255-fechallengemap-natives.md:46 (the native GetChallengeNumObjectives 8264B900 returns sub_8264C9C8(challenge, b): counts the valid objectives of one of two lists); challenge map, not the park editor
 8264CD98	guess_ParkEditor_BuildObjectiveTitleB	Second objective title builder: counts objectives with 8264C9C8, then formats from the objective records.
-8264D130	guess_ChallengePoster_OwnTheSpotTitle	Guess: rusty-trucks/crates/skate-core/src/challenges/poster.rs:37 (the own the spot objective title 8264D130 (type 9))
+8264D130	ChallengePoster_OwnTheSpotTitle	crates/skate-core/src/challenges/poster.rs:37 (the own the spot objective title 8264D130, type 9)
 8264D470	guess_AttribRef_GetField31A41CDD	Returns the attribute field 0x31A41CDD1EE6C5AC of an attrib ref, or the empty record 830D0850.
 8264D4C8	guess_CallSkater_ProUnlockedCheck	Guess: Call Skater (FE 100) pro record filter by unlock attribute (b872:29).
 8264D6C8	guess_FreePlay_ProUnlockedCheck	Guess: Free Play (mode 200) pro record filter (b968:15).
 8264D8B8	guess_SkaterSelect_DemoPublicFilter	Guess: research/b543-fe62-spawn-skater.md:16 / :18 (mode 300 predicate accepts only type 0x83A20F97C93CE562 with byte +8 set; 300 = DemoPublic, inferred there); run-51 b6.txt: compares the class key with -0x7C5DF06836C31A9E...
 8264D958	FE_SpawnSkaterScreen_Init	research/b543-fe62-spawn-skater.md:12 (init 0x8264D958 of C++ screen vtable 823054D0 opens APT template 107; code)
 8264DA48	guess_FE_CrossBarSkateWith_Slot27	Guess: class tag: OnListSelect 8264DB30 shows ID_CROSSBAR_SKATE_WITH / ID_CALL_SKATER_LIMIT_REACHED (821F8F68 / 821F8F48, b9 / d10)
-8264DB30	guess_FE_CrossBarSkateWith_OnListSelect	Guess: class tag: OnListSelect 8264DB30 shows ID_CROSSBAR_SKATE_WITH / ID_CALL_SKATER_LIMIT_REACHED (821F8F68 / 821F8F48, b9 / d10)
-8264DD68	guess_FE_CrossBarSkateWith_OnListHilight	Guess: class tag: OnListSelect 8264DB30 shows ID_CROSSBAR_SKATE_WITH / ID_CALL_SKATER_LIMIT_REACHED (821F8F68 / 821F8F48, b9 / d10)
-8264DF18	guess_FE_CrossBarSkateWith_HandleButton	Guess: class tag: OnListSelect 8264DB30 shows ID_CROSSBAR_SKATE_WITH / ID_CALL_SKATER_LIMIT_REACHED (821F8F68 / 821F8F48, b9 / d10)
+8264DB30	FE_CrossBarSkateWith_OnListSelect	crates/skate-core/src/spawn_skater.rs:163 (vt+64 0x8264DB30, A select)
+8264DD68	FE_CrossBarSkateWith_OnListHilight	crates/skate-core/src/spawn_skater.rs:178 (vt+68 0x8264DD68: store the row, refresh help or preview)
+8264DF18	FE_CrossBarSkateWith_HandleButton	crates/skate-core/src/spawn_skater.rs:190 (vt+40 0x8264DF18: B closes, X dismisses)
 8264E1B0	guess_FE_CrossBarSkateWith_Slot30	Guess: class tag: OnListSelect 8264DB30 shows ID_CROSSBAR_SKATE_WITH / ID_CALL_SKATER_LIMIT_REACHED (821F8F68 / 821F8F48, b9 / d10)
 8264E248	guess_FE_CrossBarSkateWith_Slot31	Guess: class tag: OnListSelect 8264DB30 shows ID_CROSSBAR_SKATE_WITH / ID_CALL_SKATER_LIMIT_REACHED (821F8F68 / 821F8F48, b9 / d10)
 8264E2F8	FE_CrossBarSkateWith_CountMapEntries	crates/skate-core/src/spawn_skater.rs:137 (/// sub_8264E2F8: one header per group plus its entries.)
@@ -9849,7 +9850,7 @@
 82655658	FE_ExtrasScreen_Input	research/b320-retail-extras.md:13 (Extras vtable +40 input 82655658) and b320 line 55 (Input [code 82655658])
 82655708	guess_Extras_GetOptionTitleText	Cheat code mode uses the ID_EXTRA_CHEAT_CODE string table 83025EE0; else field 0xAA753A536859233D of the extras record.
 826557D0	FE_ExtrasScreen_OnMenuSelect	research/b320-retail-extras.md:14 (Extras vtable +64 OnMenuSelect 826557D0) and b304-retail-cheat-screen.md:10
-82655830	guess_FE_ExtrasScreen_OnListSlot18	Guess: sits between the Extras OnMenuSelect 826557D0 and its apply 826558E8 (vtable 0x82305390, b320); the MiracleWhipPromo tag came from position
+82655830	FE_ExtrasScreen_OnMenuGetItemEnabled	crates/skate-core/src/extras.rs:137 (OnMenuGetItemEnabled 0x82655830 for the main rows)
 826558E8	FE_ExtrasScreen_ApplyMenuSelect	research/b304-retail-cheat-screen.md:10 (top screen vt+64 826557D0 -> 826558E8(i)); row 0 opens the cheat text entry (b304 line 11), row 6 the videos (b490 line 8)
 82655F10	guess_FE_QueueScreenAndReleaseFade	Guess: queues a screen command when the screen is open and releases the fader
 82655F98	PostMsg_FEExtrasEnterCode	Small function (228 bytes) that builds and posts cMsgFEExtrasEnterCode (0x416E18F6) through MsgBus_Post.
@@ -9967,7 +9968,7 @@
 8265E888	Results_GetNumPlayers	retail Lua binding Results_GetNumPlayers
 8265E8C0	Results_GetLayoutType	retail Lua binding Results_GetLayoutType
 8265E8F8	Results_GetThrowdownType	retail Lua binding Results_GetThrowdownType
-8265E930	guess_RaceResults_ComparePlace	Guess: rusty-trucks/crates/skate-core/src/challenges/results.rs:80 (rows in place order: 8266BA50 with comparator 8265E930, place ascending)
+8265E930	RaceResults_ComparePlace	crates/skate-core/src/challenges/results.rs:80 (comparator 8265E930 of the sort 8266BA50: place ascending)
 8265E950	Results_GetLeaderboardDataBlock	retail Lua binding Results_GetLeaderboardDataBlock
 8265EF50	FeNative_Hud_Results_GetOnlineLeaderboardCashAndEXPDataBlock	Front end script native 'Results_GetOnlineLeaderboardCashAndEXPDataBlock' registered by 8265B870 (group label Hud is ours).
 8265F188	FeNative_Hud_Results_GetGoofyTeamScoreRegTeamScore	Front end script native 'Results_GetGoofyTeamScoreRegTeamScore' registered by 8265B870 (group label Hud is ours).
@@ -10044,14 +10045,14 @@
 82663E98	guess_SimulPlay_ResetPlayerState	Guess: Clears the simultaneous play record fields +0x38..+0x280.
 82663F38	HudCentral_PostMessage	crates/skate-game/src/hud_central.rs:2 (retail post path 82663F38, central message HUD)
 82664038	CentralMessageHud_ShowCustom	When the HUD is ready (82663E40) stores id (+0x34) and priority (+0x280), clears +0xBC, sets +0xC0, formats the text into +0x38 and notifies singleton 830CFE14 (code 4); used by LuaBind_ShowCustomCentralMessage.
-826640F0	guess_CentralMessageHud_ModifySlot	Guess: rusty-trucks/crates/skate-game/src/hud_central.rs:198 (the modified slot: retail 826640F0 then the screen event 10)
+826640F0	CentralMessageHud_ModifySlot	crates/skate-game/src/hud_central.rs:198 (the modified slot: retail 826640F0 then the screen event 10)
 826641B8	guess_ChallengeCamera_ClearFlags	Clears four flags (+0x27D / +0xC0 / +0x168 / +0x1F4) and refreshes the camera
 82664218	CentralMessageHud_ShowModifiedCustom	Second message slot of the central message HUD: id at +0xE0, text at +0xE4, flag +0x168, notifies 830CFE14 with code 10; used by LuaBind_ShowModifiedCustomCentralMessage.
 826642C8	CentralMessageHud_ShowTeam	Team message slot (+0x16C, text +0x170) filled from a string id instead of formatted text, codes 0xD / 0xF by team; used by LuaBind_ShowTeamCentralMessage.
 826643C0	CentralMessageHud_ShowCustomTeam	Team message slot of the central message HUD: id +0x16C, priority +0x280, text formatted into +0x170, then notifies 830CFE14 with code 0xD / 0xF by team; used by LuaBind_ShowCustomTeamCentralMessage.
 826644A8	guess_ResultScreen_StopEffect	When +0xC0 is set clears it and resets the effect vectors
 82664550	guess_CentralMessageHud_UpdateTimer	Guess: rusty-trucks/crates/skate-game/src/hud_central.rs:32 (retails central HUD update (82664550) counts how long a message stays)
-826647E8	guess_DistanceMeter_GetData	Guess: rusty-trucks/crates/skate-core/src/challenges/distance_meter.rs:20 (DistanceMeter_GetData item 1 826647E8: 0 red, 1 white)
+826647E8	DistanceMeter_GetDataFlagItem	crates/skate-core/src/challenges/distance_meter.rs:20 (DistanceMeter_GetData item 1, 826647E8: 0 red, 1 white)
 826648D0	guess_DistanceMeterHud_Tick	Guess: Challenge distance meter HUD: refreshes every 5th tick.
 82664938	HudCountdown_Stop	Countdown component (vtable 82306260) slot +0x40: clears running +0x34 and +0x38, then sets the HUD state of the movie id +0x1C to 1.
 82664990	guess_DistanceHud_Update	Guess: When active reads the player context value, rounds it up and refreshes the text
@@ -10104,11 +10105,11 @@
 826675E0	guess_HudComp_SyncSingletonA	Guess: syncs a HUD field (+0x1C) with the singleton
 82667758	guess_HudComp_SetState1Then3B	Guess: Sets HUD element +0x1C to state 1 then 3 (second copy)
 826677C0	guess_HudComp_SyncSingletonC	Guess: syncs a HUD field (+0x1C) with the singleton
-826678A0	guess_ChallengeCallout_SetStateMinus10	Guess: rusty-trucks/crates/skate-core/src/challenges/callout.rs:13 (826678A0 sends -10 to the callout movie); run-47 b16.txt: stores -10 at +0x1C through singleton 830CFE14; a challenge callout state, not a generic HUD compo...
+826678A0	TutorialCalloutHud_Show	crates/skate-core/src/challenges/callout.rs:13 (826678A0 sends -10 = STATE_SHOW, the generic HUD show)
 82667910	guess_HudComp_SetStateMinus20	Guess: Sets HUD element +0x1C to state -20
-82667958	guess_ChallengeCallout_SetStateNone	Guess: rusty-trucks/crates/skate-core/src/challenges/callout.rs:3 (the callout movie SetState values 82667A70, 82667B58, 82667958); run-47 b16.txt: only caller ChallengeCallout_SetStateA; not the tutorial HUD
-82667A70	guess_ChallengeCallout_UpdateHud	Guess: the callout HUD component update (port challenges/callout.rs:3); resets +0x34..+0x39, checks stance flip, and calls the state setters 82667958 / 82667B58 (decompile: run-57/b2.txt)
-82667B58	guess_ChallengeCallout_SetStateB	Guess: Sets one of the callout movie's SetState values (with 82667A70, 82667958).
+82667958	TutorialCalloutHud_ShowTextOrGestures	crates/skate-core/src/challenges/callout.rs:1 (82667958); decompile: run-59/d1.txt sends SetState 0xB / 10 = STATE_TEXT / STATE_GESTURES (callout.rs:7-8)
+82667A70	TutorialCalloutHud_Update	crates/skate-core/src/challenges/callout.rs:1 (hudtutorial HUD component update 82667A70); decompile: run-59/d1.txt sends SetState 0x4D = STATE_STANCE (callout.rs:11) on a stance flip
+82667B58	TutorialCalloutHud_ShowText	crates/skate-core/src/challenges/callout.rs:1 (82667B58); decompile: run-59/d1.txt sends 0xD hide on empty text, else 0xC / 0xB (STATE_TEXT_FIRST / STATE_TEXT), and 0xD after 9999 ms
 82667C90	guess_HudPin_DeletingDtorB	Guess: slot 40 of the HudPin vtable 82305D28: clears +0x34, restores base vtable 82306130, frees when bit 0 is set
 82667CF8	guess_Player_IsPinTargetActive	Guess: when challenge flag 0C54 and byte +0xC01 are set, asks the world for the pin target.
 82667DD0	guess_HudPin_ClearWhenIdle	Guess: clears the pin target when the FMV is idle and the session check passes
@@ -10168,7 +10169,7 @@
 8266B560	guess_TrickBegun_ScoringInfo	Guess: inits scoring trick info and reads field 0x03ACC9F200807B87.
 8266B940	guess_NamePair_SetUnknown	Guess: Sets the two 0x80-byte strings at +0xA0 and +0x20 to "ID_COMMON_UNKNOWN".
 8266B9A0	guess_OnlineRecord_InitIdNamesTime	Guess: run-35 b1: 64 bit id at +0x18, two 0x80 byte %s strings (+0x20 / +0xA0), time +0x128 minus the online clock (83085418 +0x470 slot 0x24) at +0x120; not a trick message
-8266BA50	guess_ChallengeResults_SortByPlace	Guess: rusty-trucks/crates/skate-core/src/challenges/results.rs:80 (the rows in place order (8266BA50 with comparator 8265E930))
+8266BA50	ChallengeResults_SortByPlace	crates/skate-core/src/challenges/results.rs:80 (8266BA50 with comparator 8265E930, place ascending)
 8266BB40	guess_SortU32_InsertionSortA	Guess: insertion sort of a word range.
 8266BBA0	guess_GhostPipeline_BuildGrindSegments	Guess: Large VMX pass on a 0xA200 byte stack buffer: transforms rows and copies grind segment pairs (GrindData_SegmentPairDistance)
 8266C140	guess_GhostPipeline_AdvanceAlloc	Guess: Bumps the aligned allocation cursor +0x9C50 by a 0x80 aligned size
@@ -10707,7 +10708,7 @@
 8268D7E0	guess_ChallengeDiscovery_ReleaseIcons	Guess: releases the icon groups +0x75C0..+0x7610; called by guess_ChallengeDiscovery_Shutdown
 8268D898	guess_IconGroup_FindFreeLocked	Guess: under the +0x220 lock scans the pointer vector +8..+0xC for an entry with +0x28 set and +0x54 clear
 8268D960	guess_MapMarker_DrawQuad	Guess: Map markers: 32 x 32 px quads at the clip translation only (with 825E2618).
-8268DB68	guess_Map_PixelsFromCenter	Guess: rusty-trucks/crates/skate-core/src/menus.rs:359 (map pixels relative to the map center (8268DB68))
+8268DB68	Map_PixelsFromCenter	crates/skate-core/src/menus.rs:359 (map pixels relative to the map center, sub_8268DB68)
 8268DC88	guess_FrontEnd_CameraRecordCtor	Vtable 8230C738, ids -1, zero vectors and a flag
 8268DDB0	guess_FrontEnd_CameraRecordPushCopy	Guess: copies a camera record (ids, two vectors, flags) and appends it to the vector at +0x70F0
 8268DE88	guess_FrontEnd_InitCameraRecords	Guess: fills 300 records from a template and builds a pointer list at +0x70F0.
@@ -10760,7 +10761,7 @@
 826974A8	guess_Input_PatternMatchBody	Guess: walks the pattern entries from +0x20 to +0x24.
 826976D8	guess_Vt822FF030_DeletingDtor	Guess: resets vtable 822FF030 and frees self when flag bit 0
 82697740	guess_Input_RegisterGameplayActions	Guess: rusty-trucks/crates/skate-core/src/input/gameplay_map.rs:33 (the eighteen actions TU3 82697740 registers at 64..81)
-826986A8	guess_InputHistory_Init	Guess: rusty-trucks/crates/skate-core/src/input/history.rs:49 (826986A8: zeroed storage, read index 0, write index 1) and input/pad.rs:8
+826986A8	InputHistory_Init	crates/skate-core/src/input/history.rs:49 (matches 826986A8: zeroed storage, read index 0, write index 1)
 82698D18	guess_MemSys_InitThreadContext	Guess: reads the global memory status and sets up TLS and the thread context
 82698FA8	guess_Input_PostControllerChange	Name from the messages it posts (cMsgControllerInserted, cMsgControllerRemoved; 1 MsgBus_Post calls, 524 bytes); the rest of the body not read.
 826991B8	guess_MemSys_PopFreeListLocked	Guess: lock free pop from the free list slot param_2 + 6 (+0x2EE8 link)
@@ -11310,7 +11311,7 @@
 826B38E8	guess_LivingWorldDb_FindInTreeA	Guess: slot 13: exact lookup in the spatial tree at +0x33AC (826C1B50), returns the first payload word.
 826B3960	guess_LivingWorldDb_FindInTreeB	Guess: slot 14: the same lookup in the tree at +0x33CC.
 826B39D8	guess_LivingWorldDb_QueryTreeA	Guess: slot 16: radius query in the tree at +0x33AC, then filters the hits.
-826B3B18	guess_Traffic_RoadSurfaceUnder	Guess: rusty-trucks/crates/skate-core/src/living_world/traffic/spawn.rs:58 (road surface under a point (826B3B18 + 82E16410))
+826B3B18	Traffic_RoadSurfaceUnder	crates/skate-core/src/living_world/traffic/spawn.rs:58 (road surface under a point, 826B3B18 + 82E16410)
 826B3C88	guess_LWPedLanes_PickSide	Guess: when +0x3446 is clear picks lane flag +0x3445 or +0x3444 by bit 0 of the arg and walks the 4 lanes
 826B3E18	AttribRef_InitCollectionD558C5D6	Inits an Attrib reference to collection key 0xD558C5D63AFEBCAD (default record 830D0850 when missing).
 826B3E80	LWPart17C00_Ctor	Ctor of the LivingWorld part +0x17C00 (global 830854B8, vtable 823081E8, ctor 826B3E80): three inline lists (+4, +0x814, +0x1024) and a zero vector block.
@@ -11325,7 +11326,7 @@
 826B48B8	guess_LWPart17C00_OnPedestrianEvent	Guess: slot 14: unless +0x18BC bit 7 is set, takes a ped (argument - 0xB0) and its part (- 0x2C) and records the event.
 826B49E8	guess_LWPart17C00_RemoveFromList4	Guess: slot 9: finds a 64-bit id in the first pair list (+4..+8) and removes it.
 826B4C70	guess_LWPart17C00_UpdateList4	Guess: slot 10: walks the first pair list for an id and updates the entry.
-826B4FC0	guess_PedChase_PostReachedPlayerMessage	Guess: rusty-trucks/crates/skate-core/src/living_world/peds/chase.rs:290 (HUD central message line when a chase reaches the player (826B4FC0, slot +64))
+826B4FC0	PedChase_PostReachedPlayerMessage	crates/skate-core/src/living_world/peds/chase.rs:290 (HUD central message when a chase reaches the player, 826B4FC0 slot +64)
 826B51C8	guess_LWPart17C00_RemoveFromList814	Guess: slot 7: finds a 64-bit id in the pair list +0x814..+0x818 and removes it.
 826B52F0	guess_LWPart17C00_FindInList814	Guess: slot 8: searches the pair list +0x814 for a 64-bit id.
 826B5398	guess_LWPart17C00_RemoveFromList1024	Guess: slot 11: finds a 64-bit id in the pair list +0x1024 and removes it.
@@ -11352,7 +11353,7 @@
 826B69B8	guess_LivingWorld_FreeBuffers	Guess: frees +0x3C and +0x30 to the default allocator and clears +0x2C, then walks +8
 826B6AB8	guess_LivingWorld_CollectMapValues	Guess: copies the values of a hash map into a local vector then updates each slot
 826B6C78	guess_LivingWorld_StopPedViewer	Guess: stops the hip test sequence and the CAS viewer playback (+0x2C..+0x40)
-826B6D58	guess_LWCensus_Ctor	Guess: rusty-trucks/crates/skate-core/src/living_world/config.rs:24 (vehicle limit 15: 826B83C8 refuses at census +148; ctor 826B6D58)
+826B6D58	LWCensus_Ctor	crates/skate-core/src/living_world/config.rs:24 (census ctor 826B6D58; vehicle limit 15 at census +148)
 826B6ED0	LWWorldState_DeletingDtor	Slot 0 of the LivingWorld part +0xBFE8 (global 83085498, vtable 8230C638): body 826B6F38, frees when bit 0 is set.
 826B6F38	LWWorldState_DtorBody	Dtor body: restores vtables 8230C638 / 8230C688, calls 825309E8 on (830CFD94 +0xC4) + 8 with the +4 part and releases two Attrib collections.
 826B7010	guess_LWCensus_UpdateFadeTimer	Guess: run-35 b16 + gc1: called by 826B71F0 (census update) on the census object, and by guess_LivingWorld_UpdateTraffic / guess_LivingWorld_ResetAll
@@ -11402,7 +11403,7 @@
 826BE4F0	guess_LivingWorld_ResetActorComponents	Guess: calls slot 0x34 of the +0x7EC component of every actor in map +0x20 (three maps)
 826BE688	guess_Game_WalkPhysOutStages	Guess: walks the hash map at +0x20 +4 updating each stage.
 826BE7D0	guess_LivingWorld_GetPlayerPosition	Guess: LivingWorld slot 31: zeroes the output, then fills it from the player actor that global 83085480 slot 4 returns; the dynamic object tick and guess_PedBrain_CanReact use slot 31 as their reference position.
-826BE870	guess_LWCensus_FocusVelocity	Guess: rusty-trucks/crates/skate-game/src/living_world/mod.rs:651 (speed squared at or below which the census focus velocity is zero, retail sub_826BE870)
+826BE870	LWCensus_FocusVelocity	crates/skate-game/src/living_world/mod.rs:651 (census focus velocity, zero at or below the still speed, retail sub_826BE870)
 826BE950	guess_LivingWorld_CollectNoSpawnVolumes	Guess: LivingWorld slot 36: fills a list from (global 830CFD94 + 0xDC) + 0x17C; the census spawn tests the spawn position against each entry (82DD87A8) before creating a ped.
 826BEA10	guess_LivingWorld_GetCameraVectorA	Guess: LivingWorld slot 33: returns a vector from slot 13 of the object at (global 830CFD94 + 0xA4) + 0x10, probably the camera.
 826BEA70	guess_LivingWorld_GetCameraVectorB	Guess: LivingWorld slot 34: the same object, slot 15.
@@ -12953,7 +12954,7 @@
 8272C140	guess_PauseMenu_ForwardSlot3Call	Gets an inner object from the owner's slot 3 and calls its slot 1 with two arguments.
 8272C1A0	guess_UpdateRegistry_Add	Guess: adds an object to the per-kind list returned by slot 6 of the registry (+0 vtable +0x18) when flag bit 0 is set; used by system Activate slots (kind 0x11).
 8272C2F0	guess_UpdateRegistry_Remove	Guess: removes an object from the per-kind list returned by slot 6 of the registry; pair of guess_UpdateRegistry_Add.
-8272C610	guess_FE_EventStatsScreen_ForwardSlot4	Guess: Calls slot 4 of the object returned by slot 0x10 of the owner.
+8272C610	guess_Flow_ForwardViaGetterSlot4	Guess: decompile: run-59/d2.txt; calls slot 4 of the object returned by owner slot 0x10; callers are mostly online / extras / unlock code flows (run-59 rf1.txt), not one FE screen
 8272C670	guess_PauseMenu_ForwardSlot5Call	Gets an inner object from the owner's slot 5 and calls its slot 2 with one argument.
 8272C6E0	Flowmsg_DeletingDtor	Slot 0 of vtable 8230EE68, the object SystemHub_Ctor allocates with the name tag Flowmsg (821CB2E8); frees when param_2 bit 0
 8272C740	guess_Flowmsg_DtorBody	Guess: run-49 b7.txt: the only call of the Flowmsg deleting dtor 8272C6E0 (slot 0 of vtable 8230EE68, tag Flowmsg); not a dev file server step
@@ -13684,7 +13685,7 @@
 8275E598	guess_PhysOut_RunStagesPassA	Guess: With mask bit 2 and a live owner (+0xC, +0x10) runs the first job of +0x40, then each stage in +0x34 whose mask (slot 0x64) matches
 8275E6E8	guess_PhysWorld_EndBoard	Guess: rusty-trucks/crates/skate-game/src/physics/riding_outputs.rs:318 (EndBoard 8275E6E8, called by World 8275EB10 after PlayerInput)
 8275E7E0	guess_PhysOut_RunStagesPassC	Guess: Same mask test with the second job of +0x40 (slot 4), then the stages
-8275E928	guess_PhysWorld_PublishFilteredPhysicals	Guess: rusty-trucks/crates/skate-core/src/player/frame.rs:74 (8275E928: filtered physicals publish the solver facing work)
+8275E928	PhysWorld_PublishFilteredPhysicals	crates/skate-core/src/player/frame.rs:74 (8275E928: filtered physicals publish solver facing work)
 8275EA20	PhysWorld_StartBatches	crates/skate-game/src/physics/frame.rs:99 (//World8275EA20 starts both batches before actor SetUpPhysics. Foot)
 8275EB10	guess_PhysWorld_RunPlayerStages	Guess: rusty-trucks/crates/skate-game/src/physics/riding_outputs.rs:318 (World 8275EB10 calls EndBoard 8275E6E8 after PlayerInput); no font work
 8275ED68	guess_Game_UpdatePhysOutStage	game stage update that runs the PhysOut modules (82DF2058) among others
@@ -13748,12 +13749,12 @@
 82763618	guess_Island_Dtor	Guess: erases the island from its group and resets the vtable.
 827638F8	guess_PhysWorld_SetBodyIslandFlags	Guess: writes the per body island byte (0xB0 byte bodies, 0x60 byte entries) from +0x557C lists; 0 when world mode +8 is 2
 82763B08	Island_StepSolver2	rusty-trucks/crates/skate-core/src/physics/drive_preparation/mod.rs:1 and physics/assembly.rs:123 (drive frame preparation in TU3 Island::Step_Solver2 82763B08)
-82763D18	guess_PhysOutStage_Fence	Guess: rusty-trucks/crates/skate-core/src/player/frame.rs:104 (82763D18: the Adjust phase cannot run until this fence completes)
+82763D18	PhysOutStage_WaitFence	crates/skate-core/src/player/frame.rs:104 (82763D18 wait: the Adjust phase cannot run until this fence completes); decompile: run-59/d4.txt polls the job slot +0x30 with a yield until done, then the sleep pass and Phy...
 82763E00	guess_PhysWorld_SetSolverIterations	Guess: Writes 50 or 25 to solver +0xB0 by the world mode +8, then steps the solvers +0x5580 / +0x5584
 82763EE0	guess_PhysWorld_BuildContacts	Guess: Calls the solver +0x5580 slot 8 and builds the contact lists of the islands at +0x5598..+0x55C4
 827641A0	guess_PhysWorld_StepIslands	Guess: Calls the +0x557C object slot 8 then steps the islands by the world state +8 (3 / 4)
 82764420	guess_PhysWorld_TryReserveBodies	Guess: Returns early unless the request count fits under the limit +0x7C (used +0x64 plus count)
-82764480	guess_PhysWorld_BuildDependencyTree	Guess: rusty-trucks/crates/skate-core/src/player/frame.rs:99 (82764480 / 82DC35E0 build the dependency tree after every state)
+82764480	PhysWorld_BuildDependencyTree	crates/skate-core/src/player/frame.rs:99 (82764480 / 82DC35E0 builds the dependency tree after every state)
 82764790	guess_PhysWorld_SetSimMode	Guess: run-51 b20.txt: stores the mode at +8, rebuilds the group pair table (PhysGroupPairTable_Build 82765EF0) and the contact caches (82765AA0), marks +0x559C +0x14 dirty and copies five words per pool +0x55A4 / +0x55A8; n...
 827648F0	guess_PhysIsland_ReadTuning	Guess: Reads attrib fields D76D9DB5EE1FD008 and C94D65091DCB828B.
 82764AB0	guess_BipedQuery_Run	Guess: rusty-trucks/crates/skate-game/src/physics/offboard/ground_query.rs:1 (original Biped query 82764AB0 / 82770650 / 82C1EAD8); not a debug draw batch
@@ -13992,7 +13993,7 @@
 827778C0	DMOPool_Rebuild	research/b221-held-dmo-query-filter.md:46 (DMOPool vtable +0x04 827778C0 rebuild) and :49 (called per frame, clears the mesh list then re-adds every registered assembly part); run-51 d4.txt slot 1, b24.txt
 82777988	guess_DMOPool_AddPartShape	Guess: research/b221-held-dmo-query-filter.md:50 (the rebuild calls 82777988(pool, assembly, part shape, transform, group = assembly+0x28, ...) for every part); run-51 b24.txt: writes a record into the pool list +0x428..+0x440
 82777AA0	guess_PhysIsland_BuildBodyList	Guess: transforms shapes (guess_Math_XformToMatrix34) and inserts body pointers and 0x40 byte records into vectors
-82777E70	guess_PhysIsland_CollideBodies	Guess: VMX pass over two body lists
+82777E70	PhysBroadphase_ShapeQueryBox	crates/skate-core/src/physics/board_world/broadphase.rs:222 (82777E70: the box every world triangle vertex box is tested against before the pair query, from the shape bounds slot)
 82778238	guess_PhysIsland_SolveContacts	Guess: large (3.7 KB) VMX pass over contact records
 827790B0	guess_PhysIsland_DecodePackedShape	Guess: decodes a packed shape header (low nibble kind 1..3, flags 0x20 / 0x40) and returns the data offset
 82779188	guess_PhysIsland_QueryAabbC	Guess: AABB scan with group filter and a per body callback (third variant)
@@ -14561,7 +14562,7 @@
 827B24F8	IndicatorTrail_Build	research/b566-companion-indicator.md:45 (3. The trail itself: 827B24F8(indicator, pos) [code])
 827B2720	guess_PresCamera_SampleSplineShot	Guess: samples a camera spline (attrib 2F57F64D, field 5D92E494915216BD), adds time at +0x1B5C and builds the shot transform from the NIS camera
 827B2B40	CompanionIndicator_ClearTrail	Clears the trail words (+0x1C80..+0x1C90) and frees them.
-827B2BA8	guess_IndicatorTrail_BSplineCurve	Guess: rusty-trucks/crates/skate-core/src/indicator_trail.rs:69 (the drawn curve (827B2BA8): a uniform cubic B spline over the points)
+827B2BA8	IndicatorTrail_BSplineCurve	crates/skate-core/src/indicator_trail.rs:69 (the drawn curve 827B2BA8, b567: a uniform cubic B spline over the points)
 827B2DE0	guess_SplineMgr_DeletingDtor	Guess: slot 11: guess_SplineMgr_SmallStep then free
 827B2E48	guess_SplineMgr_SmallStep	Guess: no calls
 827B2EF8	guess_SplineMgr_CreateSpline	Guess: Creates one Spline object (0x970 bytes) and links it
@@ -14860,7 +14861,7 @@
 827CD298	guess_Autosave_PinAndInit	Name from the messages it posts (cMsgPinPlayer, cMsgInitAutosave; 2 MsgBus_Post calls, 304 bytes); the rest of the body not read.
 827CD3C8	guess_FE_LeaderboardList_FindFree	Guess: Walks the FE +0xE0 +0x60 list looking for a free 0x68 byte row.
 827CD580	guess_FE_LeaderboardList_Reset	Guess: Walks the FE +0xE0 +0x60 list +0x2C and resets each row.
-827CD728	guess_BoardSales_CountArmedMilestones	Guess: rusty-trucks/crates/skate-core/src/career/milestones.rs:38 (count - pending - still armed (827CD728))
+827CD728	BoardSales_CountArmedMilestones	crates/skate-core/src/career/milestones.rs:38 (count minus pending minus still armed, 827CD728, b895)
 827CD8D0	guess_BoardSales_LookupPrevMilestone	As the next milestone lookup but with the current index minus one.
 827CD9A0	guess_BoardSales_LookupNextMilestone	Collects every Attrib collection of class 0xA5970491380FF1BE, sorts them and returns the one at the current milestone index.
 827CDA70	guess_Challenge_IsKillableKind	Binds the challenge record (class 0xA4F35B159D7432B5) and tests its type field (02B828CC) against 0x13 and other kinds.
@@ -19122,7 +19123,7 @@
 8296EBB0	Vec3_AngleBetweenVectors	run-53 b3.txt: squared length gate, one rsqrt refinement, clamped dot, acos; port air/state/runtime.rs:46 (AngleBetweenVectors 0x8296EBB0), air/trajectory/math.rs:46
 8296EC98	guess_Vec3_SignedAngle	Guess: rusty-trucks/crates/skate-core/src/player/offboard/ground_entry/math.rs:1 (8296EC98 signed angle)
 8296EDE8	guess_HoMWipeoutScorer_RotateBySinCos	Guess: Builds a rotation from sin and cos of an angle and applies it to a vector.
-8296EF20	guess_Camera_LookBasis	Guess: rusty-trucks/crates/skate-core/src/camera/orientation_math.rs:70 (look basis 8296EF20: normalize world up cross At, then At cross that)
+8296EF20	Camera_LookBasis	crates/skate-core/src/camera/orientation_math.rs:70 (look basis 8296EF20: normalize world up cross At, then At cross that)
 8296EFE0	guess_Math_FrameFromAxisAndHint	Guess: research/peds/b147-ped-body-bones.md:10 (part 0 Hips aimed at Head: frame from the Hips row 2 axis and the Hips -> Head hint through sub_8296EFE0); run-51 b31.txt: called by guess_Ped_UpdateBodyBTransforms 82E35838 ne...
 8296F0A8	guess_NIS_AttachXformMul	Guess: multiplies the attach transform rows (+0x10 / +0x20 / +0x30) with vector math
 8296F1A0	guess_LWDynamicObjectActor_AngleVec	Guess: vector angle (acos) test.
@@ -19216,7 +19217,7 @@
 829757D0	guess_SndBank_RandomSample	Guess: picks a random sample and reads the memory status.
 82975A60	guess_SndVoiceGroup_Start	Picks a random pitch (CRT_rand times range +0x10 plus base +0xC of the descriptor +0x54), stores the start flag and starts each voice.
 82975B08	guess_SndVoiceGroup_Update	Scales the volume by the descriptor gain (+0x54 +8) and the pitch by +0x58, updates each voice (82976860) and frees voices whose state +0x4C is above 3.
-82975BF0	guess_SndVoiceGroup_AnyActive	True when any voice of the group (count byte +7 of the descriptor +0x54) has state +0x4C below 4.
+82975BF0	SndVoiceGroup_AnyActive	crates/skate-audio/src/splice/mod.rs:340 (sub_82975BF0: any voice still delaying or playing)
 82975C58	guess_SndVoiceOwner_DeletingDtor	Guess: stores 82317184, stops the voices by state, frees
 82975CC8	guess_SndVoiceGroup_StartBody	Guess: picks a random entry and starts the voice group.
 82975E70	guess_SndVoice_QueueRelease	Guess: queues an 8 byte release command (guess_AudioCmd_Run48F28) for the voice +4 under the audio lock 8307762C, then clears the seven slots
@@ -21616,7 +21617,7 @@
 82AD3AF0	guess_Collision_PairDistance	Calls the pair function from the 6 by 6 table 82FD56F0 by the two primitive types (+0x90) and returns the first float
 82AD3B60	guess_Collision_CopyResult	Copies a result record: word and aligned vectors
 82AD3CD8	Collision_PrimitivePairIntersect	retail name PrimitivePairIntersect per our notes
-82AD43A8	guess_Collision_GpPairContactQuery	Guess: rusty-trucks/crates/skate-core/src/physics/world_contact/primitive_pair.rs:1 (simulation GP pair contact query 82AD43A8)
+82AD43A8	Collision_GpPairContactQuery	crates/skate-core/src/physics/world_contact/primitive_pair.rs:1 (simulation GP pair contact query, original Skate 3 TU3 82AD43A8)
 82AD4768	guess_Collision_PairDistanceCheck	Guess: computes a pair distance and compares it.
 82AD4850	guess_GrindData_InitSegmentLink	Guess: Writes a segment link record (+0x30 entries of 8 bytes, +0x2C entries of 0x20) with an end marker 0xFFFF.
 82AD48D0	guess_GrindData_FindNearestSegment	Guess: Loop over the segment list looking for the nearest point to the vector +0x20.
@@ -21636,7 +21637,7 @@
 82AD6830	guess_GrindOctree_InsertQuery	Guess: rusty-trucks/crates/skate-game/src/grind_world/octree.rs:1 (loose octree insertion / query order 82AD6830 / 82476158)
 82AD6A08	guess_GrindData_GetSegmentRecord	Guess: Reads segment link n (+0x30, 8 byte rows): start index +4, count byte +6, rows of 0x20 bytes.
 82AD6BA0	guess_DynamicHullTree_InitNodes	guess: stores the node count (+0x20) and lays out 0x20 byte nodes in an aligned block.
-82AD6D18	guess_GrindOctree_PushLeafLists	Guess: rusty-trucks/crates/skate-game/src/grind_world/octree.rs:116 (82AD6D18 pushes resident then ascending leaf lists; 82476158 consumes them)
+82AD6D18	GrindOctree_PushLeafLists	crates/skate-game/src/grind_world/octree.rs:116 (82AD6D18 pushes resident then ascending leaf lists)
 82AD6EF0	guess_PhysIsland_SweepQueryInit	Guess: Splats the radius into a vector, stores the mode and initializes the iterator through FUN_8276C178
 82AD7048	guess_PhysIsland_TreeExpandNode8	Guess: run-42\b26.txt: pops the node stack (count at +0x2800), tests the 8 children of a node (u16 child ids) against the query box and pushes the hits
 82AD7740	SkateboardBody_ResetDefaults	crates/skate-core/src/physics/construction/deck_geometry.rs:171 (the aggregate volume transform is identity, 82AD7740)
@@ -21645,7 +21646,7 @@
 82AD7998	guess_BoxVolume_Init	Guess: fills a box volume: +0x40 from 83072128, +0x50 = 1, extents from the vector.
 82AD7A28	guess_BoxVolume_SetHalfExtents	Guess: when the handle is set, passes the three floats as a vector to 82AD7998.
 82AD7A98	BoxVolume_MaxFeature	crates/skate-core/src/physics/world_contact/box_feature.rs:8 (/// Complete native box maximum-feature callback82AD7A98. Face winding uses the)
-82AD8508	guess_BoxVolume_ProjectDirection	Guess: rusty-trucks/crates/skate-core/src/physics/world_contact/projection.rs:15 (project_direction: capsule 82AD99C8, triangle 82ADE3B8, box 82AD8508; 48 byte interval out)
+82AD8508	BoxVolume_ProjectDirection	crates/skate-core/src/physics/world_contact/projection.rs:15 (project_direction: capsule 82AD99C8, triangle 82ADE3B8, box 82AD8508)
 82AD8758	guess_BoxVolume_CreateGP	Guess: rusty-trucks/crates/skate-game/src/physics/colliders.rs:134 (CreateGP 82AD8758 starts the basis composition with a product)
 82AD88E0	guess_Volume_CopyCenterToQuery	Guess: Shared slot 3 of the Box and Sphere volume records (82FD5780): copies the center vector into the query record at +0x220
 82AD8908	guess_BoxVolume_LineIntersect	Guess: Slot 5 of the Box volume record (id 4): long vector body taking start, end and a result block; looks like a segment or ray test against the box
@@ -21655,7 +21656,7 @@
 82AD97A0	CapsuleVolume_GetBBox	crates/skate-core/src/physics/board_world/broadphase.rs:105 (82AD97A0: center +- fma(abs axis, half length +68, radius +80))
 82AD9858	guess_CapsuleVolume_GetSize	Guess: Slot 1 of the CapsuleVolume record (82FD5780): writes one size vector of the shape
 82AD98A0	CapsuleVolume_MaxFeature	crates/skate-core/src/physics/world_contact/feature.rs:44 (/// Complete capsule maximum-feature callback82AD98A0. segment_scratch carries)
-82AD99C8	guess_CapsuleVolume_ProjectDirection	Guess: rusty-trucks/crates/skate-core/src/physics/world_contact/projection.rs:15 (project_direction: capsule 82AD99C8)
+82AD99C8	CapsuleVolume_ProjectDirection	crates/skate-core/src/physics/world_contact/projection.rs:15 (project_direction: capsule 82AD99C8)
 82AD9A88	guess_CapsuleVolume_BatchGP	Guess: rusty-trucks/crates/skate-core/src/physics/world_contact/projection.rs:26 (full batch GP callbacks: sphere 82ADD820, capsule 82AD9A88)
 82AD9B68	guess_CapsuleVolume_InitQueryShape	Guess: Slot 4 of the CapsuleVolume record (82FD5780): fills a query shape with type 2 at +0x90 and the owner at +0x84
 82AD9C78	guess_RoundVolume_GetScaledAxis	Guess: slot 3 shared by the capsule (82FD57D4) and cylinder (82FD57FC) volume vtables: scales the axis +0x10 by the radius +0x44 and writes the result
@@ -22571,6 +22572,7 @@
 82B6B318	guess_Attrib_FindCollectionByClassKey	Guess: finds the class by key, then the collection by key through Attrib_ClassFindCollection
 82B6B3D0	guess_Attrib_FindCollectionLocked	Guess: locked variant of 82B6B318 that also searches the database entries
 82B6B4D8	guess_Attrib_ForEachCollectionOfClass	Guess: walks every collection of a class under the database lock and calls the callback (used by 82B6B858)
+82B6B6D8	guess_Attrib_ReleaseCollectionCallback	Guess: 56 byte callback that releases one attrib collection; its address is passed by guess_Attrib_ForEachCollectionRelease 82B6B710 [decompile: run-59/d2.txt 82B6B6D8]
 82B6B710	guess_Attrib_ForEachCollectionRelease	Guess: walks the class collections with the 82B6B6D8 callback and releases them
 82B6B858	guess_AttribSys_ForEachWithArgs5	Guess: packs five args and walks the attrib tables with the 82B6B830 callback through 82B6B4D8
 82B6B898	guess_AttribSys_PatchHandlerCtor	Guess: sets the patch handler vtables 8231BCE8 and friends.
@@ -23174,10 +23176,10 @@
 82B98AA0	guess_SkaterAnim_HashState	Guess: in vtable 8231E178 (word at 8231E1C0, run-55/rf2.txt) whose slots are SkaterAnim_SetRidingFakie and SkaterAnim bit tests; state hash visitor over +0xDC flag bits and pose matrices
 82B98DB8	guess_GestureCatalog_Ctor	Guess: b1: SkaterMgr +0x15C block: seven u64 hash maps of 0x764 bytes, a node pool +0x33C0..+0x34A0, then 82B98F70 fills them; its map helpers are the ones SGAnimParams_ReadXml and the CAS animator use (anim parameter contai...
 82B98E98	guess_SkaterMgr_ClearHashLists	guess: clears seven hash bucket lists (stride 0x764).
-82B98F70	guess_GestureCatalog_FillTables	Guess: b1 + list: 30 KB static fill called only by 82B98DB8 through the 82BC12A8 / 82BC1BE8 / 82BC1F70 key entry helpers (decompiler timeout, body not read)
+82B98F70	guess_GestureTrickMapping_Init	Guess: third party clone name: research/skate3clone-findings.md:91 (GestureTrickMapping::Init 0x82B98F70, 270 records); port gesture_catalog.rs:2 agrees (catalog built by 82B98DB8 -> 82B98F70, 270 map insertions); decompiler...
 82BA07F0	GestureTrickMapping_Find	rusty-trucks/crates/skate-game/src/input/gesture_mapping.rs:1 (GestureTrickMapping 82BA07F0 and CreateTrickIntentFromGesture 82BA1C30..); run-47 b13.txt: HashMap24_Find over the gesture tables (+0x764, +0xEC8, +0x162C...
 82BA0A48	guess_SGBehaviour_IsFilteredIntent	Guess: compares an intent key against a fixed list of intent keys.
-82BA0C20	guess_MGIntent_ApplyFilter	Guess: rusty-trucks/crates/skate-core/src/input/graph_intents.rs:3 (apply_filter: complete 82BA0C20, filter ordinals from 82BA0A48); gcq.txt: callers CreateMGIntent_ApplyOps, FilterMotionGraphIntent_ApplyOps, SGBehaviour_Boa...
+82BA0C20	MGIntent_ApplyFilter	crates/skate-core/src/input/graph_intents.rs:3 (complete 82BA0C20, apply_filter)
 82BA0D30	guess_Score_GrabAngleVec	Vector math on three float arguments for grab scoring
 82BA0EA8	SGCondition_HasAGIntent_Check	The check of the StateGraph condition "HasAGIntent": slot 12 of its vtable 8231E3F8 (built by SGCondition_Create_HasAGIntent); slot 12 is the only pure virtual slot of the condition base vtable 82321DEC.
 82BA0F78	SGCondition_HasGestureIntent_Ctor	Constructor of the SGCondition node "HasGestureIntent": called by SGCondition_Create_HasGestureIntent on the new block; sets vtable 8231E430.
@@ -23334,7 +23336,7 @@
 82BA9250	SGBehaviour_ToggleBoard_Slot11	Slot 11 of the SGBehaviour node "ToggleBoard" (vtable 8231F8C8, built by SGBehaviour_ToggleBoard_Ctor). Slot meaning not known (structural name).
 82BA9310	guess_SGBehaviour_ToggleBoard_Retrieve	Guess: rusty-trucks/crates/skate-core/src/player/offboard/toggle_board.rs:1 (ToggleBoard 82BA8FE8, retrieval 82BA9310, drop 82BA9990)
 82BA9990	guess_SGBehaviour_ToggleBoard_Drop	Guess: rusty-trucks/crates/skate-core/src/player/offboard/toggle_board.rs:1 (ToggleBoard 82BA8FE8, retrieval 82BA9310, drop 82BA9990)
-82BA9D08	guess_ToggleBoard_ResetYawPitch	Guess: rusty-trucks/crates/skate-core/src/player/offboard/toggle_board.rs:94 (Begin 82BA8FD8 resets the phase then tail-calls ResetYawPitch 82BA9D08)
+82BA9D08	ToggleBoard_ResetYawPitch	crates/skate-core/src/player/offboard/toggle_board.rs:94 (Begin 82BA8FD8 resets the phase then tail calls ResetYawPitch 82BA9D08)
 82BA9E20	guess_SGBehaviour_ToggleBoard_RetrieveB	Guess: rusty-trucks/crates/skate-game/src/graph_host/motion_toggle_board.rs:1 (TU3 ToggleBoard 82BA8FD8 / 82BA8FE8, retrieval 82BA9310 / 82BA9E20)
 82BAA208	guess_ToggleBoard_BaseCtor	Guess: base constructor (ref count cleared, vtable 82320508).
 82BAA320	SkaterAnim_CharacterGesture	retail name CharacterGesture per our notes
@@ -23369,7 +23371,7 @@
 82BACF00	SGBehaviour_SetPushCoefs_Slot13	Slot 13 of the StateGraph behaviour "SetPushCoefs" (vtable 8231FC18, built by SGBehaviour_Create_SetPushCoefs); behaviour base vtable 8230C338: slot 11 pure virtual, slots 12 to 14 empty by default. Slot meaning not known (structural name).
 82BACF50	guess_PushAnim_UpdateChannels	Guess: rusty-trucks/crates/skate-core/src/riding/push_animation.rs:2 (0x82BACF50 updates the three push channels)
 82BAD258	SGBehaviour_ComputeTargetCoefsFromSpeedAndStrength_Slot13	Slot 13 of the StateGraph behaviour "ComputeTargetCoefsFromSpeedAndStrength" (vtable 8231FC54, built by SGBehaviour_Create_ComputeTargetCoefsFromSpeedAndStrength); behaviour base vtable 8230C338: slot 11 pure virtual, slots 12 to 14 empty by default. Slot meaning not known (structural name).
-82BAD260	guess_PushBehavior_ComputeTargetCoefsFromSpeedAndStrength	Guess: rusty-trucks/crates/skate-core/src/riding/push_behaviors.rs:50 (ComputeTargetCoefsFromSpeedAndStrength, 82BAD260)
+82BAD260	PushBehavior_ComputeTargetCoefsFromSpeedAndStrength	crates/skate-core/src/riding/push_behaviors.rs:50 (ComputeTargetCoefsFromSpeedAndStrength, 82BAD260)
 82BAD5B8	InitPush_Begin	rusty-trucks/crates/skate-core/src/riding/push_behaviors.rs:188 (InitPush::Begin, 82BAD5B8); retail class name over the slot name
 82BAD658	guess_PushAnim_HeldTimeToStrength	Guess: rusty-trucks/crates/skate-core/src/riding/push_animation.rs:2 (0x82BAD658 maps held time to strength)
 82BAD6E8	SGBehaviour_ComputeFirstPushStrength_Slot12	Slot 12 of the StateGraph behaviour "ComputeFirstPushStrength" (vtable 8231FCCC, built by SGBehaviour_Create_ComputeFirstPushStrength); behaviour base vtable 8230C338: slot 11 pure virtual, slots 12 to 14 empty by default. Slot meaning not known (structural name).
@@ -23939,10 +23941,10 @@
 82BD2E60	SkeletonIK_MatrixInterpolateB	crates/skate-core/src/animation/foot_ik/math.rs:1 (//! Matrix interpolation used by SkeletonIK, TU3 82BD3150/82BD2E60.)
 82BD3150	SkeletonIK_MatrixInterpolate	crates/skate-core/src/animation/foot_ik/math.rs:1 (//! Matrix interpolation used by SkeletonIK, TU3 82BD3150/82BD2E60.)
 82BD35B8	Math_AxisRotation	crates/skate-core/src/camera/orientation_math.rs:40 (/// Complete axis rotation82BD35B8. Standalone sine/cosine and the matrix)
-82BD3720	guess_PhysicalPlayerHiLOD_FindRepresentedParent	Guess: rusty-trucks/crates/skate-game/src/physics/foot_ik.rs:53 (82BD3720 walks parents until it finds a represented physical part)
+82BD3720	PhysicalPlayerHiLOD_FindRepresentedParent	crates/skate-game/src/physics/foot_ik.rs:53 (82BD3720 walks parents until it finds a represented physical part)
 82BD3858	guess_Joint_SetLinearFrame	Guess: rusty-trucks/crates/skate-core/src/physics/skeleton_body/joints.rs:86 (InitJoints passes the identity matrix to SetLinearFrame 82BD3858)
-82BD3A10	guess_DriveFrame_SetChildFrame	Guess: rusty-trucks/crates/skate-core/src/physics/drive_frames.rs:151 (SetChildFrame 0x82BD3A10)
-82BD3BD0	guess_DriveFrame_SetParentFrame	Guess: rusty-trucks/crates/skate-core/src/physics/drive_frames.rs:153 (SetParentFrame 0x82BD3BD0)
+82BD3A10	DriveFrame_SetChildFrame	crates/skate-core/src/physics/drive_frames.rs:151 (SetChildFrame 0x82BD3A10)
+82BD3BD0	DriveFrame_SetParentFrame	crates/skate-core/src/physics/drive_frames.rs:153 (SetParentFrame 0x82BD3BD0)
 82BD3D90	PhysicsUtility_ClampVectorWithinMaxLength	rusty-trucks/crates/skate-core/src/air/state/jump_velocity.rs:21 (PhysicsUtility::ClampVectorWithinMaxLength, 0x82BD3D90)
 82BD3E78	Reckoning_AngleLimiter	crates/skate-core/src/air/reckoning/math.rs:56 (doc line names the address; next port fn limit_angle)
 82BD41B0	Vec3_ClampToSphere	(radius, out, point, center): out = point when within radius of center, else center + (point - center) * radius / distance.
@@ -23974,11 +23976,11 @@
 82BD9728	PhysicsSkeleton_SetHandIkTargetA	research/npc/b143-held-car-body-contact.md:34 (82BD9728 / 82BD97D0 only write hand IK targets +576 / +592; code); decompile: run-55/d8.txt transforms the point by the matrix +0x2E90, clamps to a s...
 82BD97D0	PhysicsSkeleton_SetHandIkTargetB	research/npc/b143-held-car-body-contact.md:34 (hand IK target writer; code); decompile: run-55/d8.txt same as 82BD9728 for the point +0x39C0, stores at skeleton +0x250
 82BD9878	guess_SkeletonBody_GetPartFrame	Guess: rusty-trucks/crates/skate-core/src/physics/skeleton_body/runtime.rs:25 (GetPartFrame 82BD9878 normalizes the mapped animation frame)
-82BD9990	guess_PhysicsSkeleton_DrivesBody	Guess: class tag: uses +0x1930 / +0x1934 of its argument, the Physics::Skeleton record that HiLOD slot 33 reads through slot 0x7C (b11 / b12)
+82BD9990	PhysicsSkeleton_ResetBoardFrames	crates/skate-core/src/physics/skeleton_board_frames.rs:44 (Reset 82BD9990: the retained COM seed is the spawn position)
 82BD9EA8	guess_PhysicsSkeleton_SampleBoardXform	Guess: class tag: argument fields +0x1930 / +0x2DB0 (Physics::Skeleton; b12)
 82BD9FB0	guess_PhysicsSkeleton_BlendPose	Guess: class tag: argument byte +0x407B (Physics::Skeleton block; b12)
 82BDA0D0	PhysicsSkeleton_ProcessAnimAttributes	b8: called by 82BD8918 with the skeleton as the first argument
-82BDC6C8	guess_SkaterSim_ShouldBeAirborne	True in state 2 (+0x4024) or when the vertical speed (+0x3170 lane 1) is above the tuning limit +0x18 -> +0x320 and the state is not 1.
+82BDC6C8	SkaterSim_IsSkateboardAnimated	crates/skate-core/src/player/selector/conditions.rs:46 (TU3 0x82BDC6C8, is_skateboard_animated); decompile: run-59/d5.txt state +0x4024 == 2 or abs of lane 1 of +0x3170 above tuning +800 (threshold_800)
 82BDC740	guess_PhysAir_ClearBlock	Guess: fills a block with a pattern.
 82BDCA38	Skeleton_GeneralUpdate	rusty-trucks/crates/skate-core/src/animation/foot_ik/mod.rs:1 (native skeleton IK, TU3 GeneralUpdate 82BDCA38 and its six update stages)
 82BDCC28	Skeleton_UpdateLandingOnSkateboardAdjust	class tag: argument fields +0x3D50..+0x3D80 and +0x4005 / +0x400C, as in 82BD8F10 (Physics::Skeleton block; b12)
@@ -24001,7 +24003,7 @@
 82BDF7C0	guess_Skeleton_TeleportStageB	Guess: rusty-trucks/crates/skate-game/src/physics/skeleton_input_teleport.rs:1 (teleport skeleton stages 82BE3508 and 82BDF7C0)
 82BDFA88	Skeleton_UpdateWipeout	rusty-trucks/crates/skate-game/src/physics/wipeout_states/skeleton.rs:1 (original Skeleton::UpdateWipeout 82BDFA88)
 82BDFBE8	Skeleton_UpdateRootTransformsWipeout	rusty-trucks/crates/skate-core/src/player/wipeout_state/skeleton.rs:1 (original Skeleton::UpdateRootTransformsWipeout 82BDFBE8)
-82BDFE58	guess_PhysicsSkeleton_OrientBody	Guess: transform and sin / cos orient step on +0x2DB0..+0x4021; called by guess_PhysAir_StepOrientRateLimited
+82BDFE58	PhysicsSkeleton_UpdateTeleport	crates/skate-core/src/physics/skeleton_root.rs:42 (82BDFE58: teleport prediction uses the current physical deck position)
 82BE0318	Skeleton_UpdateRootTransforms	rusty-trucks/crates/skate-core/src/physics/skeleton_root.rs:1 (Skeleton::UpdateRootTransforms 82BE0318)
 82BE0858	guess_PhysLandingOnDeck_AngleStep	Guess: vector step with sin and cos and the shared air step.
 82BE0CC0	guess_PhysicsSkeleton_AngleOf2EA0	Guess: angle helper on +0x2EA0 / +0x2EB0; called by the landing on deck and off board pushing vector steps
@@ -24018,7 +24020,7 @@
 82BE2BA8	PhysicsSkeleton_FinishOutput	crates/skate-core/src/player/post_output.rs:12 (port fn finish_skeleton_output_82be2ba8)
 82BE3170	guess_PhysStateBlend_LerpVec	Short vector blend used by five callers
 82BE3220	Skeleton_BoneWorldPosition	research/b241-carry-edge-sign.md:28 (82D444A0: li r5,23; bl 82BE3220 gives the skater bone 23 position; code)
-82BE32D0	guess_PhysicsSkeleton_ResetBlendAndStiffness	Guess: sets the blend weight and bone stiffness for all parts; called by PhysState_WipeoutGround_Update
+82BE32D0	PhysicsSkeleton_SetWipeoutDrag	crates/skate-core/src/player/wipeout_state/body.rs:56 (82BE32D0 set_wipeout_drag); decompile: run-59/d5.txt clamps the drag, Body_SetLinearDrag / Body_SetAngularDrag with (drag + 1) / 2
 82BE3350	guess_PhysicsSkeleton_ClearPartialMode	Guess: rusty-trucks/crates/skate-core/src/physics/skeleton_body/collision_mode.rs:291 (Skeleton 82BE3350 clears the partial mode, root and extra volumes) and ragdoll.rs:34
 82BE33D0	Skeleton_PublishAnimatedPose	crates/skate-core/src/riding/grounded/state/board_types.rs:216 (port fn publish_animated_pose_82be33d0)
 82BE3508	guess_PhysicsSkeleton_ResetInputDefaults	Guess: run-35 b4 / b5: param_1 is the Physics::Skeleton (uses skeleton fields +0x1930/+0x3D50/+0x4005/+0x4008/+0x4030); class map: Skeleton +0x1930 SkeletonBody, +0x1934 SkeletonDrives, +0x1940 pose block, +0x2DB0 HiLOD
@@ -24026,7 +24028,7 @@
 82BE3700	guess_PhysicsSkeleton_ApplyFlag407BA	Guess: reads +0x1930 / +0x407B; called from 82D91574
 82BE3808	guess_PhysicalPlayer_ResetRagdollBodyModes	Guess: Sets all 23 body entries and their 0x60 byte parts to mode 3, clears the active bit, sets the root body mode 4 and clears +0x407B
 82BE38D0	guess_PhysicsSkeleton_ApplyFlag407BB	Guess: reads +0x1930 / +0x407B; called from 82D9150C
-82BE3998	guess_PhysicsSkeleton_WipeoutDisplace	Guess: sets stiffness and blend and applies a displacement to a part; called by PhysState_WipeoutGround_Update
+82BE3998	PhysicsSkeleton_WipeoutSpecialSurface	crates/skate-core/src/player/wipeout_state/body.rs:60 (82BE3998 special_surface, cached physical record positions before the live writes)
 82BE3B58	guess_SkeletonState_Torque	Guess: rusty-trucks/crates/skate-core/src/player/wipeout_state/torque.rs:1 (SkeletonState angular estimate 82BEC0E8 and torque 82BE3B58)
 82BE3CC8	guess_PhysicsSkeleton_HashState	Guess: called with HiLOD +0x75C (Physics::Skeleton) from the HiLOD state hash 82DB9418
 82BE4290	SkeletonBody_Ctor	Constructor of class 'SkeletonBody': called on the new block right after guess_Mem_AllocNamed with that tag (in 82BD7C48, 82BD7D98).
@@ -24043,15 +24045,15 @@
 82BE5B30	SkeletonBody_InitJoints	rusty-trucks/crates/skate-core/src/physics/skeleton_body/joints.rs:1 (SkeletonBody::InitJoints 82BE5B30)
 82BE6B78	guess_PhysicalPlayerHiLOD_BuildBoneMatrices	Loops over bones building matrices from the transforms at +0x18 +8
 82BE6D60	guess_SkeletonBody_SetUpNormalAndStiffness	Guess: up normal loop, stiffness and blend on +0xBDC..+0x2022; called by 82BE3350 and 82D9159C
-82BE6FF8	guess_Skeleton_ResetDrives	Sets drive mode 4, clears flag bit 0 of the drive records and 0x17 slots from +0x1FC4
+82BE6FF8	SkeletonCollision_DisableAll	crates/skate-core/src/physics/skeleton_body/collision_mode.rs:137 (82BE6FF8 disable_all; bone volume group values survive)
 82BE7078	guess_SkeletonBody_ResetNormalFlags	Guess: resets the up normal and flags +0x2020 / +0x2021; called by guess_PhysicalPlayerHiLOD_ResetInputDefaults
-82BE70D8	guess_Skeleton_SetBoneStates5	Sets state 5 on the skeleton and every 0x60 byte bone record
-82BE7190	guess_SkeletonBody_ResetPartC	Guess: per part reset; called many times by 82BE5248
-82BE71F0	guess_Skeleton_ReleaseDriveSlot	Guess: Called from the grind exit: per slot flag +0xB4 clears drive mode (+0x54 = 4, bit 0 of +0x5C) or a pending word
+82BE70D8	SkeletonCollision_NormalCollision	crates/skate-core/src/physics/skeleton_body/collision_mode.rs:129 (82BE70D8 normal_collision; does not consult BoneHasCollision)
+82BE7190	SkeletonCollision_EnableBone	crates/skate-core/src/physics/skeleton_body/collision_mode.rs:150 (82BE7190 enable_bone; tests the counter)
+82BE71F0	SkeletonCollision_NormalBone	crates/skate-core/src/physics/skeleton_body/collision_mode.rs:177 (82BE71F0 normal_bone, unlike the whole body normal path)
 82BE7280	Skeleton_SetUpNormal	retail name SetUpNormal per our notes
-82BE74C8	guess_PhysWipeoutGround_ResetBodiesA	guess: loops the 0x60 byte body records of the ragdoll (+0x18 -> +8) on wipeout ground enter.
-82BE75B0	guess_PhysWipeoutGround_ResetBodiesB	guess: second body record loop (0x60 stride, 2.0 and 0.5 constants) on wipeout ground enter.
-82BE76B0	guess_PhysWipeoutGround_ResetBodiesC	guess: third vector body step on wipeout ground enter.
+82BE74C8	PhysWipeoutGround_RemoveNormalVelocity	crates/skate-core/src/player/wipeout_state/body.rs:16 (82BE74C8: upper parts keep a tenth of the normal component, lower parts zero it)
+82BE75B0	PhysWipeoutGround_BlendVelocity	crates/skate-core/src/player/wipeout_state/body.rs:27 (82BE75B0 then 82BD41B0: average with the requested velocity and limit distance)
+82BE76B0	PhysWipeoutGround_LimitVelocity	crates/skate-core/src/player/wipeout_state/body.rs:38 (82BE76B0 limit_velocity)
 82BE7788	Skeleton_ApplyDisplacementToPart	retail name ApplyDisplacementToPart per our notes
 82BE7860	SkeletonBody_InitAttribData	rusty-trucks/crates/skate-core/src/physics/skeleton_body/drives.rs:23 (InitAttribData 82BE7860 applies CollisionDriveScalar to each part); run-47 b13.txt: long run of Attrib_GetField reads into +0xBE0..+0xC00 and the...
 82BE8140	guess_SkeletonBody_HandleMessage	slot 8 of the SkeletonBody secondary vtable (this - 0xC): switches on a message kind (0x10 pose update into the bone table, 0x12 a list)
@@ -24245,7 +24247,7 @@
 82BFC038	guess_SessionMarker_PointInZoneIndex	Guess: shape test of a point, returns the marker index.
 82BFC1E8	guess_SessionMarker_ReadZoneFields	Guess: reads zone fields 0xE64C980EE2114070 and 0x59E1F2B3CDC4E658 of the record at +0x120.
 82BFC378	guess_SessionMarker_ZoneFieldsTest	Guess: tests the zone shape and reads fields 0xE64C980E and 0x59E1F2B3.
-82BFC550	guess_SessionMarker_ZoneListTest	Guess: walks the zone list from +0x60 (count at +0x74).
+82BFC550	Checkpoint_PopBest	crates/skate-core/src/player/respawn.rs:153 (82BFC550 pop_best: descending score, newest wins ties, the selected entry is removed)
 82BFC718	guess_SkaterActor_CopyMarkerXform	Guess: when the list is empty stores the marker index at +0x40 and copies the transform.
 82BFC828	guess_Checkpoint_SelectManual	Guess: rusty-trucks/crates/skate-core/src/player/respawn.rs:176 (manual / session marker selection 82BFC828 with its own history walk)
 82BFC9B0	Checkpoint_SelectAutomatic	crates/skate-core/src/player/respawn.rs:175 (82BFC9B0, used by automatic actor reset 82592518)
@@ -24336,26 +24338,26 @@
 82C02388	Board_DynamicWheelNormal	crates/skate-core/src/physics/board_dynamic_normal.rs:1 (dynamic wheel response normal, original TU3 82C02388)
 82C02840	PhysicalPlayerHiLOD_CalcGroundPosition	crates/skate-core/src/player/input_phase/runtime.rs:45 (fn calculate_ground_position_82c02840()
 82C02A80	Skateboard_FillPhysOut	b3: arg is the Skateboard (field +0xC body transform +0x240)
-82C03638	guess_SpeedWobble_UpdateSpeedWobble	Guess: rusty-trucks/crates/skate-core/src/riding/speed_wobble.rs:2 (UpdateSpeedWobble 82C03638 supplies the selected mode attributes and body inputs; class not stated)
+82C03638	SpeedWobble_UpdateSpeedWobble	crates/skate-core/src/riding/speed_wobble.rs:2 (UpdateSpeedWobble 82C03638)
 82C03718	Skateboard_ApplyQueuedForces	research/skate3clone-findings.md:171 (force consumer 0x82C03718, 48 byte records, torque arm DeckForceYOffset 0.05)
 82C03940	guess_PhysWipeoutGround_InitFromSkeleton	guess: wipeout ground enter step reading the skeleton record (+0xC -> +0x18 -> +8 -> +0x4C).
 82C03AF8	Skateboard_SetStandard	crates/skate-core/src/player/offboard/board_possession/lifecycle.rs:24 (82C03AF8 clears 8384 bit 7, enables selected volumes)
 82C03B50	Skateboard_Serialize	slot 3 of Skateboard: visits +0x20 (82453540), then hashes the 12-byte vectors at +0x60, +0x70, ... (stride 0x10, at least to +0xB0) into the visitor's running hash (+0x10 times 0x21 plus each), same pattern as the physics state Serialize slots
 82C03EF0	Board_AppendForce	crates/skate-core/src/physics/force_queue.rs:1 (board force delivery: TU3 append 0x82C03EF0)
-82C03F98	guess_Board_ApplyWorldSpaceForceToDeck	Guess: rusty-trucks/crates/skate-game/src/physics/grind/board.rs:1 (BoardRuntime adaptation of AddWorldForce 82C03F98)
+82C03F98	Board_ApplyWorldSpaceForceToDeck	crates/skate-core/src/riding/ground_correction_math.rs:155 (ApplyWorldSpaceForceToDeck 82C03F98, moment arm from the deck)
 82C040F0	Board_TruckTargets	crates/skate-core/src/riding/steering.rs:1 (TU3 steering tilt 0x82D92440 and truck targets 0x82C040F0)
 82C04168	Board_SetVelocity	research/b194-spawn-push-bump.md:15 (spawn push 82C04168 writes the given xyz into every body +0x20, linear velocity; code)
-82C041C0	guess_PhysAir_VecStepB	Vector air step using the state +0x130
-82C04270	guess_PhysAir_VecStepC	Vector air step using a value from the object slot 4
+82C041C0	PhysBoardAnim_ApplyBlend	crates/skate-core/src/physics/board_animation.rs:54 (82C041C0 returns the target unchanged while inactive, else evaluates the slow / fast graph once; module: board animation blend 82C01878)
+82C04270	PhysBoardAnim_SetTargetVelocity	crates/skate-core/src/physics/board_animation.rs:118 (82C04270: target compared with the deck body COM, all seven board bodies get this XYZ velocity)
 82C04368	guess_Board_ErrorCapture	Guess: rusty-trucks/crates/skate-core/src/physics/board_animation.rs:1 (board error capture 82C04368)
 82C04708	HookDrive_EnableAnimationSoft	rusty-trucks/crates/skate-core/src/physics/hook_drive/mod.rs:36 (82C04708 with its inline linear enable and the 82C0D5C0 call); run-47 b19.txt: flag +0x122, linear soft constants, then 82C0D5C0; caller SkateboardContr...
 82C047F0	Manual_CalcManualEffect	crates/skate-core/src/physics/manual/controller.rs:1 (CalcManualEffect 82C047F0 control / scalar response)
 82C04F68	Skateboard_UpdateSpeedModel	rusty-trucks/crates/skate-core/src/riding/speed_model.rs:1 (TU3 Skateboard::UpdateSpeedModel 82C04F68, ground force tag 6)
 82C055F0	guess_Skateboard_ResyncBodyTransform	Guess: b3: Skateboard arg; reads the body +0x240 transform as a matrix and feeds it back through guess_SkateboardBody_VecStep
 82C05658	HookDrive_EnableAngularOnly	rusty-trucks/crates/skate-core/src/physics/hook_drive/mod.rs:49 (complete 82C05658: animated flag, angular soft, then linear hard / zero); run-47 b19.txt: sets the flag +0x122, calls 82C0D5C0, clears the linear block;...
-82C056B0	guess_PhysicsGround_ApplyPartXforms	Guess: builds two matrices and applies six part transforms.
+82C056B0	PhysicsGround_BoardPathApproach	crates/skate-core/src/riding/grounded/state/board_path.rs:93 (82C056B0: current moved toward target by min of gain step and max; ground board path 82C05EC0); decompile: run-59/d4.txt reads the part transform and sets...
 82C05868	guess_AIRecord_VelocityStep	Guess: rusty-trucks/crates/skate-core/src/living_world/ai_record.rs:88 (flag bit 28 step (82C05868: up to 0.2 m/s per tick toward the recorded skaters velocity))
-82C05988	guess_PhysicsGround_YawStepToward	Guess: rusty-trucks/crates/skate-core/src/riding/grounded/state/board_path.rs:108 (82C05988: the yaw step (radians) toward forward in the ground frame)
+82C05988	PhysicsGround_BoardPathYawStep	crates/skate-core/src/riding/grounded/state/board_path.rs:108 (82C05988: the yaw step toward forward in the ground frame); decompile: run-59/d4.txt signed angle, sin cos, SkateboardBody_SetTransform
 82C05D78	guess_PhysFollowPath_VecStep	guess: vector step called from PhysState_FollowPath_Update.
 82C05EC0	PhysicsGround_ApplyPostPhysicsFlags	Post-physics step of the ground state: by bits of the body flags (+0x130)+0x6F0 calls 82C056B0 (bit 30, block +0x680), 82C05868 (bit 28, block +0x690) and 82C05988 (bit 29, block +0x670).
 82C05F50	guess_Skateboard_SkateboardReset	Guess: b3: Skateboard arg (+0xC body, +0x130 PPI); steps the body to the given matrix (mirrored when PPI +0x9A4 0x100000), Board_ResetBoardBody, clears +0x100 / body +0x1E00 / +0x1E04 and the feet-on-board byte +0x122
@@ -24385,7 +24387,7 @@
 82C0A510	guess_SkateboardBody_ReadField3322	Guess: reads Attrib field 0x332284C4E878A7C5; called twice by guess_SkateboardBody_InitD76D
 82C0A6F8	guess_SkateboardBody_TruckMassInput	Guess: rusty-trucks/crates/skate-core/src/physics/construction/board_parts.rs:1 (wheel / truck mass input producers 82C0AA78 and 82C0A6F8)
 82C0AA78	SkateboardBody_WheelMassInput	crates/skate-core/src/physics/construction/board_parts.rs:57 (doc line names the address; next port fn wheel_mass_input)
-82C0ADF0	guess_SkateboardBody_InitializeTransforms	Guess: rusty-trucks/crates/skate-core/src/physics/construction/authored_transforms.rs:1 (authored seven part matrices passed to Part::SetTransform by TU3 82C0ADF0)
+82C0ADF0	SkateboardBody_InitializeTransforms	crates/skate-core/src/physics/construction/authored_transforms.rs:1 (authored seven part matrices passed to Part::SetTransform by TU3 82C0ADF0)
 82C0B2C8	SkateboardBody_SetTransform	crates/skate-core/src/physics/board_pose.rs:1 (//! Complete TU3 board SetTransform 82C0B2C8 and its part/pose dependencies.)
 82C0B560	guess_SkateboardBody_InitGrid	Guess: sets up a 7 by 7 bit grid.
 82C0B770	Board_CreateDrives	retail name CreateDrives per our notes
@@ -24480,7 +24482,7 @@
 82C12050	StateGraph_LoadCached	Builds "data\%s" from a graph name (slashes to backslashes), hashes it (String_HashPjw) and returns the cached root state; parses the file on a miss or when forced and stores it in the cache.
 82C12260	StateGraph_BuildPathFromRoot	Recursive: appends the parent chain (+0x18) of a state, root first, stopping at the given state.
 82C122E8	StateGraph_FindCommonAncestor	Builds root-to-state paths for two states and returns the last state they share; the shared prefix goes to the output list.
-82C12438	guess_StateGraphParser_ParseOperator	Guess: rusty-trucks/crates/skate-core/src/graph/expression.rs:5 (ParseOperator 82C12438: case sensitive strings, zero for missing)
+82C12438	StateGraphParser_ParseOperator	crates/skate-core/src/graph/expression.rs:5 (ParseOperator 82C12438: case sensitive strings, zero for missing)
 82C12508	ExpressionOperator_GetActivationMasked	rusty-trucks/crates/skate-core/src/graph/expression.rs:1 (TU3 ExpressionOperator::GetActivationMasked 82C12508)
 82C126F0	SGCondition_PhysicsSpeedAndSlopeCompare_Ctor	Condition ctor: SGConditionBase_Ctor, vtable 82321F08, +0x1C = 1, +0x20 = 0.0, +0x24 = 0, then reads its options from the attribute reader (strings 820C427C, 820C42E4, ...); called by SGCondition_Create_PhysicsSpeedAndSlopeCompare.
 82C12A78	guess_SGConditionFloat_Check	Guess: slot 12 shared by every float camera condition vtable: reads the value from slot 13 and compares it (guess_SGCondition_CompareValue sits next)
@@ -24647,7 +24649,7 @@
 82C1DA68	Observatory_RewardData_Serialize	Writes the Observatory::RewardData section (version 1) with six words from +4..+0x18
 82C1DB60	ObservatoryRewardData_Load	Reads the save section named Observatory::RewardData (version 1): five words into +4..+0x14
 82C1DC80	guess_ChallengeStatus_ReleaseCollections	Guess: releases the attrib collection of each 0x18 byte entry
-82C1DCE0	guess_Career_FireArmedActions	Guess: rusty-trucks/crates/skate-core/src/career/mod.rs:153 (armed actions whose conditions now hold leave the armed list (82C1DCE0))
+82C1DCE0	Career_FireArmedActions	crates/skate-core/src/career/mod.rs:153 (the armed actions whose conditions now hold leave the armed list, 82C1DCE0)
 82C1DD80	guess_U64Map_LowerBound	Tree lower bound on a 64 bit key at node +0x10
 82C1DE68	guess_U64Map_InsertHint	Guess: hinted rb tree insert (unsigned 64 bit key).
 82C1DF88	guess_U64Map_InsertUnique	Guess: rb tree insert of a 64 bit key when not present.
@@ -24678,7 +24680,7 @@
 82C21558	guess_GrindGeometryAnalyzer_VectorStep	Guess: b8: only caller 82C20C08; wraps guess_BipedAir_VectorStep
 82C216A0	guess_GrindGeometryAnalyzer_PickResultCode	Guess: b8: only caller 82C20C08; writes a code word (4, 0xB or a 7 bit id from +0x70 / +0x130) by comparing candidate heights
 82C21828	GrindSurface_TiltedNormal	crates/skate-core/src/air/trajectory/grind_surface/orientation.rs:3 (doc line names the address; next port fn tilted_normal)
-82C21930	guess_GrindSurface_CompleteLanding	Guess: rusty-trucks/crates/skate-core/src/air/trajectory/grind_surface/landing.rs:1 (original 82C21930 after six query completion); run-47 b19.txt: builds a GrindGeometryAnalyzer, analyzes, then the tilted normal 82C21828; o...
+82C21930	GrindSurface_CompleteLanding	crates/skate-core/src/air/trajectory/grind_surface/landing.rs:1 (original S3 TU3 82C21930 after six query completion)
 82C21D78	guess_GrindData_PtrVectorInsert	Guess: Pointer vector insert at a position (grows by doubling, alloc tag 0x38)
 82C21F00	guess_ResourceLoad_FormatPath	Guess: formats a resource path from a 6 entry kind table (marquee first).
 82C21FA0	guess_PhysicalPlayerHiLOD_FormatDebugName	Guess: Formats a short id and then a 0x40 byte debug name.
@@ -24995,7 +24997,7 @@
 82C3EC48	guess_LWVehicleRoute_EvalTwoSplinePoints	Guess: evaluates spline position and tangent twice on the spline at +0x10 (two route points).
 82C3ED90	guess_LWVehicleRoute_EvalTwoLanePoints	Guess: two points at distance on a road shape, each with spline position and tangent.
 82C3EEE8	guess_LWVehicleActor_RouteStepA	Guess: vector route step.
-82C3F0C8	guess_LWVehicle_LaneChangeCurveFrame	Guess: rusty-trucks/crates/skate-core/src/living_world/traffic/follow.rs:187 (on the lane change curve while it runs (82C3F0C8))
+82C3F0C8	LWVehicle_LaneChangeCurveFrame	crates/skate-core/src/living_world/traffic/follow.rs:187 (the car is drawn on the lane change curve while it runs, sub_82C3F0C8)
 82C3F1D8	guess_LWVehicleActor_EvalLaneAtDistance	Guess: point at distance on the road shape +0xEC of the current lane, then position and tangent of spline +0xF0.
 82C3F348	guess_LWVehicleActor_RouteStepB	Guess: vector route step.
 82C3F540	guess_TrafficMover_BuildPassageArc	Guess: rusty-trucks/crates/skate-core/src/living_world/traffic/follow.rs:583 (the passage starts in 82C3A9E0 / 82C3F540); run-47 b19.txt: route step then RoadShape_BuildArcLengthTable into +0xE98; callers are the vehicle tra...
@@ -25011,7 +25013,7 @@
 82C414A8	Traffic_SkaterScan	research/npc/b36-traffic-v4-driver.md:86 (## 7. Skater scan sub_82C414A8 [code])
 82C41810	guess_LWCensus_QueueEntitiesBody	Guess: run-35 b8: queues living world entities through guess_LWManager_QueueEntityOnce / guess_LWSubsystems_CallSlot18 / 1C; called by the census rings (826B7530 / 826B7760, b3); not SkaterMgr
 82C41A90	Traffic_PointInQuad	crates/skate-core/src/living_world/traffic/obstacles.rs:85 (sub_82C41A90: point in the convex quad, ground plane)
-82C41BD0	guess_Traffic_RecordTouchesQuadEdge	Guess: rusty-trucks/crates/skate-core/src/living_world/traffic/obstacles.rs:101 (82C41BD0: the record touches the quads left, front or right edge)
+82C41BD0	Traffic_RecordTouchesQuadEdge	crates/skate-core/src/living_world/traffic/obstacles.rs:101 (sub_82C41BD0 with the 82C41A90 fallback: the record touches the left, front or right quad edge)
 82C41CD0	Traffic_ManeuverDecider	crates/skate-core/src/living_world/traffic/follow.rs:454 (the maneuver decider sub_82C41CD0)
 82C42348	guess_Traffic_DriverHornChance	Guess: rusty-trucks/crates/skate-core/src/living_world/traffic/horn.rs:25 (driver bit 0x01 chance (82C42348))
 82C424F0	guess_LWVehicleActor_AllocObstacle	Guess: vehicle actor slot 19: takes an element from store 1 of the vehicle memory man ("Vehicle Obstacle MemStore").
@@ -25132,7 +25134,7 @@
 82C47D60	guess_PedNav_IsPolyCostHigh	Guess: research/b653-nav-snap-window.md:23 (82C47D60 is true when max(cost nibbles of poly +0x2C) >= 2); run-51 b25.txt: true when the handle +0x20 is invalid, else guess_NavMesh_MaxAreaCost - 1.0 > 82063A48
 82C47DE8	SortedVectorU32_InsertUnique	Binary-searches a sorted vector of 32-bit values and inserts the value when it is not present.
 82C47EE0	SortedVectorU32_Erase	Binary-searches a sorted vector of 32-bit values and erases the match; returns 1 when found.
-82C47FC8	guess_LWDynObjActor_MulVectors	Guess: run-35 b6: LW dynamic object actor unit (between LWDynamicObjectMan 82C4A..82C4C and LWDynObjActor 82C4E7B8): Attrib class CCB7, guess_DMO_AddWaypoint, PhysicsFactory release, AI channel shutdown; not trick patterns
+82C47FC8	PhysMass_DmoBoxInertia	crates/skate-core/src/physics/mass.rs:262 (inertia fill for a DMO body 82C4E568, box inertia 82C47FC8)
 82C480B0	Vt82323040_DeletingDtor	Sets vtable 82323040, releases the Attrib collection +0x1C, base dtor, frees when flag bit 1
 82C48138	guess_LWEntity_DeletingDtorA	Guess: Deleting destructor shape (default allocator, flag bit 1).
 82C48198	guess_LWEntity_DeletingDtorB	Guess: Runs EntityComponent_DtorBody and frees the object when flag bit 1 is set.
@@ -25192,7 +25194,7 @@
 82C4B120	guess_LWDynamicObjectMan_CollectArea	Guess: collects objects of an area into two lists.
 82C4B2D0	guess_LWDynamicObjectMan_CollectTwoLists	Guess: looks entities up in part F4F0 and inserts them in two vectors (+0 and +0x110).
 82C4B578	guess_LWDynamicObjectMan_IsEntityIdle	Guess: Entity from slot 0x14; true when its slot 0x70 returns 0
-82C4B5F0	guess_LWDynamicObjectMan_ResetObject	Guess: rusty-trucks/crates/skate-game/src/physics.rs:469 (reset one object, cMsgResetDMO: 8289A048 -> 82C4B5F0 -> 82C4B780)
+82C4B5F0	LWDynamicObjectMan_ResetObject	crates/skate-game/src/physics.rs:469 (reset one object, cMsgResetDMO 8289A048 -> 82C4B5F0 -> 82C4B780)
 82C4B780	LWDynamicObjectMan_ResetObjectBody	crates/skate-game/src/physics.rs:469 (reset one object, cMsgResetDMO: 8289A048 -> 82C4B5F0 -> 82C4B780)
 82C4B8C0	LWDynamicObjectMan_StartSelfRighting	research/report-upright.md:5 (start 82C4B8C0, manager slot +40; code)
 82C4B960	guess_LWDynamicObjectMan_GetPartXformById	Guess: Looks up an id in map +4 and returns the part matrix of that actor
@@ -25201,7 +25203,7 @@
 82C4C370	guess_LWDynamicObjectMan_ForwardSlot54ById	Guess: Finds an actor by id and calls its slot 0x54
 82C4C3E0	guess_LWDynamicObjectMan_ForwardByIdB	Guess: Finds an actor by id and forwards a call (sibling of 82C4C370)
 82C4C450	guess_LWDynamicObjectMan_ActivateIfOwner	Guess: Calls actor slot 0x78(1) when the owner at +0x3A90 matches the argument
-82C4C4E0	guess_LWDynamicObjectMan_GrindRailProvider	Guess: rusty-trucks/crates/skate-game/src/grind_world/props.rs:1 (grind rails carried by DMOs (provider 82C4C4E0))
+82C4C4E0	LWDynamicObjectMan_GrindRailProvider	crates/skate-game/src/grind_world/props.rs:1 (grind rails carried by DMOs, provider 82C4C4E0)
 82C4C7B0	guess_LWDynamicObjectMan_DebugDraw	Guess: Draws debug lines for every actor
 82C4C948	guess_LWDynamicObjectMan_TestPlacementFlags	Guess: Placement test with flag bits 1..6 (vehicles, peds, obstacles)
 82C4CDF8	guess_LWDynObjActor_WalkPartMap	Guess: run-35 b6: LW dynamic object actor unit (between LWDynamicObjectMan 82C4A..82C4C and LWDynObjActor 82C4E7B8): Attrib class CCB7, guess_DMO_AddWaypoint, PhysicsFactory release, AI channel shutdown; not trick patterns
@@ -25776,10 +25778,10 @@
 82C75148	guess_Volume_ContainsObject	With a 128 entry stack list collects and tests volume members
 82C752A8	Objective_Evaluate	objective evaluate (adds points)
 82C75400	guess_Objective_EvaluateComplete	Locks (+0x638 slot 2), tests completion (82C75EC8 on +0xC) and sets the objective state to 8 when complete; returns -2 or -1.
-82C75490	guess_Objective_PickFailureRow	Guess: rusty-trucks/crates/skate-core/src/challenges/objectives.rs:138 (FailureObjectivesWithEvents (82C75490): the first row whose predicate holds)
-82C755B8	guess_Objective_PickHintRow	Guess: rusty-trucks/crates/skate-core/src/challenges/objectives.rs:142 (HintObjectives (82C755B8): the first row whose predicate holds)
+82C75490	Objective_PickFailureRow	crates/skate-core/src/challenges/objectives.rs:138 (the objective failure rows FailureObjectivesWithEvents, 82C75490)
+82C755B8	Objective_PickHintRow	crates/skate-core/src/challenges/objectives.rs:142 (the objective hint rows HintObjectives, 82C755B8: the first row whose prerequisites hold)
 82C75690	Objective_PointsValid	retail name PointsValid per our notes
-82C75740	guess_Objective_ActivateRows	Guess: rusty-trucks/crates/skate-core/src/challenges/objectives.rs:247 (its activation (82C75740))
+82C75740	Objective_ActivateRows	crates/skate-core/src/challenges/objectives.rs:247 (its activation 82C75740 on reset)
 82C75850	guess_Objective_UpdateState	guess: switch on the objective state +0x4F8; state 1 moves to 4 or 2 depending on the record from 82C5FA58 (+0x610).
 82C75960	guess_Objective_BuildSequenceNodes	Guess: allocates sequence nodes from the pools at +0x6AC and +0x8E4.
 82C75B38	Objective_SuspendVars	research/b871-initvars.md:77 (suspend: 82E92DB0 with obj+0x63C, clears +0x10 / +0x8C, releases +0xC / +0x88, runs 82C760B8 on +0x108 / +0x198 / +0x228, clears +0x631); run-51 b11.txt shows the same offsets
@@ -27091,7 +27093,7 @@
 82D079B8	guess_FileRequest_DeletingDtor	Guess: finishes the file request and frees itself when asked
 82D07A20	guess_FileRequest_FinishAndFree	Guess: Waits for the file request, completes it, frees its inline vector and the request.
 82D07B18	guess_FE_ChildScreen_Update	Guess: Child screen update by its state +0x18.
-82D07C40	guess_Credits_ParseFile	Guess: rusty-trucks/crates/skate-core/src/credits.rs:26 (parse a credits file (82D07C40))
+82D07C40	Credits_ParseFile	crates/skate-core/src/credits.rs:26 (parse a credits file, 82D07C40)
 82D08010	guess_GameApp_InitLanguage	Guess: reads the language setting and caches the localised strings.
 82D08278	guess_FE_MenuAction_Reset	Guess: Initializes the menu action and resets its table.
 82D08330	guess_FE_MenuAction_FindById	Guess: Looks the action id up in the table 82FCA4D4 and stores its value in 82FDE28C.
@@ -27296,7 +27298,7 @@
 82D14650	guess_MusicSystemBase_Ctor	First call of MusicSystem_Ctor; sets vtable 82326B00 and clears 16 slots.
 82D14728	guess_MusicSystemBase_DeletingDtor	Guess: runs guess_Vt82326B00_Dtor then frees when bit 0 is set (next to guess_MusicSystemBase_Ctor)
 82D14790	guess_Vt82326B00_Dtor	Guess: Stores vtable 82326B00, clears global 8308541C and frees the array +0x3E8..+0x3F0 through the world heap.
-82D147F8	guess_Playlist_GetSongInfo	Guess: rusty-trucks/crates/skate-game/src/music_player_host.rs:272 (GetSongInfo (82D147F8): artist, title, album of song id)
+82D147F8	Playlist_GetSongInfo	crates/skate-game/src/music_player_host.rs:272 (GetSongInfo sub_82D147F8: artist, title, album of a song id)
 82D14958	guess_AudioPath_MsgCallback	Guess: callback registered with the audio path manager by AudioPath_InitSystem
 82D14A30	guess_Playlist_FindSongByName	Walks the song records (count +0x1E0, names from +0x20) comparing with a name
 82D14B00	guess_Playlist_FindSongIndexById	Guess: run-35 b1: fills a list with guess_Playlist_FindSongByName and returns the index of the matching id, else -1
@@ -27540,7 +27542,7 @@
 82D29988	guess_ChallengeRunner_FieldKindMinus23	Guess: reads Attrib field 0x02B828CCDB4785E4 and subtracts 0x23.
 82D299F8	guess_NamedNode_Reset	Guess: clears +0x10 / +0x14, sets name "#" at +0x19, calls vtable +0x10 and resets flags +0x9C..+0xA5
 82D29B60	TutorialCallout_WriteInstruction	crates/skate-core/src/challenges/callout.rs:57 (doc line names the address; next port fn write)
-82D29C38	guess_ChallengeRunner_SortPickList	Guess: rusty-trucks/crates/skate-game/src/challenges.rs:212 (create a spot ones last in query order, the others reversed (82D29C38))
+82D29C38	ChallengeRunner_SortPickList	crates/skate-game/src/challenges.rs:212 (82D29C38, b851: create a spot rows last in query order, the others before them in reverse)
 82D29D48	guess_ChallengeRunner_IntroLoopByField	Guess: introsort loop by Attrib field 0x02B828CCDB4785E4.
 82D29EF8	guess_ChallengeRunner_InsertionSortByField	Guess: insertion sort by Attrib field 0x02B828CCDB4785E4.
 82D29FB0	guess_ChallengeRunner_PartitionByField	Guess: partitions a range by Attrib field 0x02B828CCDB4785E4.
@@ -27657,7 +27659,7 @@
 82D341D0	PhysState_PhysicsAir_Ctor	Constructor of class 'PhysState_PhysicsAir': called on the new block right after guess_Mem_AllocNamed with that tag (in 82DB18A0).
 82D342F8	PhysState_OffBoardPushing_DeletingDtor	slot 0 of the OffBoardPushing physics state vtable 82327364 (slots 4..11 are the named OffBoardPushing Enter / Exit / GetName / WriteOutputs / UpdatePostPhysics / Serialize): releases the Attrib refs +0x34 and +0x24, sets the base vtable 823270D8, frees on flag bit 0
 82D34388	PhysState_PhysicsAir_Enter	slot 4 (Enter) of the PhysState_PhysicsAir vtable
-82D34570	guess_PhysState_PhysicsAir_SnapshotBody	Guess: run-35 nb list: inside the PhysState_* state block 82D3; one tag per state family
+82D34570	PhysState_PhysicsAir_ComLaunchHelper	crates/skate-core/src/air/state/update.rs:1 (TU3 PhysicsAir Update 0x82D346C0 and COM launch helper 0x82D34570); air/state/runtime.rs:9 (272 byte trajectory launch record)
 82D346A0	PhysState_PhysicsAir_Exit	slot 5 of vtable 823271DC
 82D346C0	PhysState_PhysicsAir_Update	slot 2 (Update) of the PhysState_PhysicsAir vtable
 82D34AB0	PhysState_PhysicsAir_BoardUpdate	crates/skate-core/src/air/state/board.rs:1 (TU3 PhysicsAir board update 0x82D34AB0; old name UpdateFootContacts)
@@ -27696,7 +27698,7 @@
 82D37B20	PhysState_PhysicsGround_Exit	slot 5 of vtable 82327244
 82D37C50	PhysState_PhysicsGround_PreUpdate	run-37 vt1 + b10: slot 1 of the PhysicsGround vtable, the slot that is Physics_PreUpdate in Biped_Ground; copies the state under the lock (82D38018) and clears +0xAAA
 82D37C88	PhysState_PhysicsGround_Update	slot 2 (Update) of the PhysicsGround state vtable 82327244; calls PhysicsGround_UpdateSkateboard
-82D37F38	guess_PhysState_PhysicsGround_StepSlot3	slot 3 of PhysicsGround (called each frame by PhysicalPlayerHiLOD_CallStateSlot3): board sim step 82D613B0 / 82D633B0, then 82BDF530 and 82C04368
+82D37F38	guess_PhysState_PhysicsGround_UpdateWithHandPlant	Guess: crates/skate-game/src/physics/handplant.rs:133 (Ground 82D37F38 consumes the hand plant candidate query before its shared skeleton update); decompile: run-59/d3.txt HandPlant_Launch, FourLimbIK, Skeleton_PublishGround...
 82D38018	guess_PhysState_PhysicsGround_CopyStateLocked	Guess: copies the ground state and writes a word under the physics lock; called by 82D37C50
 82D380E8	guess_PhysState_PhysicsGround_CopyState	Guess: copies a state block.
 82D38430	PhysState_PhysicsGround_ContactLeaf	crates/skate-core/src/riding/grounded/state/contact_state.rs:1 (ground contact identity / update leaf 82D38430)
@@ -27726,17 +27728,17 @@
 82D3B5E8	PhysState_WipeoutGround_Enter	slot 4 (Enter) of the PhysState_WipeoutGround vtable
 82D3B990	PhysState_WipeoutGround_Exit	slot 5 of vtable 82327278
 82D3B9C8	PhysState_WipeoutGround_Update	slot 2 (Update) of the WipeoutGround state vtable 82327278; runs the wipeout ground steps, the recover check and the anim mode set
-82D3C2B0	guess_PhysState_WipeoutGround_CheckBoardVelocity	Guess: run-35 nb list: WipeoutGround state block 82D3
+82D3C2B0	PhysState_WipeoutGround_ResponseNormal	crates/skate-core/src/player/wipeout_state/response.rs:4 (82D3C2B0 response_normal: only upward collision and prediction normals are accepted)
 82D3C3F8	guess_WipeoutGround_ApplyControlProfile	Guess: rusty-trucks/crates/skate-core/src/player/wipeout_state/profiles.rs:1 (the five authored physics_wipeout_control profiles and original 82D3C3F8)
 82D3C770	Wipeout_AlignUpAxis	crates/skate-core/src/player/wipeout_state/orientation.rs:1 (original Wipeout alignment 82D3C770: Euler X / Y degrees -> rotated up axis)
-82D3C928	guess_WipeoutGround_Drift	Guess: rusty-trucks/crates/skate-core/src/player/wipeout_state/profiles.rs:53 (original 82D3C928 is fn drift: after the air rotational control, keeps body velocity W, steers by drift_sideways)
+82D3C928	WipeoutGround_Drift	crates/skate-core/src/player/wipeout_state/profiles.rs:53 (original 82D3C928 drift, after air rotational control)
 82D3CB50	Wipeout_ProfileAirRotation	crates/skate-core/src/player/wipeout_state/control_profile_air.rs:1 (original profile driven Wipeout air rotation 82D3CB50)
 82D3D660	Wipeout_ContactControl	crates/skate-core/src/player/wipeout_state/control_ground.rs:1 (original Wipeout contact control 82D3D660)
 82D3DD40	guess_Wipeout_AltAirControl	Guess: rusty-trucks/crates/skate-core/src/player/wipeout_state/control_air.rs:1 (original alternate air control 82D3DD40)
 82D3E348	Wipeout_RetainedVelocityA	crates/skate-core/src/player/wipeout_state/response.rs:1 (//! Original Wipeout response82D3E678 and retained-velocity82D3E348/82D3E8C0.)
 82D3E478	guess_PhysState_WipeoutGround_StepD	Guess: reads +0x1B0..+0x23F; called by 82D3B9C8
 82D3E5E8	guess_PhysState_WipeoutGround_GetRecoverDelay	Guess: run-35 nb list: next to PhysState_WipeoutGround_RecoverCheck 82D3E678
-82D3E678	guess_Wipeout_Response	Guess: rusty-trucks/crates/skate-core/src/player/wipeout_state/response.rs:1 (original Wipeout response 82D3E678)
+82D3E678	Wipeout_Response	crates/skate-core/src/player/wipeout_state/response.rs:1 (original Wipeout response 82D3E678)
 82D3E8C0	guess_PhysState_WipeoutGround_ApplyPendingBodyW	Guess: b12.txt: when flag +0x1E8 is set, writes the w lane of +0x1C0 into 23 ragdoll bodies (0x60 stride, +0x20 vector), clears the flag and resets +0x1B0
 82D3E980	PhysState_WipeoutGround_ShouldExit	research/b810-npc-respawn-delay.md:43 (82D3E980 tests +0x9A8 bit 0x10000000 and compares the wipeout time; code)
 82D3EAE0	PhysState_WipeoutGround_Recovery	crates/skate-core/src/player/wipeout_state/recovery.rs:1 (original recovery 82D3EAE0, request 82D3E980, scalar 82D3E5E8 and post 82D3ED30)
@@ -27751,7 +27753,7 @@
 82D3F710	PhysStateGrind_SetWheelCollisionBytes	crates/skate-game/src/physics/grind/lifecycle.rs:48 (82D3F710: wheel collision bytes 844..847)
 82D3F7D0	PhysState_SetPartAngularDrag	crates/skate-game/src/physics/grind/lifecycle.rs:56 (82D3F7D0 SetPartAngularDrag)
 82D3F850	PhysStateGrind_ExitNudge	crates/skate-core/src/physics/grind_forces/release.rs:1 (exit nudge 82D3F850)
-82D3FA18	guess_PhysStateGrind_ApplyCenterForce	Guess: Grind force: evaluates a 4 point curve (+0x220 / +0x230) of the distance from the rail center and applies it; near the center force debug strings
+82D3FA18	PhysStateGrind_ApplyLateralPin	crates/skate-core/src/physics/grind_forces.rs:25 (82D3FA18 lateral_pin, called by the 50-50 update 82D41D70 with 800, 0, 0.07)
 82D3FD08	guess_PhysState19x_ApplyForce50	Guess: Scales the vector at +0x50 by the argument times +0xAEC and applies it to the record at +0x70
 82D3FD88	PhysStateGrind_ApplyFrictionForce	crates/skate-core/src/physics/grind_forces.rs:59 (82D3FD88 after its surface / material selection damps velocity)
 82D3FFC0	guess_PhysState19x_ApplyUpForce	Guess: When +0x5E8 is above zero and the direction test passes, applies a fixed up vector to the record at +0x70
@@ -27835,7 +27837,7 @@
 82D43B90	PhysState_OffBoardPushing_Ctor	Constructor of class 'PhysState_OffBoardPushing': called on the new block right after guess_Mem_AllocNamed with that tag (in 82DB18A0).
 82D43D70	guess_PhysState_OffBoardPushing_EnterFrames	Guess: inits frames and reads field 0xB6730894F9DFE0B3.
 82D442D0	PhysState_OffBoardPushing_Enter	slot 4 (Enter) of the PhysState_OffBoardPushing vtable
-82D444A0	guess_PhysState_OffBoardPushing_EnterBody	Guess: computes a body frame and reads fields 0x57D37D696363167E and 0x1CECE1CC07C5CD94.
+82D444A0	PhysState_MoveObject_BindHeldRecord	crates/skate-core/src/player/offboard/move_object/held_record.rs:2 and :56 (82D444A0 with full: bind the held grab record and place the grip from the skater); decompile: run-59/d3.txt calls PhysState_MoveObject_HandPo...
 82D448D8	guess_PhysState_OffBoardPushing_EnterVecStep	Guess: Calls 82E09578 then a vector step on the enter direction
 82D449B8	PhysState_OffBoardPushing_Exit	slot 5 of vtable 82327364
 82D44A10	PhysState_OffBoardPushing_Update	slot 2 (Update, per run-4) of the OffBoardPushing physics state vtable 82327364; reads Attrib field 0xF081CA3EC9E51BFB of +0x24
@@ -27906,7 +27908,7 @@
 82D4D668	guess_PhysState_LandingOnDeck_PickContacts	Guess: picks a contact pair unless flag 0x1000 at +0x9B0.
 82D4D830	PhysState_LandingOnDeck_Exit	Slot 5 (Exit) of the LandingOnDeck state: resets the helper at +0x44 (82D78B28).
 82D4D838	PhysState_LandingOnDeck_Update	Slot 2 (Update) of the LandingOnDeck physics state vtable 82327468.
-82D4DD80	guess_LandingState_AccurateTime	Guess: rusty-trucks/crates/skate-core/src/player/offboard/landing_state.rs:129 (accurate_time from the physical toe volume positions 15 / 19, not IK targets)
+82D4DD80	LandingState_AccurateTime	crates/skate-core/src/player/offboard/landing_state.rs:129 (82D4DD80 accurate_time: actual physical toe volume positions)
 82D4DF08	PhysState_LandingOnDeck_UpdatePostPhysics	Slot 10 of the LandingOnDeck state.
 82D4DFC8	PhysState_LandingOnDeck_WriteOutputs	Slot 9 of the LandingOnDeck state: copies state results into PhysOut block 18 (OffBoard, +0x48): +0x14B, +0x98 and vectors from +0xB0.
 82D4E118	guess_PhysicsControllerData_Update	Guess: rusty-trucks/crates/skate-core/src/player/offboard/move_object.rs:10 (PhysicsControllerData 82D4E118: filtered PID whose output accumulates)
@@ -28274,7 +28276,7 @@
 82D67B50	guess_TrajectorSelector_ResetCurveFields	Guess: writes +0x888 / +0x890 / +0xB30 / +0x255C; called by guess_SkaterSim_WipeoutResetCurve
 82D67D08	guess_TrajectorSelector_ResetFields	Guess: b12: only caller 82D67848 (TrajectorSelector)
 82D682E8	TrajectorSelector_RecordTakeoffArc	research/npc-sim-air-bails.md:84 (recorded arc at takeoff 82D682E8 -> 82D67B50 / 82D67A00; code)
-82D68698	guess_TrajectorSelector_ReadCurveB	Guess: Attrib curve read; called by guess_SkaterSim_WipeoutResetCurve
+82D68698	TrajectorSelector_MaxTime	crates/skate-core/src/air/trajectory/launch.rs:216 (82D68698 max_time with the original -19.6 and -1/9.8 coefficients)
 82D68800	TrajectorSelector_Update	crates/skate-core/src/player/post_input.rs:72 (port fn update_trajectory_selector_82d68800)
 82D68AF0	guess_TrajectorSelector_StageBody	Guess: b12: callee of 82D68800 (TrajectorSelector, run 25 row)
 82D68C80	TrajectorSelector_CastRecordedArc	crates/skate-core/src/air/trajectory/launch.rs:88 (///9659: the recorded AI arc was cast (sub_82D68C80 then skips the grind lock and pass 2).)
@@ -28287,7 +28289,7 @@
 82D69F80	TrajectorySelector_CalculateGrindTrajData	research/skate3clone-findings.md:63 (TrajectorySelector::CalculateGrindTrajData 0x82D69F80); run-49 b5.txt: grind trajectory fields +0xBB0..+0xBC4 and the surface hit curve
 82D6A168	TrajectorSelector_TakeBestGrind	crates/skate-core/src/air/trajectory/grind/candidate.rs:166 (doc line names the address; next port fn take_best_grind)
 82D6A398	TrajectorSelector_ConsiderGrindPrimitive	crates/skate-core/src/air/trajectory/grind/candidate.rs:81 (doc line names the address; next port fn consider_grind_primitive)
-82D6A840	guess_TrajectorSelector_GrindAdmission	Guess: rusty-trucks/crates/skate-core/src/air/trajectory/grind/admission.rs:1 (original S3 82D6A840 admission)
+82D6A840	TrajectorSelector_GrindAdmission	crates/skate-core/src/air/trajectory/grind/admission.rs:1 (original S3 82D6A840 admission)
 82D6AF58	TrajectorSelector_PublishLanding	crates/skate-core/src/air/trajectory/grind/admission.rs:1 (//! Original S3 82D6A840 admission and82D6AF58 landing publication.)
 82D6B0C8	guess_TrajectorSelector_HashState	Guess: called with HiLOD +0x720 (TrajectorSelector) from 82DB9418; StateHasher visits of fields +0x780..+0xAE0
 82D6B818	AttribRef_GetField620EEA2E	Returns field 0x620EEA2E27A371A2 of the referenced Attrib record, or the default record 830D0850.
@@ -28298,11 +28300,11 @@
 82D6CC50	guess_OffboardTrajectorSelector_FlagsBody	Guess: b4 + b12 + d7: 82DB3C78 passes HiLOD +0x724, the 0x2140 byte OffboardTrajectorSelector block; uses +0x211C..+0x212C (run-32 ambiguous item resolved)
 82D6D020	guess_AirSelector_CandidateCompletion	Guess: rusty-trucks/crates/skate-core/src/player/offboard/air_completion.rs:1 (candidate completion / scoring 82D6D020)
 82D6D4D0	guess_PhysState_LandingSurfaceStep	Guess: surface hit test plus guess_PhysState_LandingTimerVec and AttribRef_GetField620EEA2E
-82D6DE08	guess_PhysState_Biped_Air_LandField	Guess: reads field 0x620EEA2E27A371A2 and runs the stage helper.
+82D6DE08	PhysState_Biped_Air_AdjustAnimation	crates/skate-core/src/player/offboard/air_prediction.rs:98 (82D6DE08 adjusts velocity at the current frame, then restores)
 82D6E018	BipedAir_DescendingWallQualify	crates/skate-core/src/player/offboard/air_prediction.rs:129 (82D6E018 is the original descending wall trajectory qualification)
 82D6E178	BipedAir_RecomputeArcToEnd	crates/skate-core/src/player/offboard/air_prediction.rs:135 (82D6E178 recomputes the 9.8 m/s2 arc to the same end point)
 82D6E3F8	BipedAir_PublishFrameResult	crates/skate-core/src/player/offboard/air_prediction.rs:1 (frame publication 82D6E3F8 of the result owner 82D6CC50)
-82D6E798	guess_BipedAir_BeginRequery	Guess: rusty-trucks/crates/skate-core/src/player/offboard/air_selector.rs:142 (begin_requery; the caller supplies the processed suppression flags)
+82D6E798	BipedAir_BeginRequery	crates/skate-core/src/player/offboard/air_selector.rs:142 (82D6E798 begin_requery)
 82D6E8A0	guess_OffboardTrajectorSelector_SurfaceCheck	Guess: b4 + d7: 82DB3C78 runs it on HiLOD +0x724 (OffboardTrajectorSelector) when +0x2133 is set
 82D6EA70	PhysState_Biped_Air_StateChecksum	research/b937-chain-flag.md:43 (88.cpp:35211  82D6EA70  read  other (B)  class B state hash / checksum over its fields  high [code] )
 82D6F440	guess_FootPlantManager_Reset	Guess: runs on the FootPlantManager block (tag FootPlantManager, HiLOD +0x72C)
@@ -28327,7 +28329,7 @@
 82D724E8	guess_GrindAirAdjust_TestCandidate	Guess: reads +0x948 / +0x94C / +0xA8C; called by 82D723D0
 82D72610	guess_GrindAirAdjust_ApplyAdjust	Guess: reads +0xA20 / +0xA30 / +0xA74 and writes the output; runs when +0xA70 = 1
 82D72810	guess_GrindAirAdjust_SteerStep	Guess: runs the two direction steps on +0x9C0 / +0xA74..+0xA88; called by guess_GrindAirAdjust_Update when +0xA70 = 1
-82D72B40	guess_GrindAirAdjust_ReadSettings	Guess: rusty-trucks/crates/skate-game/src/physics/grind_air_settings.rs:1 (stock GrindAirAdjust settings 82D72B40)
+82D72B40	GrindAirAdjust_ContactPoints	crates/skate-core/src/physics/grind_air/targets.rs:25 (82D72B40 contact_points: sine for tip height, unprojected tip length added to Z)
 82D73040	HeadTracking_Ctor	Constructor of class 'HeadTracking': called on the new block right after guess_Mem_AllocNamed with that tag (in 82BD7260).
 82D73128	guess_HandPlantManager_FrameAngleStep	Guess: acos angle step around guess_PhysState_HandPlant_FrameStep
 82D739D8	GrindJumper_Update	crates/skate-core/src/physics/grind_contact/manager.rs:124 (82D739D8: invalid investigation retains geometry)
@@ -28376,14 +28378,14 @@
 82D783A8	BipedAirFeet_EvaluateSupportMode	crates/skate-core/src/player/offboard/biped_air/feet.rs:50 (82D783A8: evaluate the old support mode before 82D77CE0 replaces it)
 82D785F8	BipedFeet_Fill	crates/skate-core/src/player/input_phase/types.rs:147 (BipedGround Fill 82D32D38 and shared Feet Fill 82D785F8)
 82D78668	guess_PhysState_Biped_Ground_SerializeVectors	Feeds three 0xC-byte vectors per pass (two passes from +0) to the serializer callback (+0x1C) and keeps a times-33 checksum in the serializer (+0x10); called by PhysState_Biped_Ground_Serialize.
-82D78B28	guess_LandingOnDeckManager_Reset	Guess: runs on the LandingOnDeckManager block (HiLOD +0x73C)
-82D78C38	guess_LandingDeck_CorrectTrajectory	Guess: rusty-trucks/crates/skate-core/src/player/offboard/landing_deck.rs:99 (correct_trajectory: keeps the native correction sign and positive frame guard)
+82D78B28	LandingOnDeckManager_Reset	crates/skate-core/src/player/offboard/landing_deck.rs:78 (82D78B28 reset: does not clear proposed +96 or the outstanding query)
+82D78C38	LandingDeck_CorrectTrajectory	crates/skate-core/src/player/offboard/landing_deck.rs:99 (82D78C38 correct_trajectory: keeps the native correction sign)
 82D78D30	guess_LandingOnDeck_AirAssistance	Guess: rusty-trucks/crates/skate-core/src/player/offboard/landing_deck/update.rs:1 (ordered Air assistance 82D78D30)
 82D78EE8	guess_LandingDeck_Trajectory	Guess: rusty-trucks/crates/skate-core/src/player/offboard/landing_deck/trajectory.rs:1 (original 82D78EE8 and its 82D60B98 / 82D60C80, 82D609E0, 82D60B00 arithmetic)
 82D792D0	guess_LandingOnDeck_IK	Guess: rusty-trucks/crates/skate-core/src/player/offboard/landing_deck/update.rs:1 (IK 82D792D0)
 82D79420	guess_LandingOnDeckManager_Fill	Guess: rusty-trucks/crates/skate-game/src/physics/offboard/landing_deck/output.rs:1 (complete 82D79420 writes into caller owned physical output fields)
 82D794A0	guess_LandingOnDeckManager_Update	Guess: rusty-trucks/crates/skate-core/src/player/offboard/landing_deck/update.rs:1 (manager Update 82D794A0)
-82D79948	guess_PhysState_BipedAir_ResetLandingBody	Guess: run-35 nb list: inside the PhysState_* block 82D79
+82D79948	PhysState_BipedAir_LandingObstructionRequest	crates/skate-core/src/player/offboard/landing_deck/query.rs:1 (Obstruction request 82D79948) and :7 (numeric request, radius 0.3)
 82D79B40	guess_LandingOnDeck_MovingContactSync	Guess: rusty-trucks/crates/skate-core/src/player/offboard/landing_deck/query.rs:1 (moving contact Sync 82D79B40)
 82D79E30	guess_PhysState_LandingOnDeck_ApplyContact	Guess: When flag 0x4000000 of +0x9B8 is set reads the floats +0xA0 and applies the deck contact vectors
 82D79F00	Skateboard_Toolkit_CalcHippyJumpVel	rusty-trucks/crates/skate-core/src/player/offboard/hippy_jump.rs:1 (TU3 Skateboard::Toolkit_CalcHippyJumpVel at 0x82D79F00)
@@ -28422,9 +28424,9 @@
 82D800C0	Biped_SupportLocalAccel	crates/skate-core/src/player/offboard/ground_motion/support.rs:72 (82D800C0: reference frame local acceleration, mirrored X / Z, cap then filter)
 82D80360	guess_Biped_StepVecShared	Guess: vector step; called by 82D7C818 and 82D7E1A8
 82D80548	Biped_MovementStage	crates/skate-core/src/player/offboard/cadence.rs:75 (movement stage 82D80548 runs before the cadence producer)
-82D80720	guess_BipedCadence_Produce	Guess: rusty-trucks/crates/skate-core/src/player/offboard/cadence.rs:1 (Biped cadence producer 82D80720)
-82D80CE0	guess_Biped_PublishFrames	Guess: rusty-trucks/crates/skate-core/src/player/offboard/ground_motion/publication.rs:1 (published frame copy and retained positional correction decay)
-82D80EB0	guess_Biped_GroundApproach	Guess: rusty-trucks/crates/skate-core/src/player/offboard/ground_motion/approach.rs:6 (approach step; no state change when the job has no target frame)
+82D80720	BipedCadence_Produce	crates/skate-core/src/player/offboard/cadence.rs:1 (biped cadence producer 82D80720)
+82D80CE0	Biped_PublishFrames	crates/skate-core/src/player/offboard/ground_motion/publication.rs:1 (82D80CE0: published frame copy and retained positional correction decay)
+82D80EB0	Biped_GroundApproach_RefreshTarget	crates/skate-core/src/player/offboard/ground_motion/approach.rs:6 (82D80EB0 refresh_target: no state change when the job has no target)
 82D80F48	Biped_ExportResult	crates/skate-core/src/player/offboard/controller/output.rs:1 (original result exporter 82D80F48)
 82D81028	OffboardContact_LessByDistance	rusty-trucks/crates/skate-core/src/player/offboard/contact_sort.rs:2 (comparator 82D81028 uses distance 52 only); run-47 b13.txt: compares the floats at +0x34 (52) of two records; caller OffboardGroundAnalyzer_Transit...
 82D81068	OffboardGroundAnalyzer_Ctor	alloc tag OffboardGroundAnalyzer (0x7710), stores HiLOD +0x740
@@ -28452,13 +28454,13 @@
 82D85C48	guess_OffboardGroundAnalyzer_CandidateHelper	Guess: called by 82D84D38 and 82D85070
 82D85D08	SurfacePhysics_Ctor	Constructor of class 'SurfacePhysics': called on the new block right after guess_Mem_AllocNamed with that tag (in 82DB18A0).
 82D86018	guess_PlayerHiLOD_SetInputMode	Sets the input mode +0x9EC of the player record (1..6, anything else becomes 1) and the matching handler pointer +0x9F0.
-82D860F8	guess_GrindEngagement_UpdateVecHelper	Guess: list: only caller 82D86F00
-82D861D8	guess_GrindManager_CalcApproachSlopeSine	Guess: rusty-trucks/crates/skate-core/src/physics/grind_contact/admission.rs:83 (S3 82D861D8 / S2 CalcApproachSlopeSine 82DDA1A8)
+82D860F8	GrindEngagement_EngagementSlopeSine	crates/skate-core/src/physics/grind_contact/admission.rs:90 (S3 82D860F8 engagement slope sine, smaller dead zone for coping)
+82D861D8	GrindManager_CalcApproachSlopeSine	crates/skate-core/src/physics/grind_contact/admission.rs:83 (S3 82D861D8 / S2 CalcApproachSlopeSine 82DDA1A8)
 82D862B8	Math_DeadZoneScale	crates/skate-core/src/physics/grind_contact/control.rs:80 (82D862B8: signed .25 dead zone, remaining range scaled by 4/3)
 82D86318	guess_GrindBalance_UpdateEnter	Guess: b4: called by 82D8AB08 with GrindManager +0x14 (GrindBalance)
 82D86808	guess_GrindBalance_UpdateAngle	Guess: b1 + b4: GrindManager +0x14 (GrindBalance); runs on grind family 400, state 0x2BD or record flag +0x180; uses sin / cos
 82D86C88	guess_GrindBalance_UpdateFlag19C	Guess: b1 + b4: GrindManager +0x14 (GrindBalance); sets or clears bit 31 of record +0x19C from the +8 float thresholds
-82D86DE8	guess_GrindEngagement_Update	Guess: b4: called by 82D8AB08 with GrindManager +0x18 (GrindEngagement)
+82D86DE8	GrindEngagement_Update	crates/skate-core/src/physics/grind_contact/entry.rs:43 (82D86DE8: retain flags and velocity when invalid, reset impact every update)
 82D86F00	GrindContact_AirborneEntry	crates/skate-core/src/physics/grind_contact/entry.rs:1 (TU3 82D86F00 airborne entry)
 82D872B8	GrindContact_ImpactAdmission	crates/skate-core/src/physics/grind_contact/entry.rs:1 (TU3 82D86F00 airborne entry and 82D872B8 impact admission)
 82D87460	GrindManager_DirectedTangent	research/grind-spline-end-2026-10-08.md:57 (### Directed tangent 82D87460 [code])
@@ -28499,7 +28501,7 @@
 82D8DA68	Reckoning_Ctor	Constructor of class 'Reckoning': called on the new block right after guess_Mem_AllocNamed with that tag (in 82DB18A0).
 82D8DBD8	Reckoning_UpdateAirStates	rusty-trucks/crates/skate-core/src/air/reckoning/mod.rs:1 (Reckoning::UpdateAirStates 82D8DBD8)
 82D8E0F8	Reckoning_UpdateGroundNormal	rusty-trucks/crates/skate-core/src/air/ground_normal.rs:1 (TU3 Reckoning::UpdateGroundNormal 82D8E0F8)
-82D8E1C0	guess_Reckoning_UpdateHandplant	Guess: rusty-trucks/crates/skate-core/src/air/reckoning/mod.rs:128 (Handplant Reckoning 82D8E1C0, uses the ordinary persistent normal filters)
+82D8E1C0	Reckoning_UpdateHandplant	crates/skate-core/src/air/reckoning/mod.rs:128 (Handplant Reckoning 82D8E1C0, update_plant)
 82D8E3E0	Reckoning_UpdateBiped	rusty-trucks/crates/skate-core/src/player/offboard/ground_reckoning.rs:1 (original Reckoning::UpdateBiped 82D8E3E0); guess because physics/grind_forces/reckoning.rs:1 calls the same address UpdateGrindStates
 82D8E5C0	Reckoning_AssembleRidingInputs	crates/skate-core/src/riding/ground_orientation.rs:2 (//! Inputs are assembled by82D8E5C0; this module owns the three persistent)
 82D8E9E0	Reckoning_ResetBodyFlip	run-35 gc1: every caller is a PhysState_* state function; one tag per state family (PhysState_<State>_<What>)
@@ -28584,7 +28586,7 @@
 82D96F70	Score_GroupEndReason	retail name GroupEndReason per our notes
 82D97000	guess_SkaterActor_Part50_GetRecordEntityType	Guess: skater part +0x50 slot 75: resolves record n's handle and looks its type up in a sorted table (8269A940).
 82D97078	ChaseGroup_IsPrimary	research/peds/b12-ped-chase-group.md:36 (+48 82D97078 = IsPrimary(handle) = entry[0].handle == handle)
-82D97108	guess_ChaseGroup_SwapPrimary82D97108	Guess: same role as guess_ChaseGroup_SwapPrimary at 82D97100 (duplicate function name in Ghidra); the address suffix makes the name unique, role kept
+82D97108	ChaseGroup_GiveUpPrimary	crates/skate-core/src/living_world/peds/chase.rs:155 (82D97108 give_up_primary: with at least two chasers the primary swaps)
 82D97378	SkaterActor_Part50_HasRecordForHandle	Skater actor part +0x50 slot 86: true when a record's entity handle (+0x30 / +0x34) equals the given valid handle.
 82D97400	ChaseGroup_FormationPoint	crates/skate-core/src/living_world/peds/chase.rs:140 (/// 82D97400: where a chaser holds formation, the chasees position plus its offset.)
 82D974D8	guess_ChaseGroup_GetEntryWorldPoint	Guess: research/peds/b154-ped-chase-vs-retail.md:47 (chase group slot 64 82D974D8 = entry+0 + chasee position, feeds the block prediction) and research/peds/b12-ped-chase-group.md:38 (slots 56..68 of the group vtable); a cha...
@@ -28644,7 +28646,7 @@
 82D9C7C0	guess_PedBody_IsReady	Guess: research/b289-ped-part-friction.md:22 (ped body vtable 0x8232A86C); class tag fixed, slot meaning kept
 82D9C818	guess_DmoMgr_ReadPartXform	Guess: reads the part transform from the model +0x4C +0x20, identity when absent.
 82D9C870	guess_Physics_ReadBodyState	Guess: reads the body block from +0x18 / +8 / +0x4C or zero when absent
-82D9C8C8	guess_PhysAssembly_SetBodyPose	Guess: research/b230-sleeping-prop-wake.md:29 (82D9C8C8..82D9CCF0 the body API, first entry set pose); run-51 b39.txt: same wake pattern on body n; the generic body API is shared by the board (82C056B0) and the DMO methods,...
+82D9C8C8	PhysAssembly_SetSinglePartTransform	crates/skate-core/src/physics/board_runtime.rs:188 (82D9C8C8 board, transform, part: one part alone, a frozen part is woken first); decompile: run-59/d4.txt calls PhysBody_Wake
 82D9C930	PhysAssembly_SetBodyLinearVelocity	research/b230-sleeping-prop-wake.md:29 (body API: set linear velocity 82D9C930, each if assembly active +0x24 wake body, then write); run-51 b39.txt: wakes body n (0x60 stride) when +0x24 is set, then writes the vec3...
 82D9C9B0	PhysAssembly_SetBodyAngularVelocity	research/b230-sleeping-prop-wake.md:29 (set angular velocity 82D9C9B0); run-51 b39.txt: same wake, then writes the vec3 into [body +0x4C] +0x30
 82D9CA30	Physics_AddForce	retail name AddForce per our notes
@@ -28788,11 +28790,11 @@
 82DA5EF0	guess_ScoreHolder_FinalizeAndLogRecord	Guess: guess_ScoreRecord_TryFinalize, then for a valid trick id (0..0x14B) not yet logged (+0xBD) copies the 200-byte record into the output list at (+4)+0x3B8 (count first) unless holder +0x1C5D is set.
 82DA5F98	TrickState_CompleteCarrier	crates/skate-game/src/scoring_runtime.rs:308 (82DA5F98: only a valid carrier completes)
 82DA60F0	guess_TrickState_QueueScoreRecord	for a valid record (+0x7C, id +0xC in 0..0x14B): adds points (82DA46D0) once, then appends the 200-byte record to the ring at +0xCE0 (count +0xCD8)
-82DA6198	guess_ScoreHolder_AccountA	Guess: rusty-trucks/crates/skate-core/src/scoring.rs:1 (native ScoreHolder accounting, TU3 82DA6198 / 6260 / 6408 / 6468 / 6538)
-82DA6260	guess_ScoreHolder_EndAirTrick	Guess: rusty-trucks/crates/skate-core/src/scoring.rs:94 (EndAirTrick 82DA6260; invalid ids touch neither history nor rewards)
+82DA6198	ScoreHolder_CountTrick	crates/skate-core/src/scoring.rs:70 (non air collectors use 6198, count_trick, then add to the accumulator); decompile: run-59/d10.txt saturating byte counters per trick id at +0x1000 and +0x114C and per category (tab...
+82DA6260	ScoreHolder_EndAirTrick	crates/skate-core/src/scoring.rs:94 (EndAirTrick 82DA6260)
 82DA6320	ScoreCarrier_ReplaceViaConversion	crates/skate-core/src/scoring/carrier.rs:92 (replace a carrier through its conversion link 82DA6320)
 82DA6408	guess_ScoreHolder_FlushPendingAir	when +0x1C5C is set: output +0x18 = +0x2C + +0x28, clears both and +0x1C4C, sets +0x1C55, then commits the pending air
-82DA6468	guess_ScoreHolder_RewardAirSequence	Guess: rusty-trucks/crates/skate-core/src/scoring.rs:121 (RewaredAirSequence 82DA6468; repeated calls cannot bank twice)
+82DA6468	ScoreHolder_RewardAirSequence	crates/skate-core/src/scoring.rs:121 (RewaredAirSequence 82DA6468, retail spelling; cannot bank twice)
 82DA6538	Score_PublishAndResetAirSequence	retail name PublishAndResetAirSequence per our notes
 82DA6630	Score_ScoreHolder_PublishToOutput	copies the ScoreHolder into the owner's score output block (owner +0x3C): totals +0x18..+0x30 as ints at +0..+0x20, flag +0x3942, the five 0x328-byte record lists into +0xE0 / +0x408 / +0xA58 / +0xD80 / +0x730 when not empty, the per-trick counters into +0x13D0 and per-kind counters into +0x151C; then guess_TrickState_PublishRecordB on the sequence
 82DA6840	AttribRef_GetFieldE356ED00	b11.txt: returns Attrib_GetField(ref, 0xE356ED00ABF1D7F0) or the default collection 830D0850; same shape and naming as the solid AttribRef_GetField* getters
@@ -29005,7 +29007,7 @@
 82DBA708	guess_ChallengePresGroup_DtorBody	Guess: b2: the body called by the PresGroup deleting dtor 82DBA6A0
 82DBA778	guess_PresMgr_RunCurrentGroup	Guess: runs PresGroup_Run on the current group (+0xC6C / +0xC70)
 82DBA810	guess_PresMgr_CreateGroup	Guess: builds a presentation group for a key (called by SignupPres_OnChallengeStart).
-82DBA8F8	guess_PresMgr_RemoveOwnerGroups	Guess: rusty-trucks/crates/skate-core/src/presentation.rs:188 (remove every group of an owner (82DBA8F8))
+82DBA8F8	PresMgr_RemoveOwnerGroups	crates/skate-core/src/presentation.rs:188 (remove every group of an owner, 82DBA8F8)
 82DBAAB0	guess_PresMgr_StopGroup	Guess: stops the owner's group (SignupPres_Stop).
 82DBABA8	guess_PresMgr_StopAndEraseGroup	Guess: stops group events and erases the group from the map at +0xC4C.
 82DBACA0	guess_PresMgr_Start	Guess: rusty-trucks/crates/skate-core/src/presentation.rs:41 (what Manager::start did with a group (82DBACA0))
@@ -29342,7 +29344,7 @@
 82DD6AF0	guess_TriggerVolumeGroup_Dtor	Guess: notes/triggers-volumes-re.md:46 (group vtable 0x82328CC4)
 82DD6BF0	guess_ChallengeVolume_CreatePhysics	Guess: Creates the physics volume with a unit scale.
 82DD6C68	guess_ChallengeVolume_BuildShape	Guess: Builds a volume shape descriptor on the stack.
-82DD6D20	guess_TriggerVolumeMsgGroup_PostExitCollisions	Guess: b7 + d4: allocates the removedFromPreviousList scratch, finds entries no longer hit and posts cMsgTriggerExitCollision (E961529A) for each to the queue +0x8E4
+82DD6D20	TriggerVolumeMsgGroup_RemoveEntity	crates/skate-core/src/triggers.rs:20 (removing an entity, 82DD6D20, posts exits for its volumes)
 82DD6EF8	TriggerVolumeGroup_CollectContaining	notes/triggers-volumes-re.md:47 (group vtable 0x82328CC4 +28 = volumes containing entity, sub_82DD6EF8); run-51 b36.txt: pushes matching volumes into the output vector (guess_PtrVector_Insert) from the group lists +0x...
 82DD7018	Trigger_RemoveVolume	retail name RemoveVolume per our notes
 82DD70E8	Trigger_GroupUpdate	crates/skate-core/src/triggers.rs:5 (//! - Each group update (82DD70E8) gives every tracked entity a query)
@@ -29542,8 +29544,8 @@
 82DEEAF8	guess_PhysOutConditioner_Grinds_GatherVectors	Guess: copies board / rail vectors from the grind parts into one output block
 82DEEB90	guess_GrindConditioner_RecordHistory	Guess: Fills the current grind sample (+0x20) and, in mode 100, stores samples in a ring of 30 entries of 0x90 bytes at +0x300 (counter +0x13E0)
 82DEED28	guess_GrindConditioner_GetHistorySample	Guess: Returns the sample at +0x20 while fewer than 31 are stored, else the ring entry ((n - 30) mod 30) at +0x300
-82DEED98	guess_PhysOutConditioner_Grinds_TestA	Guess: vector test.
-82DEEEE0	guess_PhysOutConditioner_Grinds_TestB	Guess: vector test.
+82DEED98	PhysOutConditioner_Grinds_StraightPose	crates/skate-game/src/physics/grind_chromosome/pose.rs:36 (82DEED98 straight: twist uses Basic128)
+82DEEEE0	PhysOutConditioner_Grinds_LowPose	crates/skate-game/src/physics/grind_chromosome/pose.rs:61 (82DEEEE0 low: sign the Basic32 axis from Basic48 minus contact)
 82DEEFB0	guess_PhysOutConditioner_Grinds_TestC	Guess: vector test.
 82DEF1C8	guess_PhysOutConditioner_Grinds_FormatName	Guess: formats a debug name.
 82DEF518	guess_PhysOutConditioner_Grinds_UpdateBody	Guess: grinds conditioner update over the rail list.
@@ -29553,7 +29555,7 @@
 82DEF810	PhysOutConditioner_Score_Update	slot 1 of the score conditioner (vtable 823294E4, built in PhysOutConditioners_Ctor around the Score::ScoreModule at +0x10): runs guess_Score_ScoreModule_Update, then writes the score output +0x8C from +0x88 with a 4-frame hold counter +0xC
 82DEF890	PhysOutConditioner_823294FC_Ctor	constructor of conditioner 6 of PhysOutConditioners_Ctor (0x110 bytes): PhysOut at +4, vtable 823294FC, copies four tuning words +0x2D0..+0x2DC into +0x90.., allocates two Debug Graph tagged bytes, then its Reset (slot 2)
 82DEF9F0	PhysOutConditioner_823294FC_DeletingDtor	slot 0 of conditioner vtable 823294FC: frees the buffers +0xFC and +0x100, sets the base vtable 823295F8, frees on flag bit 0; structural name, the conditioner's subject is a guess (see guess_PhysOutConditioner_Animation_Update)
-82DEFAA0	guess_TurnConditioner_Reset	Guess: rusty-trucks/crates/skate-core/src/input/turn_conditioner.rs:27 (steering history portion of the native reset 82DEFAA0)
+82DEFAA0	TurnConditioner_Reset	crates/skate-core/src/input/turn_conditioner.rs:27 (native reset 82DEFAA0, steering history portion)
 82DEFB30	guess_TurnConditioner_Update	Guess: rusty-trucks/crates/skate-core/src/input/turn_conditioner.rs:1 (steering conditioner 82DEFF38, called by 82DEFB30)
 82DEFB98	guess_PhysOutConditioner_SyncTrickKey	Guess: compares the trick key with the global key 830C0C54 and copies the skater input trick key.
 82DEFCC0	guess_PhysOutConditioner_Animation_CompareKeys	Guess: clears a record and compares three part keys.
@@ -29685,7 +29687,7 @@
 82DF8440	DropPredictor_Reset	slot 1 of DropPredictor (vtable 8232A2A4), also called by DropPredictor_Ctor: zeroes the prediction floats +0x08..+0x14 and +0x390..+0x3C0, indices +0x3C4..+0x3CC, sets +0x3D0 = 1 and releases the probe +0x44 when +0x3D1 is set
 82DF84F8	CameraDropPredictor_Predict	Terrain drop prediction (with 82DF89B0 / 82DF8BC0 / 82DF8740).
 82DF8740	guess_CameraDropPredictor_LandingSlope	Guess: Landing sample (table +0x240, index +0x3C8, stride 0x40): slope angle by atan when flag +0x34, clamped to a degree limit (8218155C, or 821EB794 with the flag argument), result at +0x3C0. Part of the port's terrain drop prediction (camera\drop_predictor.rs:1).
-82DF8980	guess_DropPredictor_GetPredictedHeight	slot 3 of DropPredictor: float +0x30 of entry +0x3C8 in the 0x40-byte table at +0x240 when its valid byte +0x34 is set, else 0
+82DF8980	DropPredictor_GetPredictedHeight	crates/skate-core/src/camera/drop_predictor.rs:143 (native getter 82DF8980, drop_depth)
 82DF89B0	guess_CameraDropPredictor_ScanSamples	Guess: Walks the samples from +0x50 (state +0x3B8 / +0x3D1, +0x44 / +0x54); part of the port's terrain drop prediction (camera\drop_predictor.rs:1).
 82DF8BC0	guess_CameraRig_UpdatePathPoints	Guess: calls slot 0xC of +0x44, then copies the 0x40 byte path points of +0x240 into +0x50 and blends them (+0x3A0, flags +0x3D1 / +0x3D2)
 82DF8E80	guess_CameraRig_PickShot	Guess: reads shot fields +0x254 / +0x2A8 / +0x188 / +0x1B0 and flags +0x25..+0x27
@@ -29813,20 +29815,20 @@
 82E01260	guess_FrameComposer_SingleFraming	Guess: rusty-trucks/crates/skate-core/src/camera/frame_composer.rs:1 (complete single / transition framing 82E01260 / 82E01740)
 82E01740	guess_CameraFrame_TransitionFraming	Guess: rusty-trucks/crates/skate-core/src/camera/frame_composer.rs:1 (complete single / transition framing 82E01260 / 82E01740)
 82E01948	CameraPositioner_Update	crates/skate-core/src/camera/positioner.rs:1 (TU3 normal camera positioner 82E01948)
-82E01BA0	guess_CameraPositioner_Evaluate	Guess: rusty-trucks/crates/skate-core/src/camera/positioner.rs:118 (complete 82E01BA0; query status 3 keeps the previous valid state)
+82E01BA0	CameraPositioner_Resolve	crates/skate-core/src/camera/positioner.rs:118 (complete 82E01BA0, resolve: query status 3 keeps the previous valid state)
 82E01D30	guess_CameraPositioner_BuildCandidate	Guess: rusty-trucks/crates/skate-core/src/camera/positioner.rs:153 (complete 82E01D30; submits even when collision is off)
 82E01EA8	guess_CameraPositioner_UpdateCandidates	Guess: rusty-trucks/crates/skate-core/src/camera/positioner.rs:119 (82E01EA8 body produces only statuses 0, 1, 2)
 82E020F0	guess_CameraPositioner_CandidateStep	Guess: rusty-trucks/crates/skate-core/src/camera/positioner.rs:232 (complete 82E020F0; invalid hit positions keep the end)
 82E02190	CameraPositioner_BuildLaneBasis	crates/skate-core/src/camera/positioner.rs:249 (/// Complete82E02190, including native four-lane basis construction and ordering.)
 82E023D0	guess_CameraPath_AvoidanceOrchestrate	Guess: rusty-trucks/crates/skate-core/src/camera/path_evaluator.rs:1 (complete TU3 82E023D0 / 82E02490 orchestration (avoidance))
 82E02490	guess_CameraPath_Evaluate	Guess: rusty-trucks/crates/skate-core/src/camera/path_evaluator.rs:48 (complete 82E02490)
-82E02608	guess_CameraPath_CandidateListEval	Guess: rusty-trucks/crates/skate-core/src/camera/path_prediction.rs:1 (complete candidate list evaluator TU3 82E02608)
+82E02608	CameraPath_CandidateListEval	crates/skate-core/src/camera/path_prediction.rs:1 (complete candidate list evaluator TU3 82E02608, used by avoidance 82E023D0)
 82E02738	Rig_Ctor	Constructor of class 'Rig': called on the new block right after guess_Mem_AllocNamed with that tag (in 82DFDA60).
 82E02C88	guess_Rig_DeletingDtor	Guess: frees the rig owned blocks +0x90..+0xD0 (after Rig_Ctor)
 82E02E58	guess_CameraRig_Reset	Guess: rusty-trucks/crates/skate-core/src/camera/rig_initialization.rs:1 (state construction 82E02738, reset 82E02E58, teleport 82E031D8)
 82E03060	CameraSubject_ForwardSpeed	crates/skate-core/src/camera/avoidance.rs:243 (/// Complete82E03060; subject transform+32 is its forward vector.)
 82E030C0	guess_Rig_VecFromAngles	Guess: builds a vector from angles (after guess_CameraSubject_GetSpeed)
-82E03150	guess_CameraRig_SetElevation	Guess: rusty-trucks/crates/skate-core/src/camera/rig_initialization.rs:128 (SetElevation 82E03150: obstruction latched until the native reset)
+82E03150	CameraRig_SetElevation	crates/skate-core/src/camera/rig_initialization.rs:128 (SetElevation 82E03150)
 82E031D8	guess_CameraRig_Teleport	Guess: rusty-trucks/crates/skate-core/src/camera/rig_initialization.rs:1 (teleport 82E031D8)
 82E03300	guess_CameraRig_Update	Guess: rusty-trucks/crates/skate-core/src/camera/rig.rs:1 (native normal camera rig update 82E03300)
 82E03560	guess_CameraRig_Framing	Guess: rusty-trucks/crates/skate-core/src/camera/rig_framing.rs:1 (complete TU3 framing 82E03560 and subject driven mode selection 82E053E0)
@@ -29855,8 +29857,8 @@
 82E06CB8	guess_CameraRig_StepSubjectVec	Guess: Steps the subject vector with sin / cos (+0x5934).
 82E06E38	guess_ShotManager_SineBlend	Guess: rusty-trucks/crates/skate-core/src/camera/shot_manager.rs:1 and shot.rs:108 (ShotManager 82E06E38 uses the field publication 82E06980)
 82E07240	guess_CameraRig_ReadShotFields	Guess: Reads the shot fields +0xB4..+0x120 into the outputs.
-82E07378	guess_CameraShot_FilterBlendValues	Guess: rusty-trucks/crates/skate-core/src/camera/shot.rs:157 (complete blend value filtering 82E07378 after 82E07708)
-82E07450	guess_ShotManager_MakeInstant	Guess: run-35 nb list: inside the CameraRig_* block; shot timer
+82E07378	CameraShot_FilterBlendValues	crates/skate-core/src/camera/shot.rs:157 (complete blend value filtering 82E07378)
+82E07450	ShotManager_MakeInstant	crates/skate-core/src/camera/shot_manager.rs:277 (ShotManager 82E06418 and MakeInstant 82E07450)
 82E074A8	guess_CameraShot_InterpolateB	Guess: rusty-trucks/crates/skate-core/src/camera/shot.rs:1 (authored normal camera shots and TU3 interpolation 82E06980 / 82E074A8)
 82E07540	CameraShot_QuatInterpolate	crates/skate-core/src/camera/shot_orientation.rs:1 (//! Quaternion interpolation82E07540, with the native sign choice and near-angle)
 82E07708	guess_CameraShot_NormalBlendCallback	Guess: rusty-trucks/crates/skate-core/src/camera/manager_blends.rs:1 (complete normal shot blend callback 82E07708 and air blends 82DFE898 / E998)
@@ -29869,7 +29871,7 @@
 82E08B18	guess_Grind_UpdateHeadingAngle	Guess: Copies a heading and wraps the angle difference into range.
 82E08D18	CameraVectorTracker_Cap	crates/skate-core/src/camera/vector_tracker.rs:52 (TU3 82E08D18 caps the xyz magnitude, keeps the fourth lane)
 82E08DB8	Grind_CanGrabSpline	retail name CanGrabSpline per our notes
-82E08EE8	guess_GrabScene_CanGrabSplineB	Guess: rusty-trucks/crates/skate-core/src/player/offboard/grab_scene/qualify.rs:1 (S3 CanGrabSpline 82E08DB8 / 82E08EE8)
+82E08EE8	GrabScene_QualifyAtDistance	crates/skate-core/src/player/offboard/grab_scene/qualify.rs:25 (82E08EE8: the qualify tests at an arc distance; 82E08DB8 nearest point); decompile: run-59/d3.txt calls guess_Polyline_ArcLengthEval
 82E093E8	GrabScene_PointInFrameBox	crates/skate-core/src/player/offboard/grab_scene/qualify.rs:56 (82E093E8 rigid inverse then inclusive bounds on all XYZ axes)
 82E09578	guess_PhysState_OffBoardPushing_SegmentStep	Guess: Vector step between two points with cached constants; off board pushing caller.
 82E098B0	guess_AmbientFlag_ReleaseBuffers	Guess: releases the buffers at +0x30 and +0x218 (slot 0x10).
@@ -29897,7 +29899,7 @@
 82E0AE98	guess_DmoLock_QueryRange	Builds a range query (unit flags) and runs it
 82E0AF30	LWPhysics_CreateCapsuleVolume	Allocates a "CapsuleVolume" (0x60 bytes, tag 8206B208) through the factory's slot 6 and builds it from radius and half height (82AD9708).
 82E0AFD8	guess_PhysOutTrickPatterns_SubmitDescriptor	Guess: Builds a small descriptor (0x60, 0x10 and ones) and submits it through slot.
-82E0B070	guess_SkeletonBody_DebugMultiplyInertiaTensor	Guess: rusty-trucks/crates/skate-core/src/physics/skeleton_body/construction.rs:162 (DebugMultiplyInertiaTensor 82E0B070)
+82E0B070	SkeletonBody_DebugMultiplyInertiaTensor	crates/skate-core/src/physics/skeleton_body/construction.rs:162 (DebugMultiplyInertiaTensor 82E0B070)
 82E0B110	SkeletonBody_SetSphericalInertiaTensor	crates/skate-core/src/physics/skeleton_body/construction.rs:162 (/// DebugMultiplyInertiaTensor82E0B070 / SetSphericalInertiaTensor82E0B110.)
 82E0B1E0	SkateboardBody_InitCapsuleBetween	crates/skate-core/src/physics/construction/deck_geometry.rs:97 (82E0B1E0: midpoint = first + (second - first) / 2)
 82E0B460	TestBatchManager_Ctor	Constructor of class 'TestBatchManager': called on the new block right after guess_Mem_AllocNamed with that tag (in 8275DCC8).
@@ -30037,7 +30039,7 @@
 82E11668	guess_Vt8232ABDC_ClearLinks	Guess: Clears the four active flags of both link tables (+0x18, +0x58) and rebuilds the link lists from the 0xF8 byte entries
 82E118A0	guess_LWIntersection_InitVec	Guess: vector body, caller guess_LWIntersection_LazyInit.
 82E11980	Traffic_JunctionHolder	crates/skate-core/src/living_world/traffic/junction.rs:283 (82E11980: a car of the flow a -> e that has the junction)
-82E11C78	guess_Traffic_JunctionConnectorCar	Guess: rusty-trucks/crates/skate-core/src/living_world/traffic/junction.rs:253 (82E11C78: a car inside the junction on a connector from approach a into the exit lane)
+82E11C78	Traffic_JunctionConnectorCar	crates/skate-core/src/living_world/traffic/junction.rs:253 (sub_82E11C78: a car inside the junction on a connector from an approach)
 82E11E90	guess_SGBehaviour_ContinueFollowingLane_Step	Guess: Lane follow step of the ped behavior.
 82E12728	guess_Vt8232ABF4_DeletingDtor	Guess: Runs the 8232ABF4 dtor body and frees when asked.
 82E12780	guess_Vt8232ABF4_DtorBody	Guess: Destructor body (vtable 8232ABF4): returns every list node to its free list and resets the list
@@ -30085,7 +30087,7 @@
 82E14FC0	Traffic_TargetLaneCar	crates/skate-core/src/living_world/traffic/follow.rs:174 (the car on the target lane when the passage starts, 82E14FC0)
 82E15110	guess_LaneList_RemoveEntry	Finds the entry with the given id in list n (0x10 bytes each at +0x68) and erases it (8254A8D0).
 82E151D0	Traffic_RoadsideStopSpots	crates/skate-core/src/living_world/traffic/spots.rs:1 (//! Road-side stop spots and the lane-change gap check (82E151D0 / 82E15368, 82E14CF8, 82E14928; b71).)
-82E15368	guess_Traffic_ReservedSpot	Guess: rusty-trucks/crates/skate-core/src/living_world/traffic/manoeuvre.rs:206 (the reserved spot until the pull out starts (82E15368))
+82E15368	Traffic_ReservedSpot	crates/skate-core/src/living_world/traffic/manoeuvre.rs:206 (the reserved spot from the reservation until the pull out starts, 82E15368)
 82E15428	guess_PedLane_WalkSegments	Guess: Walks the lane segments +0x48..+0x4C with the lane data 830854C0.
 82E156D8	Traffic_SignalOpen	crates/skate-core/src/living_world/traffic/signals.rs:31 (/// green, 0 otherwise [code sub_82E156D8]; use open.)
 82E158D8	Traffic_SignalTick	research/npc/v1-report-roads.md:43 (signal tick sub_82E158D8: fixed 1/60 s per call, next phase below 0; code)
@@ -30439,7 +30441,7 @@
 82E25E20	LWPedestrianMan_CreateFactory	LivingWorld pedestrian manager slot 25: allocates 0x2C bytes tagged "LWPedestrianFactory", vtable 8232D260, default create function guess_PedBrain_Create at +0x28; stored at +0x10 by the base.
 82E25EE0	LWPedestrianMan_CreateCensusMan	LivingWorld pedestrian manager slot 27: when the entity map (+0xC) and factory (+0x10) exist, allocates 0x2C8 bytes tagged "LWPedestrianCensusMan" (vtable 8232D1C0 over 8232D1E4); stored at +0x14 by the base.
 82E25F90	guess_LWPedestrianMan_DebugDrawEntities	Guess: primary slot 5: for every entity reads AI slot 40, the transform and part +0xBC slot 6 and builds vectors with fixed constants; looks like debug drawing.
-82E262D0	guess_PedManager_UpdateHandProps	Guess: rusty-trucks/crates/skate-game/src/living_world/ped_hand_props.rs:179 (82E262D0 clears the request bit whether or not the create worked; hand prop create / release / cull)
+82E262D0	PedManager_SyncHandProps	crates/skate-game/src/living_world/ped_hand_props.rs:179 (82E262D0: attach, release on throw or drop, unlink, cull released hand props)
 82E263B0	LWPedestrianModel_DeletingDtor	Slot 0 of vtable 8232D0A8 (LWPedestrianModel): restores 8232D0A8 / 8232D128, runs Vt8232A8A0_DtorBody, frees through the LW allocator 83085454 slot 3 when bit 0 is set.
 82E26430	LWPedestrianModel_LoadAttrib	Slot 1 of vtable 8232D0A8: reads fields 0xB470A93464F84774 (to +0x70), 0xE8DEC58645CB5EAF and 0xC97276E33F3EAAF3 of the livingworld_models record, then the base slot 1.
 82E26550	guess_LWPedestrianModel_CreateCollider	Guess: slot 22 of 8232D0A8: creates a resource from the two floats at (+0x78) (radius and half height) and stores the handle at +0x58.
@@ -30647,7 +30649,7 @@
 82E3A230	guess_Ped_FindEntryInSlot2List	Guess: walks the list returned by its slot 2 (count +0x10); slot in vtables at 8232C0C8 and 8232CD78
 82E3A318	guess_Ped_HasActiveSlot3	Guess: true when its slot 2 result is set, the part at word 0x597 +0xBD0 is ready and slot 3 returns non zero; slot in vtables at 8232C0CC and 8232CD7C
 82E3A3F0	LWPedestrianActor_PlayTazerBlend	research/b248-taser-animations.md:21 (ped vtable 8232BE80 slot +248 = 82E3A3F0 = vfn240(name, 0.2, 0.2); code)
-82E3A418	guess_LWPedestrianActor_PlayLogicalAnim	Guess: rusty-trucks/crates/skate-core/src/living_world/peds/anim.rs:794 (play the logical animation name of a set on the channel (ped vfunc +240 82E3A418))
+82E3A418	LWPedestrianActor_PlayLogicalAnim	crates/skate-core/src/living_world/peds/anim.rs:794 (play the logical animation name of set on the channel, ped vfunc +240)
 82E3A4F8	guess_LWPedestrianActor_ApplyAnimRequestFromData	Guess: ped actor slot 61: builds a record from data (8268E928, 826996B8) and calls slot 60.
 82E3A5A0	PedCarryChannel_SlotStateMachine	research/peds/b99-ped-carry-channels.md:24 (- Slot state machine, run every ped update in sub_82E3A5A0 (switch on skeleton+140) [code]:)
 82E3AC70	guess_Ped_StartHipTest01	Guess: builds a record named HIP_TEST_01 and posts it to the object at +0x1704 +0x4610; called four times by 82E3A5A0
