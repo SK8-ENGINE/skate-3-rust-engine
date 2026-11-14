@@ -94,6 +94,10 @@ pub(crate) struct ObjectiveRow {
     pub kind: i32,
     pub title: String,
     pub value: String,
+    /// The title's argument (tObjectiveDefinition word 4): retail formats the title with it once, in the objective
+    /// constructor (82C726E8 through the typed formatter 8290C9A0, research b1020).
+    #[serde(default)]
+    pub title_arg: Option<String>,
 }
 
 /// What the challenge HUD shows (retail's HUD elements `timer`, `dpo`, `objective` and the banner flags).
@@ -407,7 +411,17 @@ impl Host for Bindings {
             ("HUDComponents", "Objective_GetNumObjectives") => Ok(Value::Number(s.objectives.len().min(4) as f64)),
             ("HUDComponents", "Objective_GetObjectiveState") => Ok(Value::Number(row(0).state as f64)),
             ("HUDComponents", "Objective_GetObjectiveType") => Ok(Value::Number(row(0).kind as f64)),
-            ("HUDComponents", "Objective_GetObjectiveTitle") => Ok(Value::Text(row(0).title)),
+            ("HUDComponents", "Objective_GetObjectiveTitle") => {
+                let r = row(0);
+                Ok(Value::Text(match r.title_arg {
+                    Some(arg) => {
+                        let format = crate::fe_language::NumberFormat::default();
+                        let typed = |kind: &str, a: &str| crate::fe_language::retail_typed(&format, kind, a);
+                        format!("#{}", crate::fe_language::format_typed(&format, &self.movie.text_assets.localize(&r.title), &[arg], typed))
+                    }
+                    None => r.title,
+                }))
+            }
             ("HUDComponents", "Objective_GetObjectiveValue") => Ok(Value::Text(row(0).value)),
             // Own the spot sets up its objective HUD without the activity line (b844: 3-argument SetupObjectiveHUDData).
             ("HUDComponents", "Objective_GetActivityTitle" | "Objective_GetActivityType") => Ok(Value::Text(String::new())),
@@ -730,7 +744,7 @@ mod tests {
             state.show(component, true);
             state.timer_text = "0:10".into();
             state.dpo[0] = DpoSlot { numerator: "0".into(), denominator: "1000".into(), title: "ID_CHALLENGE_OBJECTIVE_BEAT_OWNSPOT".into(), highlight: 1, ..Default::default() };
-            state.objectives = vec![ObjectiveRow { state: 3, kind: 0, title: "ID_CHALLENGE_OBJECTIVE_BEAT_OWNSPOT".into(), value: String::new() }];
+            state.objectives = vec![ObjectiveRow { state: 3, kind: 0, title: "ID_CHALLENGE_OBJECTIVE_BEAT_OWNSPOT".into(), value: String::new(), title_arg: None }];
             hud.sync(&state).unwrap();
             for _ in 0..30 {
                 hud.update().unwrap();

@@ -148,6 +148,15 @@ pub fn format_typed(format: &NumberFormat, template: &str, args: &[String], type
     )
 }
 
+/// The typed formats a challenge text uses beyond d / i / f (824FE848 registers them): `points` (handler 824FEA28)
+/// prints the int with the thousands separator and no suffix (research b1020). Other types: None (the argument as is).
+pub fn retail_typed(format: &NumberFormat, kind: &str, arg: &str) -> Option<String> {
+    match kind {
+        "points" => Some(format.int(c_atoi(arg))),
+        _ => None,
+    }
+}
+
 /// The TEAMMATE type (824FEAB8): teammate v's name while 0 < v <= the names given, else `unknown`.
 pub fn teammate_text(arg: &str, names: &[String], unknown: &str) -> String {
     let v = c_atoi(arg);
@@ -231,6 +240,10 @@ mod tests {
         assert_eq!(format_typed(&f, "Shoot {1:TEAMMATE}", &["2".into()], typed), "Shoot Sal");
         assert_eq!(format_typed(&f, "Shoot {0:TEAMMATE}", &["3".into()], typed), "Shoot Unknown");
         assert_eq!(format_typed(&f, "Beat {0:d}", &["12000".into()], typed), format!("Beat {}", f.int(12000)));
+        // the Hall of Meat titles (hom_indu_07: "50000"; hom_dwtn_03_sp "25000"); a title without a placeholder ignores it
+        let points = |k: &str, a: &str| retail_typed(&f, k, a);
+        assert_eq!(format_typed(&f, "Do a {0:points} point bail", &["50000".into()], points), format!("Do a {} point bail", f.int(50000)));
+        assert_eq!(format_typed(&f, "Bail into a vehicle", &["1".into()], points), "Bail into a vehicle");
     }
 
     #[test]

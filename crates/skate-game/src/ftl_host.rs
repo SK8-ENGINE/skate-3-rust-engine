@@ -392,6 +392,7 @@ pub(crate) fn objective_rows(rows: &[ObjectiveData], states: &[skate_core::chall
         kind: 0,
         title: r.title_id.clone().unwrap_or_else(|| "#OBJECTIVE NOT VALID!".into()),
         value: String::new(),
+        title_arg: r.title_arg.clone(),
     }).collect()
 }
 
