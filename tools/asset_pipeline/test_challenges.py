@@ -51,9 +51,14 @@ class ChallengeData(unittest.TestCase):
         rows = {(GROUP, hash64('obj_a')): group, (GROUP, hash64('obj_a_0')): objective}
         out = objective_programs(rows, refspec(GROUP, hash64('obj_a')), binary)
         self.assertEqual(out, [{'key': 'obj_a_0', 'condition': {'locals': 0, 'body': [
-            {'return': {'api': 'Lib.Done', 'args': []}}]}, 'triggers': [False] * 14, 'activation': 0,
+            {'return': {'api': 'Lib.Done', 'args': []}}]}, 'title_id': None, 'title_arg': None, 'display_in_hud': True,
+            'triggers': [False] * 14, 'activation': 0,
             'failures': [], 'failures_inline': [], 'failure_first': False, 'hints': []}])
         self.assertEqual(objective_programs(rows, None, binary), [])
+        # the HUD title: tObjectiveDefinition word 3 is the offset of its text id in the bank .bin (b947)
+        titled = binary + b'ID_OBJ_A_0' + bytes(1)
+        objective['fields'][DEFINITION]['data'] = struct.pack('>IIIII', 1, 0, 0, len(binary), 0).hex().upper()
+        self.assertEqual(objective_programs(rows, refspec(GROUP, hash64('obj_a')), titled)[0]['title_id'], 'ID_OBJ_A_0')
 
     def test_points_valid_is_inherited_and_read_from_the_parents_bank(self):
         from tools.asset_pipeline.challenges import POINTS_VALID
