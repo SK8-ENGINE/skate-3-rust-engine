@@ -98,6 +98,7 @@ pub(crate) struct Inputs<'a> {
     pub board_adjust: u32,
     /// The pose output's over flag (Wipeout.IsWipeoutOver while bailing).
     pub wipeout_over: bool,
+    pub bail_pose: Option<usize>,
     /// The end dialog's pick (end_dialog_host.rs), taken while the run waits in its end options.
     pub end_choice: Option<skate_core::challenges::end_dialog::Action>,
 }
@@ -207,7 +208,7 @@ impl TutorialRun {
             began: input.began, right_stick_y: input.right_stick_y, triggers: input.triggers, manual: input.manual,
             pushes: input.pushes, pump_acceleration: input.pump_acceleration, pump_user: input.pump_user,
             grind_rail: input.grind_rail, time_to_grind: input.time_to_grind, board_adjust: input.board_adjust,
-            wipeout_over: input.wipeout_over,
+            wipeout_over: input.wipeout_over, bail_pose: input.bail_pose,
             competitor_distances: [None; 4],
         };
         let mut groups: Vec<&mut DataObjectives> = self.objectives.as_mut().into_iter().collect();
@@ -373,7 +374,7 @@ mod tests {
     }
 
     fn input<'a>(volumes: &'a [(String, u64)], entered: &'a [u64], pending: bool, ticks: u32, distance: f32) -> Inputs<'a> {
-        Inputs { volumes, entered, exited: &[], banked: &[], ticks, teleport_pending: pending, distance, state_id: 100, in_sequence: false, markers: &[], tricks: &[], began: &[], right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pushes: 0, pump_acceleration: 0.0, pump_user: false, grind_rail: None, time_to_grind: skate_core::challenges::api::NO_GRIND_TIME, board_adjust: 0, wipeout_over: false, end_choice: None }
+        Inputs { volumes, entered, exited: &[], banked: &[], ticks, teleport_pending: pending, distance, state_id: 100, in_sequence: false, markers: &[], tricks: &[], began: &[], right_stick_y: 0.0, triggers: [0.0; 2], manual: None, pushes: 0, pump_acceleration: 0.0, pump_user: false, grind_rail: None, time_to_grind: skate_core::challenges::api::NO_GRIND_TIME, board_adjust: 0, wipeout_over: false, bail_pose: None, end_choice: None }
     }
 
     /// One step without the HUD actions (checked on their own below).

@@ -431,6 +431,8 @@ pub(crate) struct FeedInput<'a> {
     pub board_adjust: u32,
     /// Wipeout.IsWipeoutOver: in the bail with the pose's over flag set.
     pub wipeout_over: bool,
+    /// The body tweak pose the last bail closed in (ObjectiveHOM.DidSpecificBodyTweakThisFrame).
+    pub bail_pose: Option<usize>,
     /// Leader.* distances to competitors 1..4 (follow the leader).
     pub competitor_distances: [Option<f32>; 4],
 }
@@ -476,6 +478,7 @@ impl ObjectiveFeed {
             sequence_completed: input.banked.iter().any(|(_, dirty)| !dirty),
             wiping_out: input.state_id == 300,
             wipeout_over: input.state_id == 300 && input.wipeout_over,
+            bail_pose: input.bail_pose,
             off_board: off,
             went_off_board: off && !self.was_off_board,
             went_on_board: !off && self.was_off_board,
@@ -590,6 +593,21 @@ mod tests {
         let events = step(&mut d, 300, true);
         assert!(events.iter().any(|(_, e)| matches!(e, Event::Completed(0))), "{events:?}");
         assert!(!step(&mut d, 100, true).iter().any(|(_, e)| matches!(e, Event::Completed(_))), "over only while bailing");
+    }
+
+    /// ObjectiveHOM.DidSpecificBodyTweakThisFrame compares its pose with the one the last bail closed in (P+0x3540).
+    #[test]
+    fn a_body_tweak_objective_reads_the_pose_the_bail_closed_in() {
+        let row = tick_row("hom_c_0", 0, serde_json::json!([{"return": {"api": "ObjectiveHOM.DidSpecificBodyTweakThisFrame",
+            "args": [{"lit": 2}]}}]));
+        let mut d = DataObjectives::new("hom_c", &[row], Vec::new(), Default::default()).unwrap();
+        d.activate_flow();
+        let mut feed = ObjectiveFeed::default();
+        let mut step = |d: &mut DataObjectives, bail_pose: Option<usize>| {
+            feed.step(&mut [d], &FeedInput { ticks: 1, state_id: 100, bail_pose, ..Default::default() }, true)
+        };
+        assert!(step(&mut d, Some(1)).is_empty(), "another pose");
+        assert!(step(&mut d, Some(2)).iter().any(|(_, e)| matches!(e, Event::Completed(0))));
     }
 
     #[test]

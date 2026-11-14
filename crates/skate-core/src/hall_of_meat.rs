@@ -306,6 +306,12 @@ impl Poses {
         self.last_air = self.current;
     }
 
+    /// The pose written at bail close (0x82DADC48: P+0x3540 = M+0x87C if M+0x8B9 else -1, b880 §1.5): the pose the
+    /// last air tick matched. [inferred: M+0x8B9 read as "a pose is matched now"; the flag is not decoded]
+    pub fn pose_at_close(&self) -> Option<usize> {
+        self.current
+    }
+
     /// New hits count as judo kicks while the pose (this air's, or the one the last air ended in) is the judo kick.
     pub fn judo(&self) -> bool {
         self.current == Some(Self::JUDO_POSE) || self.last_air == Some(Self::JUDO_POSE)

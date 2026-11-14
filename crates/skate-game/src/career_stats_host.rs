@@ -196,6 +196,7 @@ fn track(
     physics: Option<Res<crate::physics::GamePhysics>>,
     time: Res<Time<Fixed>>,
     transition: Res<crate::map_transition::MapTransition>,
+    challenges: Option<ResMut<crate::challenges::Challenges>>,
 ) {
     let (Some(mut host), Some(mut s)) = (host, skater) else { return };
     let events = std::mem::take(&mut s.scoring.stat_events);
@@ -251,6 +252,9 @@ fn track(
             bail.injuries.tick(tuning, &impacts, dt * BailRecord::TICK_RATE);
         }
     } else if let Some(bail) = host.bail.take() {
+        if let Some(mut c) = challenges {
+            c.last_bail_pose = bail.poses.pose_at_close();
+        }
         for (i, v) in bail.rows() {
             host.record(i, v);
         }
