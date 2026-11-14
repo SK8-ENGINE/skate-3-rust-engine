@@ -1,10 +1,10 @@
 # Skate 3 (TU3) function names for Ghidra
 
-Names for 28,172 functions of the Xbox 360 Skate 3 executable with Title Update 3, worked out while porting Skate 3 to this engine. Load them into your own Ghidra project and the decompiler shows `Score_UpdatePlayers` instead of `FUN_82df18b0`.
+Names for 32,929 functions of the Xbox 360 Skate 3 executable with Title Update 3, worked out while porting Skate 3 to this engine. Load them into your own Ghidra project and the decompiler shows `Score_UpdatePlayers` instead of `FUN_82df18b0`.
 
 This folder holds names and short descriptions only. It contains no game code and no game files.
 
-**Confirmed names and guesses.** 11,423 names are confirmed: what the function does was worked out while porting it. The other 16,749 are guesses: their names start with `guess_` (for example `guess_ParkSetup_ReleaseLists`) (most descriptions also start with "Guess:"). A guess is a best reading of the code that nobody has checked against the game yet, so treat it as a hint. When a guess is confirmed it loses the prefix.
+**Confirmed names and guesses.** 13,383 names are confirmed: what the function does was worked out while porting it. The other 19,546 are guesses: their names start with `guess_` (for example `guess_ParkSetup_ReleaseLists`) (most descriptions also start with "Guess:"). A guess is a best reading of the code that nobody has checked against the game yet, so treat it as a hint. When a guess is confirmed it loses the prefix.
 
 ## What is in here
 
