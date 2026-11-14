@@ -140,6 +140,12 @@ FOLLOW = 'follow_the_leaders'
 # Films (b999) and anywhere films (b1003) run the same objectives_shared graph as follow the leader.
 FILMS = 'films'
 ANYWHERE_FILMS = 'anywhere_films'
+# Hall of Meat (b876 B3, b1005): family hall_of_meats (ChallengeType 0x1F), run by hom_challenge; its online
+# battles (hall_of_meats_battles) are not exported.
+HALL_OF_MEAT = 'hall_of_meats'
+TIME_LIMIT = _field('TimeLimit')
+DISABLE_TIME_LIMIT_SP = _field('DisableTimeLimitForSinglePlayer')
+DISABLE_HOM = _field('DisableHOM')
 FILM_LOW_LIMIT = _field('FilmTimerLowLimit')
 FTL_END_VOLUME = _field('FTLEndVolume')
 FTL_MAX_DISTANCE = _field('FTLMaxFollowDistance')
@@ -806,12 +812,14 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
     def follow(key, fields, bank_binary, family=FOLLOW):
         """A row of the objectives_shared graph: follow the leader (b875 / b1006: the start with its slots, the player 0
         and the leader 1, the end volume the leader and the player race to), films (b999) and anywhere films (b1003: no
-        start, the run begins where the player is, no hull needed). The local params over their framework parents and
-        the objective groups."""
+        start, the run begins where the player is, no hull needed) and the Hall of Meat (b1005: the same row shape plus
+        its time limit). The local params over their framework parents and the objective groups."""
         anywhere = family == ANYWHERE_FILMS
         if key not in local:
             raise ValueError('no local data vault')
-        if key not in hulls and not anywhere:
+        # Single player Hall of Meat rows (hom_*_sp) use the hull of their row without the suffix.
+        hull = key if key in hulls or not key.endswith('_sp') else key[:-3]
+        if hull not in hulls and not anywhere:
             raise ValueError('no hull')
         _, archive, vlt_entry, bin_entry = local[key]
         data, binary = read_vault(archive, vlt_entry, bin_entry, 'local')
@@ -824,9 +832,9 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             parent, more = framework[key_hash(parent)]
             for name, value in more.items():
                 p.setdefault(name, value)
-        folder = work / 'hulls' / MISSIONS / key
-        if key in hulls and not folder.is_dir():
-            hulls[key][0].extract_entries(hulls[key][1], work / 'hulls')
+        folder = work / 'hulls' / MISSIONS / hull
+        if hull in hulls and not folder.is_dir():
+            hulls[hull][0].extract_entries(hulls[hull][1], work / 'hulls')
         folder = folder if folder.is_dir() else None
         world = int((fields.get(WORLD) or {}).get('data', '0' * 16)[:16], 16)
         district = next((d for d, _ in global_locators() if hash64(d) == world), None)
@@ -877,7 +885,7 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
                 raise ValueError(f'start locator {start_name}: {len(starts)} records')
             slots = next((s for _, _, arena in stream_arenas(folder) for s in [locator_slots(arena, start_name)] if s), []) if folder else []
             start = dict(locator=start_name, matrix=starts[0], slots=slots)
-        elif not anywhere:
+        elif not anywhere and family != HALL_OF_MEAT:
             raise ValueError('no StartLocation')
         paths = raw(ROUND_PATHS)
         names = [n for n in (cstring(binary, o).decode('utf-8') if o else '' for o in (struct.unpack_from('>200I', paths, 0) if len(paths) >= 0x328 else ())) if n]
@@ -925,6 +933,8 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
             allow_session_markers=flag(ALLOW_SESSION_MARKERS), reset_ai_on_bail=flag(RESET_AI_ON_BAIL, True),
             reset_ai_on_marker=flag(RESET_AI_ON_MARKER, True), reset_objectives_on_marker=flag(RESET_OBJECTIVES_ON_MARKER),
             spawn_offboard=flag(SPAWN_OFFBOARD),
+            time_limit=number(TIME_LIMIT), disable_time_limit_for_single_player=flag(DISABLE_TIME_LIMIT_SP),
+            disable_hom=flag(DISABLE_HOM),
             intro=decoded_events(p.get(PRESENTATION['intro']), binary, bank_binary),
             ai_paths=dict(names=names, all_paths=struct.unpack_from('>I', paths, 0x320)[0] == 1 if len(paths) >= 0x328 else True,
                           param=struct.unpack_from('>I', paths, 0x324)[0] if len(paths) >= 0x328 else 0),
@@ -936,6 +946,7 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
     ribbon_names = {hash64(k): k for (c, k) in rows if c in (class_of('ribbon_indicator'), class_of('ribbon_spline_colour'))}
     icon_names = {hash64(k): k for (c, k) in rows if c == class_of('fe_map_icons')}
     result, tutorials, races, contests, follows, films, skipped = [], [], [], [], [], [], []
+    homs = []
     for (cls, key), (parent, _) in sorted(rows.items()):
         if cls != CHALLENGE or key.endswith('_ol'):
             continue
@@ -969,6 +980,12 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
         if film_family and key not in (FILMS, ANYWHERE_FILMS):
             try:
                 films.append(follow(key, fields, origin[cls, key][1], film_family))
+            except (KeyError, ValueError, StopIteration, struct.error) as error:
+                skipped.append(f'{key} ({error})')
+            continue
+        if HALL_OF_MEAT in walked[1:] and 'hall_of_meats_battles' not in walked:
+            try:
+                homs.append(follow(key, fields, origin[cls, key][1], HALL_OF_MEAT))
             except (KeyError, ValueError, StopIteration, struct.error) as error:
                 skipped.append(f'{key} ({error})')
             continue
@@ -1053,10 +1070,10 @@ def export(game_root, dlc_vaults, dlc_bigs, work, output, text=None, report=prin
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'format': FORMAT, 'version': VERSION, 'challenges': result, 'tutorials': tutorials,
                                   'own_the_lots': lots, 'races': races, 'contests': contests, 'follow_the_leaders': follows,
-                                  'films': films},
+                                  'films': films, 'hall_of_meats': homs},
                                  indent=1), encoding='utf-8')
     report(f'Challenges: {len(result)} ({", ".join(FAMILIES)}) on {len({c["map"] for c in result})} maps, '
            f'{len(tutorials)} tutorials, {len(lots)} own the lots, {len(races)} races, {len(follows)} follow the leader, '
-           f'{len(films)} films'
+           f'{len(films)} films, {len(homs)} Hall of Meat'
            + (f'; left out: {", ".join(skipped)}' if skipped else ''))
     return result
