@@ -141,3 +141,25 @@ pub(super) fn player_shapes(world: &World) -> Vec<(skate_dynamics::rapier3d::pre
 pub(crate) fn visual_solids(mods: &Mods) -> Vec<SolidBody> {
     mods.world.solid_bodies()
 }
+
+/// Mod bodies as ped navigation obstacles (doc 26, fix 11): `(id, world AABB min, max, linear
+/// velocity, attached)` per body in id order, skater proxies left out. A body the player holds
+/// (attach) counts as carried, so it is no obstacle (retail switches a carried object's off).
+pub(crate) fn obstacle_solids(mods: &Mods) -> Vec<(u64, [f32; 3], [f32; 3], [f32; 3], bool)> {
+    let skip: BTreeSet<u64> = mods.skater_proxies.values().copied().collect();
+    let attached = mods.attach.as_ref().and_then(|a| mods.bodies.get(&(a.owner.clone(), a.body.clone()))).copied();
+    let mut out: Vec<_> = mods.world.solid_bodies().into_iter()
+        .filter(|b| !skip.contains(&b.id) && !b.colliders.is_empty())
+        .map(|b| {
+            let (mut min, mut max) = ([f32::INFINITY; 3], [f32::NEG_INFINITY; 3]);
+            for c in &b.colliders {
+                let aabb = c.shape.compute_aabb(&c.pose);
+                let (lo, hi) = (aabb.mins.to_array(), aabb.maxs.to_array());
+                for k in 0..3 { min[k] = min[k].min(lo[k]); max[k] = max[k].max(hi[k]); }
+            }
+            (b.id, min, max, b.linvel.to_array(), Some(b.id) == attached)
+        })
+        .collect();
+    out.sort_by_key(|b| b.0);
+    out
+}

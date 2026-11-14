@@ -5,7 +5,7 @@ description: Iterate on skate3rust game audio when someone reports a sound that 
 
 # Audio tuning
 
-On the audio branch (upstream PR #32 and follow-ups) the **native runtime is the only audio path**
+In upstream `main` (since PR #32 merged) the **native runtime is the only audio path**
 (`crates/skate-audio`). Sounds are not "picked": every sound comes from retail's mechanism (AEMS programs, Splice
 banks, MixMap, posters), so a wrong sound means a wrong or missing mechanism or input. Port work: skill `aems-port`.
 Never commit decoded audio or copy game data into docs. Never build A/B or audition pages; measure internally, people

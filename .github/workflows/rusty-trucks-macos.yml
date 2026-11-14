@@ -1,0 +1,22 @@
+# Rusty Trucks macOS build for Hailey-Ross/rusty-trucks (docs/hails-additions/44-every-os.md): the game and its tests on
+# macOS for every push to hails-additions, its releases and manual runs. Steps: rusty-trucks-unix-build.yml.
+name: Rusty Trucks macOS build
+on:
+  push:
+    branches: [hails-additions]
+  release:
+    types: [published]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: fork-build-macos-arm64-${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'Hailey-Ross/rusty-trucks' && (github.event_name != 'release' || github.event.release.tag_name != 'experimental')
+    uses: ./.github/workflows/rusty-trucks-unix-build.yml
+    with:
+      os: macos-latest
+      target: macos-arm64
+      refpack: librefpack.dylib

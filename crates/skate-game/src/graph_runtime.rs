@@ -311,7 +311,7 @@ impl StockGraphs {
     }
 }
 
-fn load_graph(root: &Path, relative: &str) -> Result<LoadedGraph, String> {
+pub(crate) fn load_graph(root: &Path, relative: &str) -> Result<LoadedGraph, String> {
     let path = root.join(relative);
     let source = StateGraph::load(&path).map_err(|error| error.to_string())?;
     let binding = Binding::from_graph(&source).map_err(|error| error.to_string())?;

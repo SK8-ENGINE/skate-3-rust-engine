@@ -33,8 +33,10 @@ struct VertexOutput {
 fn vertex(v: Vertex) -> VertexOutput {
     var out: VertexOutput;
     let world_from_local = mesh_functions::get_world_from_local(v.instance_index);
+    // The flag's cloth sway must match the main pass, or its depth would not.
+    let sway = bindings::flag_sway(v.material_index, v.color);
     let world_position = mesh_functions::mesh_position_local_to_world(
-        world_from_local, vec4<f32>(v.position, 1.0));
+        world_from_local, vec4<f32>(v.position + sway, 1.0));
     out.clip_position = position_world_to_clip(world_position.xyz);
 #ifdef UNCLIPPED_DEPTH_ORTHO_EMULATION
     // Casters behind the cascade's near plane still occlude, so carry the true

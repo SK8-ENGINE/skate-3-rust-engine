@@ -240,6 +240,11 @@ fn update(
     entered: MessageWriter<TriggerEntered>,
     exited: MessageWriter<TriggerExited>,
 ) {
+    // Retail moves the entity within the frame; ours moves a tick or two later, so while a teleport is in flight the
+    // player's old spot is not checked (a challenge start entered and left its spot volumes from the sign-up point).
+    if state.player_tracked && skater.teleport_pending() {
+        return;
+    }
     let player = state.player_tracked.then(|| player_cylinder(&skater, &state.shape)).flatten();
     step(&volumes, &bodies, &mut state, player, entered, exited);
 }

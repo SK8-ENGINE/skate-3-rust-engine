@@ -1,7 +1,7 @@
 # SFXObj_SkateBoard rolling layers: Class_rolling, Rolling_Rattle_Class, c_board_slide (spec, 2026-10-02)
 
 Native port: `crates/skate-audio/src/player/rolling.rs`, tests
-`tests/rolling_banks.rs` (data-gated). Read from the TU3 recompilation (reference only; every function below was dumped
+`tests/rolling_banks.rs` (data-gated). Read from the TU3 (title update 3) recompilation (reference only; every function below was dumped
 to a local text file per address). Companion specs: `grain-player-spec.md` §1.4/§2.7/§3.3 (routing, push
 envelope), `aems-evaluator-spec.md` §1.10 (a post reaches every bank bound to the class).
 
@@ -32,7 +32,7 @@ Per frame: SkateBoard input 0 := 0. Pass 0 = primary truck `p` (`+1500`), pass 1
    AudioSurfaceMap word 1 of `min(material, 94)` (`sub_82494CD8`).
 2. `new == stored[t]` → next pass.
 3. `stored[t] != 14`: input 0 := 32767 (this frame). If **local and the other truck has no live sound** (`+1496 + o`
-   == 0): **hand over** — `p := 1 − p`, swap `t` ↔ `o` (no stop). Else stop `t`: kind 0 → release its patch
+   == 0): **hand over**: `p := 1 − p`, swap `t` ↔ `o` (no stop). Else stop `t`: kind 0 → release its patch
    (`+1312 + 4t`); kind 1 with grains running (`+1328 + t`) → stop both players, reset both chains; live := 0.
 4. `stored[t] := new`; 14 → next pass (kind keeps its value).
 5. `+760` := member key of `new` (`sub_824C8370`, soft by `sub_824B23C8` = state `+684` for the local player); the grain
@@ -82,9 +82,9 @@ create; patches `824C5F88` 2 / 14 / 14; layer 5 `824C9FE8` 1 / 0 / 108.
 ### Which bank answers (census `class_rolling_selector_census`, evaluator only)
 
 A post reaches PatchBank_Rolling_Surfaces, _SpiderCracks, _Objects and _RocksBounce. Slots opened (8 s):
-- always: Rolling_Surfaces 11, 12, SpiderCracks 0 / 11 (selectors 0–5) or 17 (6–15), Objects 9 / 12 / 15 (by speed) —
+- always: Rolling_Surfaces 11, 12, SpiderCracks 0 / 11 (selectors 0–5) or 17 (6–15), Objects 9 / 12 / 15 (by speed):
   silent at the gains below (none shows in the rendered table);
-- surface word 3: Rolling_Surfaces 15 (the held layers' texture — retail's most played stream, 50 of 133);
+- surface word 3: Rolling_Surfaces 15 (the held layers' texture: retail's most played stream, 50 of 133);
 - selector 1: Rolling_Surfaces 0, 2 (4 at low speed); selectors 2–15 (except 9): 1, 3 (5 at low speed);
 - selector 9: Rolling_Surfaces 13, 14; selector 5: SpiderCracks 0–16; selectors 10, 11: Objects 0–2, 12–14 (5–7, 15–17
   fast; 8–11 slow);
@@ -156,8 +156,8 @@ GAIN × SEND per start (report "Levels per bank").
 | Rolling_Rattles (push on asphalt) | 0.336 / 0.354 / 0.366 | 0.007 / 0.301 / 0.366 | 0.032 / 0.362 / 0.370 |
 | PatchBank_SpiderCracks (layer 5) | p90 0.226–0.341, max 0.226 / 0.277 / 0.355 | 0.000 / 0.223 / 0.293 | 0.001 / 0.228 / 0.353 |
 | PatchBank_Rolling_Surfaces held layers (surface 3, slot 15) | 0.030 / 0.046 / 0.102 | 0.007 / 0.044 / 0.074 | 0.010 / 0.121 / 0.388 |
-| Rolling_Surfaces patch surface 8 (slots 1, 3) | 0.024 / 0.120 / 0.115 (max 0.169) | — | slot 3 median 0.126, max 0.358 |
-| Rolling_Surfaces patch surface 13 (slots 11–14) | 0.106 / 0.111 / 0.115 | — | slot 14 max 0.174, 13 max 0.284 |
+| Rolling_Surfaces patch surface 8 (slots 1, 3) | 0.024 / 0.120 / 0.115 (max 0.169) | n/a | slot 3 median 0.126, max 0.358 |
+| Rolling_Surfaces patch surface 13 (slots 11–14) | 0.106 / 0.111 / 0.115 | n/a | slot 14 max 0.174, 13 max 0.284 |
 | PatchBank_Objects (surfaces 10, 12) | 0.101 / 0.166 / 0.203 | 0.001 / 0.030 / 0.030 | 0.003 / 0.219 / 0.250 |
 | board_scrapes (loose 1/2, 6–15 km/h, per frame) | 0.057–0.058 median, max 0.060–0.099 | 0.002 / 0.096 / 0.256 | 0.004 / 0.121 / 0.346 |
 
@@ -176,7 +176,7 @@ trigger: the first rattle's peak equals the later ones (asserted).
   `Rolling::process`'s `GrainEvent`s (two trucks, hand-over, never stopping the local player's last sounding truck;
   the MixMap mutes it on grinds / in the air), and its SkateBoard input 0 / 6 writes taken from `Routed`.
 
-## 9. UNCERTAIN / not modelled
+## 9. UNCERTAIN / not modeled
 
 - `sub_824B23C8` for non-local players (a lookup, not `+684`).
 - The loose-board vectors and `[rec+24]+3475` (§4); our engine publishes none of it yet.
@@ -195,11 +195,11 @@ Session `state_20261002_203746` (+ stderr log), headless analysis:
   for a surface one-shot at the session's takeoff speeds. Fix: skip those two `BED_CUES` when the native player runs
   (and once `rolling.rs` is integrated, they are replaced).
 - **The native layers go quiet in the air** (`layers_go_quiet_after_takeoff`: push at 30 km/h, takeoff 10 frames later:
-  rattle peak 0.217 / patch 0.173 on the ground, no voice above 0 from 10 frames after takeoff) — SkateBoard
+  rattle peak 0.217 / patch 0.173 on the ground, no voice above 0 from 10 frames after takeoff): SkateBoard
   level(1)/(6)/(7)/(9)/(10) are 0 without wheels.
 - Retail facts checked for the other owners: retail's state `+208` keeps the riding speed in the air and fluctuates
   ±5 km/h (GREC 180430, owner 40C33020, 96 takeoffs), so SenseOfSpeed's rattle (level(1) not wheel-gated: 832 at
   31 km/h both on the ground and in the air) toggling around 30 km/h in jumps (11 posts in this 38 s session) is retail
-  behaviour, not a bug. Retail's wheel material is 143 on 96 % of air frames (37938 / 39685), so routing surface 3
+  behavior, not a bug. Retail's wheel material is 143 on 96 % of air frames (37938 / 39685), so routing surface 3
   (asphalt_smooth) in the air and the grain bed's "bind asphalt_smooth_hard (surface tag 0)" at landings is retail-like;
   the bed is muted there by level(1) = 0 (the grain bed's part).

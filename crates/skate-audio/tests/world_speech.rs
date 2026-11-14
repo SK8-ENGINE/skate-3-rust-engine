@@ -224,6 +224,8 @@ fn load_bank(name: &str, bank: &str) -> Option<Data> {
             tuning.insert(
                 id.parse().unwrap(),
                 EventTuning {
+                    start_delay: f("unknown_0"),
+                    stream_gap: f("unknown_4"),
                     gap: f("gap"),
                     priority: f("priority") as i32,
                     interrupt: e.get("flags_12").is_some_and(|b| b.arr().get(1).is_some_and(|x| x.num() != 0.0)),

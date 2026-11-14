@@ -64,6 +64,12 @@ pub(super) fn snapshot(world: &World) -> Value {
 
 /// Deliver queued enter/exit events as `on_event` to every running mod.
 pub(super) fn dispatch(world: &mut World, mods: &mut Mods) {
+    if let Some(mut teleporters) = world.get_resource_mut::<crate::teleporters::Teleporters>() {
+        for used in std::mem::take(&mut teleporters.mod_queue) {
+            mods.manager.dispatch("on_event", json!({"name": "teleporter_used", "teleporter": used.teleporter,
+                "exit": used.exit + 1, "body": used.body}));
+        }
+    }
     let Some(mut state) = world.get_resource_mut::<TriggerState>() else { return };
     let events = std::mem::take(&mut state.mod_queue);
     if events.is_empty() {
@@ -108,6 +114,53 @@ pub(super) fn set_box(world: &mut World, owner: &str, key: String, options: skat
         instance_id: None, link_guid: None, source: VolumeSource::Mod(owner.to_owned()),
     });
     Ok(())
+}
+
+/// `sdk.triggers.teleporter`: add or replace (options) or remove (none) one of the mod's teleporters on the loaded map.
+pub(super) fn set_teleporter(world: &mut World, owner: &str, key: String, options: Option<skate_mods::TeleporterOptions>) -> Result<(), String> {
+    let slot = (owner.to_owned(), key.clone());
+    let Some(options) = options else {
+        world.resource_mut::<crate::teleporters::Teleporters>().mods.remove(&slot);
+        return Ok(());
+    };
+    let map = world.resource::<crate::map_transition::CurrentMap>().path.as_deref()
+        .and_then(|p| p.file_stem()).map(|s| s.to_string_lossy().into_owned())
+        .ok_or("teleporters need a loaded map")?;
+    // The volume: a map volume by id, else the mod's own box by key.
+    let volumes = world.resource::<TriggerVolumes>();
+    let volume = if volumes.map.iter().any(|v| v.id == options.volume) {
+        options.volume.clone()
+    } else if volumes.mods.contains_key(&(owner.to_owned(), options.volume.clone())) {
+        TriggerVolumes::mod_id(owner, &options.volume)
+    } else {
+        return Err(format!("no trigger volume {}", options.volume));
+    };
+    let teleporters = world.resource::<crate::teleporters::Teleporters>();
+    if !teleporters.mods.contains_key(&slot) && teleporters.mods.keys().filter(|(o, _)| o == owner).count() >= MAX_PER_MOD {
+        return Err(format!("{MAX_PER_MOD} teleporters per mod maximum"));
+    }
+    let exits = options.exits.iter().map(|e| {
+        // Rows: right, up, forward (sin h, 0, cos h), position (as setup's locator matrices).
+        let (s, c) = e.heading.sin_cos();
+        crate::teleporters::Exit { map: e.map.clone().unwrap_or_else(|| map.clone()), locator: String::new(),
+            matrix: [[c, 0., -s, 0.], [0., 1., 0., 0.], [s, 0., c, 0.], [e.position[0], e.position[1], e.position[2], 1.]],
+            world: e.world.clone() }
+    }).collect();
+    // The icon: a `ribbon_indicator` key, upright at the mod's point or the volume's center.
+    let indicator = options.indicator.clone().map(|key| {
+        let at = options.indicator_position.or_else(|| volumes_center(world, &volume)).unwrap_or_default();
+        crate::visual_indicators::Placement { key, locator: String::new(),
+            matrix: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [at[0], at[1], at[2], 1.]],
+            style: options.indicator_style.clone(), colour: options.indicator_colour.clone(), always: false, fit: None }
+    });
+    let teleporter = crate::teleporters::Teleporter { id: key, map, volume_id: volume, volume: None, title_id: None,
+        title: options.title, exits, layout: None, indicator };
+    world.resource_mut::<crate::teleporters::Teleporters>().mods.insert(slot, teleporter);
+    Ok(())
+}
+
+fn volumes_center(world: &World, id: &str) -> Option<[f32; 3]> {
+    world.resource::<TriggerVolumes>().get(id).map(|v| v.shape.center)
 }
 
 pub(super) fn remove_box(world: &mut World, owner: &str, key: &str) {
@@ -201,6 +254,9 @@ pub(super) fn clear_owner(world: &mut World, owner: &str) {
     if let Some(mut volumes) = world.get_resource_mut::<TriggerVolumes>() {
         volumes.clear_owner(owner);
     }
+    if let Some(mut teleporters) = world.get_resource_mut::<crate::teleporters::Teleporters>() {
+        teleporters.clear_owner(owner);
+    }
     if let Some(mut tracked) = world.get_resource_mut::<TrackedBodies>() {
         tracked.0.retain(|(o, _), _| o != owner);
     }
@@ -218,6 +274,9 @@ pub(super) fn clear_owner(world: &mut World, owner: &str) {
 
 /// World change / runtime reset: mods re-add their volumes on `world_changed`.
 pub(super) fn clear(world: &mut World) {
+    if let Some(mut teleporters) = world.get_resource_mut::<crate::teleporters::Teleporters>() {
+        teleporters.mods.clear();
+    }
     if let Some(mut tracked) = world.get_resource_mut::<TrackedBodies>() {
         tracked.0.clear();
     }

@@ -16,7 +16,7 @@
 //!
 //! UNCERTAIN (spec §8.3): the tap alignment (n−D vs n−D−1), how many blocks retail waits before a
 //! new configuration is heard (its module timer; we apply it at the next block), whether resizes
-//! clear the lines (we zero them), the f32 association of the vectorised kernels.
+//! clear the lines (we zero them), the f32 association of the vectorized kernels.
 
 const SPEED_OF_SOUND_INV: f32 = 0.002_900_232_1;
 const KNOTS: [f32; 9] = [0.0, 12.5, 25.0, 37.5, 50.0, 62.5, 75.0, 87.5, 100.0];

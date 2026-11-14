@@ -1,5 +1,5 @@
 //! PeakingIir2 (PI20, `sub_82B2C658`; spec `audio-specs/aems-voice-graph-spec.md` §4.10): an RBJ peaking EQ.
-//! Parameters: 0 = centre (Hz), 1 = linear gain, 2 = Q. Class defaults 96000 Hz / 1.0 / 3.0. The
+//! Parameters: 0 = center (Hz), 1 = linear gain, 2 = Q. Class defaults 96000 Hz / 1.0 / 3.0. The
 //! module bypasses (pass-through, history cleared once) only when the gain is exactly 1.0; ω is
 //! clamped to [FLOOR, CEIL] and Q to 0.2..20 for the coefficients. Same Direct Form I kernel as
 //! the high/low-pass ([`super::biquad::kernel`]). Not bit-exact against retail (no replay vectors:
@@ -23,7 +23,7 @@ impl Default for PeakingIir2 {
     }
 }
 
-/// RBJ peaking coefficients (A = √gain, α = sin ω / 2Q), normalised by a0, in f32.
+/// RBJ peaking coefficients (A = √gain, α = sin ω / 2Q), normalized by a0, in f32.
 pub fn coefficients(freq: f32, gain: f32, q: f32, rate: f32) -> Coefficients {
     let w = omega(freq, rate);
     let w = if w.is_nan() { CEIL } else { w.clamp(FLOOR, CEIL) };
@@ -66,7 +66,7 @@ impl PeakingIir2 {
         // is bit-identical to an earlier silent channel's copies that channel's output and history:
         // same coefficients, same history, same input → the same result from the pure kernel. The
         // rest take [`kernel_block`] (settled-filter shortcut). Bit-identical to running [`kernel`]
-        // on every channel (optimisation pass 2026-10-03; tests in `dsp::biquad`).
+        // on every channel (optimization pass 2026-10-03; tests in `dsp::biquad`).
         let mut silent_before: [Option<[u32; 4]>; 8] = [None; 8];
         for ch in 0..channels.len().min(8) {
             let (done, rest) = channels.split_at_mut(ch);
@@ -132,7 +132,7 @@ mod tests {
         clip(&mut [&mut c[..]], 100.0);
     }
 
-    /// The process before the optimisation pass (test-only reference): the plain kernel on every
+    /// The process before the optimization pass (test-only reference): the plain kernel on every
     /// channel.
     fn process_reference(eq: &mut PeakingIir2, channels: &mut [&mut [f32]], rate: f32) {
         if eq.gain == 1.0 {
@@ -155,7 +155,7 @@ mod tests {
 
     /// Six-channel blocks as an eEQChain bus sees them (silent channels, a voice on some, -0.0,
     /// a constant), with the parameters changing as the jitter / re-rolls change them: the
-    /// optimised process (twin copies, settled filters, silent tails) equals the reference bit for
+    /// optimized process (twin copies, settled filters, silent tails) equals the reference bit for
     /// bit, block by block, outputs and histories.
     #[test]
     fn silent_shortcuts_match_the_plain_kernel() {

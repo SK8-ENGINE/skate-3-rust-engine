@@ -74,7 +74,7 @@ pub(crate) struct Multiplayer {
     transport: Option<Box<dyn transport::Transport>>,
     lobby: Option<Session>,
     info: Info,
-    schema: network::Schema,
+    pub(crate) schema: network::Schema,
     anchors: Vec<usize>,
     remotes: BTreeMap<u64, Remote>,
     pub status: String,
@@ -673,7 +673,7 @@ pub(crate) fn prepare(net: Res<Multiplayer>, mut physics: ResMut<GamePhysics>, s
     proxies.bodies.clear();
     proxies.volumes.clear();
     proxies.solids.clear();proxies.groups.clear();proxies.actors.clear();
-    proxies.dynamics_before.clear();proxies.dynamics_deltas.clear();
+    proxies.dynamics_before.clear();proxies.dynamics_deltas.clear();proxies.observed.clear();
     for (peer, remote) in &net.remotes {
         if mods.as_ref().is_some_and(|m| crate::modding::peer_suspended(m, *peer)) { continue; }
         if let Some(prediction) = skate_net::prediction::CollisionPrediction::at(remote.body_at.elapsed().as_secs_f32()) {
@@ -726,6 +726,11 @@ fn player_name_path(asset_root: &std::path::Path) -> std::path::PathBuf {
         .parent()
         .unwrap_or(asset_root)
         .join("settings/player.json")
+}
+
+/// The local player's name (`settings/player.json`, "Player" when unset): the race leaderboard's own row.
+pub(crate) fn local_player_name(asset_root: &std::path::Path) -> String {
+    load_player_name(&player_name_path(asset_root))
 }
 
 fn load_player_name(path: &std::path::Path) -> String {

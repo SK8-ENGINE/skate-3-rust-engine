@@ -3,7 +3,7 @@
 > **2026-10-02 19:00: the recomp sessions behind the measured sections below were deleted (pre-fix trace writer, a few malformed lines). Treat those findings as "re-verify on clean data" (only all_20261002_163809 / _164620 / _180430 and world_hooks are clean).**
 
 
-From reading the recompiled TU3 code (reference only; 2026-10-02). Addresses are evidence; never copy
+From reading the recompiled TU3 (title update 3) code (reference only; 2026-10-02). Addresses are evidence; never copy
 code. Record offsets are decimal.
 
 ## File and records
@@ -74,7 +74,7 @@ picks one at random), curve type 0xF209C093F40A4CCC.
 | Hash_C493ED34D1D32521 | patch index (clamped 0..500 for `c_emitter`) | 81 |
 | Hash_6D18B8674D7E5337 | `Sk8::Audio::eVolumeType`: 1 = looping emitter, 5 = reverb zone, 4 = single winner; 0/2/3/7 also exist | 1 (inherited) |
 | Hash_F209C093F40A4CCC | `eVolumeFalloffType`: 0 = (1−d)², 1 = 1−d, other = flat | 0 |
-| Hash_C48AB73A227B3B00 | variant list (RefSpec array) | — |
+| Hash_C48AB73A227B3B00 | variant list (RefSpec array) | n/a |
 
 Examples (volume / f9908 / patch):
 - water_lapping 1.0 / 15 / 82; water_lapping_pond 0.8 / 15 / 83; trees_rustle 0.25 / 38 / 76
@@ -197,7 +197,7 @@ Per sound (`aud_emitter` record):
 - **Lookup:**
   - 128 m tiles (`sub_82C0EFA0`), each with 19 layer slots matched by `name_id(layer name)`:
     7 audio_ambience, 8 audio_emitters, 10 audio_reverb, plus districts, fog, sky, bloom, etc.
-  - Each slot is a quadtree (`sub_82C0F0B0`): header centre (x, z) +0, half-size +16, node count +32,
+  - Each slot is a quadtree (`sub_82C0F0B0`): header center (x, z) +0, half-size +16, node count +32,
     node offset +36.
   - Nodes are 10 bytes: four u16 children and a u16 value. child[0] 0xFFFF = leaf; value 0xFFFF = no key.
   - Children are tested in order −x−z, −x+z, +x−z, +x+z, with inclusive edges.
@@ -328,7 +328,7 @@ in 30 s (not 24). Details: `aems-evaluator-spec.md`.
 
 ## Zone bed level: −11 dB base VERIFIED (2026-10-02)
 `check_bed_level.py` compared retail capture levels (1 s RMS percentiles, long-run stops) with the bed's
-5-channel stream × zone volume folded like the capture (host fold 0.4·(front + surround + 0.5·centre)).
+5-channel stream × zone volume folded like the capture (host fold 0.4·(front + surround + 0.5·center)).
 - Medians, retail vs predicted with −11 dB: dt_open −42.1 / −42.1; dt_main −39.2 / −38.7;
   dt_rez −44.2 / −43.6; indu_quarry −47.7 / −47.8. Without the base, every prediction is 11 dB too loud.
 - The stream channel order L R C Ls Rs fits slightly better than L C R Ls Rs (0.3 dB). Unverified.

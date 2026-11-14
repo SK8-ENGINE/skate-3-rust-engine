@@ -83,6 +83,7 @@ pub(crate) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         0
     };
     if state.leaving_updates > 35 {
+        bevy::log::info!("GRIND_WIPEOUT fired=[\"leaving_too_long\"] leaving_updates={} speed={speed:.2}", state.leaving_updates);
         skater.wipeout.state.request(17, 0.);
     }
     state.output.crouch = dot3(frame[2], state.output.normal).abs() * 0.4;

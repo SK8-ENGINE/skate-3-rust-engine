@@ -1,9 +1,9 @@
-# EA AEMS (Skate 3 audio runtime) — reference notes for the port
+# EA AEMS (Skate 3 audio runtime): reference notes for the port
 
 ## Native-port spec index (2026-10-02)
 | Spec | Status |
 |---|---|
-| `rwaudio-prior-work.md` | done: prior art (nfsmw CC0, BurnoutDecomp b5-decomp/BP-Decomp, tw2004 CC0), licences |
+| `rwaudio-prior-work.md` | done: prior art (nfsmw CC0, BurnoutDecomp b5-decomp/BP-Decomp, tw2004 CC0), licenses |
 | `aems-evaluator-spec.md` | done: ABKC/MOIR layouts, runtime, 40 opcodes, timing, RNG, test plan; **PoC op 5 bug** |
 | `aems-voice-graph-spec.md` | done: SndPlayer1 … Send DSP, buses, output stage, validation |
 | `mixmap-spec.md` | done: MXB format (247 controllers), evaluation math, Ambience/Emitter outputs, ducking; decoder + reference evaluator match PR #4 on 73,800 cells |
@@ -23,10 +23,10 @@ Knowledge only, from others' hard-won work; never copy their code (it transcribe
 - sk8Audio (andrewnakas/skate3-audio, NO license → reference only), branch `phase0-measurements`:
   `docs/audio-banks.md` (canonical bank write-up), `execution-trace.md`, `rw-audio-core.md`, `rw_audio_structs.h`.
   Read from a local clone.
-- Our own measurements in the recompilation (summarised in doc 11).
-PR #4 docs ≠ code in places (slots 19/20 claimed ported but missing; setters only in authored.rs) — trust code.
+- Our own measurements in the recompilation (summarized in doc 11).
+PR #4 docs ≠ code in places (slots 19/20 claimed ported but missing; setters only in authored.rs); trust code.
 
-## .abk (ABKC) — big-endian, offsets from bank start
+## .abk (ABKC): big-endian, offsets from bank start
 Header: +0 "ABKC"; +0x08 variant (0x05030001 ×369, 0x05030002 ×7); +0x0A u16 input-record count; +0x14 size;
 +0x18/+0x20 S10A sample-bank offset (twice); +0x1C first record (0x5C); +0x24 S10A length; +0x30 code fixups
 (empty on all banks); +0x34 rebase list (add bank base; 4,656 words); +0x38 exports (count, 12-byte entries:
@@ -121,7 +121,7 @@ Conventions: vf52(0) azimuth 0..65535; vf56(n) pitch cents → ×4096 (0..8192);
   **Retail's continuous rolling = the grain player; Class_rolling is sparse one-shot texture.**
 - Rolling_Rattle_Class: w3 speed, w4 surface code 1..5, w6 1, w8 25000, w10 32767, w11 8; updater w2 pitch(3),
   w7 level(16), w8/w9 filters 14/15, w10 level(6); posted on push trigger state byte 335.
-- Contacts (SFXObj_Contacts): Splice (SPLC .bnk) one-shots — formats splc.rs, selection/gain/pitch
+- Contacts (SFXObj_Contacts): Splice (SPLC .bnk) one-shots: formats splc.rs, selection/gain/pitch
   authored/oneshot.rs, game side player_audio/contact_voices.rs. Our decoded rule: doc 11 (recomp measurements).
 - Collision (SFXObj_Collision / CSTATEMGR_Collision): 10 LRU slots, two voices per message (one per material),
   material → Skate_Collisions.bnk / Skate_Metal.bnk (collision_states.rs).
@@ -133,7 +133,7 @@ grind_instance example (post payload, tick 256/48000, redeliver traced updates, 
 render_player_audio; retail capture tags ST/PO/UP/RL/BD/GP/GL/VF/MC + audio_capture_extract/verify/compare
 tools; compare medians in narrow speed bins, never session averages.
 
-## PR #1 (mx/audio-engine-vehicles) — what it adds (report 2026-10-01)
+## PR #1 (mx/audio-engine-vehicles): what it adds (report 2026-10-01)
 PR #1's skate-audio-core = PR #4's (PR #4 is a later superset: adds measured transfer functions §11, defect 13
 "Collision switch = input 15 bit 0 on controller 60030000"). PR #1 adds the game side:
 `skate-game/src/player_audio.rs` + `player_audio/**`, `physics/audio_observation.rs`, `skate-data/src/audio/*`,
@@ -176,7 +176,7 @@ member+4 × spread(+44) × block[0] × fade envelope (+24..+40, mostly zero); pi
 Record header (sub_82975B08): block[0] ×= record +8 (record gain, e.g. 0.5 landing impact); block[1] ×= container
 random (record +12/+16, pitch). block[0] = level rewritten by the owner every frame; block[1] = an owner output in
 cents (1200/octave). **Our own main-checkout `audio_formats.splc_patches` / game_audio play_record read +8 as gain
-too — fix in Phase B.**
+too; fix in Phase B.**
 Contacts (sub_824BE1B8 per frame): pop +60 = trunc(level(2)×K[sel])/32767 (vault 8BF3668CF7994CD4 / 212B6F75D11AA39B);
 pop roll +96 = level(7); ollie voice 0x448 +52 = level(12); landing impact 0x447 (container 1095) +56 = level(13);
 touchdown voices (sub_824B8D48, 4 slots +140) = trunc(level(3)×K[cat][3·kind+variant])/32767 (vault arrays

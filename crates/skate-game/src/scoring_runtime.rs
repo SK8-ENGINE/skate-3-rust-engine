@@ -50,8 +50,37 @@ pub(crate) struct Frame {
     pub teleported: bool,
     pub reverting: bool,
 }
+/// What the career stats read (`career_stats_host`, doc 31 "Career stats"), drained every fixed step.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum StatEvent {
+    /// A trick left its slot (the stats' trick end 0x82773D98): its id, whether it completed, whether the player saw
+    /// it announced, and the time held and distance covered when its move ended here (the move tracker 82DB0588;
+    /// 0 when the move carries on as the next trick).
+    TrickEnd { id: usize, success: bool, announced: bool, held: f32, distance: f32 },
+    /// The first tick of a body flip (82DA8EB8 latches it once per flip).
+    BodyFlipAttempt,
+    /// The air ended landed with this many body flips (82773C00, |P+0x2674|).
+    BodyFlips(u32),
+}
+/// One banked sequence: its score and whether it ended in a bail.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct BankedSequence {
+    pub score: i32,
+    pub wiped_out: bool,
+    /// Completed tricks of the sequence by trick category (`catalog::category`; retail `Trick.GetNumTrickType`).
+    pub tricks: [u16; SEQUENCE_CATEGORIES],
+    /// An air of the sequence landed with body flips (retail `didFlip` from `Trick.GetCompletedAirNumFlips`).
+    pub flipped: bool,
+}
+
+/// Trick categories counted per sequence (catalog categories 0..13).
+pub(crate) const SEQUENCE_CATEGORIES: usize = 14;
+
+const BANKED_CAP: usize = 16;
+
 pub(crate) struct Runtime {
     pub data: ScoringData,
+    pub(crate) stat_events: Vec<StatEvent>,
     pub session: Session,
     collector: Collector,
     carriers: [Option<Carrier>; 4],
@@ -82,6 +111,18 @@ pub(crate) struct Runtime {
     revert_id: Option<usize>,
     sequence_active: bool,
     sequence_score: f32,
+    banked: Vec<BankedSequence>,
+    /// Keys (hash of the scoring_trick row) of the tricks announced since the last take (retail's began list, research
+    /// b865 §2: BeganTrick). Capped so nothing grows without a reader.
+    announced: Vec<u64>,
+    /// Keys of the tricks completed since the last take, landed and announced (retail's ended list and its trick-done
+    /// message 0x92CC9BBD, b865 §1: DidSpecificTrick and the ThisFrame variants). Bailed and unannounced ones are
+    /// not in it. Capped like `announced`.
+    done: Vec<u64>,
+    seq_tricks: [u16; SEQUENCE_CATEGORIES],
+    seq_flipped: bool,
+    /// The manual held now: (tail, seconds held).
+    manual: Option<(bool, f32)>,
     trick_name: String,
     display_base: String,
     display_spin_degrees: i32,
@@ -103,9 +144,20 @@ pub(crate) struct Runtime {
     pub close_tricks: bool,
 }
 impl Runtime {
+    /// What spectators read (`82E245F0` slot B, b157): the current sequence's points (HUD units) and a bail this tick.
+    pub(crate) fn spectator_feed(&self) -> (i32, bool) {
+        (if self.sequence_active { self.sequence_score as i32 } else { 0 }, self.close_tricks)
+    }
+
+    /// Half turns of spin so far in this air (score state +0x3018; `GetCurrentDegreesOfSpin` / 180).
+    pub(crate) fn half_turns(&self) -> u32 {
+        self.spin_turns.unsigned_abs()
+    }
+
     pub fn load(data: &Collections) -> Result<Self, String> {
         Ok(Self {
             data: ScoringData::load(data)?,
+            stat_events: Vec::new(),
             session: Session::default(),
             collector: Collector::None,
             carriers: std::array::from_fn(|_| None),
@@ -136,6 +188,12 @@ impl Runtime {
             revert_id: None,
             sequence_active: false,
             sequence_score: 0.,
+            banked: Vec::new(),
+            announced: Vec::new(),
+            done: Vec::new(),
+            seq_tricks: [0; SEQUENCE_CATEGORIES],
+            seq_flipped: false,
+            manual: None,
             trick_name: String::new(),
             display_base: String::new(), display_spin_degrees: 0,
             trick_seq: 0,
@@ -163,11 +221,31 @@ impl Runtime {
     pub(crate) fn sequence_score(&self) -> f32 {
         self.sequence_score
     }
+    /// The sequences banked since the last call (retail cMsgSequenceComplete, research b841; challenges.rs).
+    pub(crate) fn take_banked(&mut self) -> Vec<BankedSequence> {
+        std::mem::take(&mut self.banked)
+    }
+    pub(crate) fn manual(&self) -> Option<(bool, f32)> {
+        self.manual
+    }
+    pub(crate) fn take_announced(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.announced)
+    }
+
+    pub(crate) fn take_done(&mut self) -> Vec<u64> {
+        std::mem::take(&mut self.done)
+    }
     pub(crate) fn sequence_active(&self) -> bool {
         self.sequence_active
     }
     pub(crate) fn line_score(&self) -> f32 {
         self.session.holder.snapshot.line
+    }
+    /// `[P+0x3C]+0x88` (`82DA6630`): the larger of the last trick sequence's reward and the one in progress,
+    /// truncated, the score the NPC reaction manager compares (minus `+0x34`, reset to 0; its other writers unread).
+    pub(crate) fn reaction_score(&self) -> i32 {
+        let s = &self.session.holder.snapshot;
+        s.last_reward.max(s.accumulated) as i32
     }
     pub(crate) fn multiplier(&self) -> f32 {
         self.session.combo.multiplier
@@ -224,8 +302,20 @@ impl Runtime {
     }
     fn finish(&mut self, slot: usize, complete: bool, keep_metric: bool) {
         if let Some(mut carrier) = self.carriers[slot].take() {
+            let (held, distance) = if keep_metric { (0., 0.) } else { (self.held[slot], self.distance[slot]) };
+            self.stat_events.push(StatEvent::TrickEnd { id: carrier.scorable.id, success: complete, announced: carrier.announced, held, distance });
             if complete {
-                carrier.complete(self.data.unannounced_factor);
+                // 82DA5F98: only a valid carrier completes, and one completed before its announcement posts nothing.
+                if carrier.complete(self.data.unannounced_factor) && !carrier.unannounced {
+                    if let Some(c) = self.seq_tricks.get_mut(carrier.scorable.score_type) {
+                        *c = c.saturating_add(1);
+                    }
+                    if self.done.len() < 64 {
+                        if let Some(d) = self.data.by_id(carrier.scorable.id) {
+                            self.done.push(skate_data::attrib_hash::hash(d.identifier));
+                        }
+                    }
+                }
                 if self.collector == Collector::Air {
                     self.session
                         .holder
@@ -341,6 +431,9 @@ impl Runtime {
                     .ok_or("Missing announced scorable")?;
                 self.trick_name = d.label.clone();
                 self.display_id = Some(c.scorable.id);
+                if self.announced.len() < 64 {
+                    self.announced.push(skate_data::attrib_hash::hash(d.identifier));
+                }
                 if self.collector == Collector::Air {
                     self.air_display_started = true;
                 }
@@ -409,11 +502,18 @@ impl Runtime {
         Ok(())
     }
     pub fn advance(&mut self, f: Frame) -> Result<(), String> {
+        // Nothing drains them without the career stats (tests, tools): keep the list bounded.
+        if self.stat_events.len() > 256 {
+            self.stat_events.clear();
+        }
         let bailing = f.category == FilteredCategory::Wipeout;
         if bailing && !self.was_bailing {
             self.bail_seq = self.bail_seq.saturating_add(1);
         }
         self.was_bailing = bailing;
+        // The manual being held (catalog 2 nose / 3 tail) and for how long: the objective Manual.* reads.
+        self.manual = self.carriers.iter().flatten().find(|c| matches!(c.scorable.id, 2 | 3))
+            .map(|c| (c.scorable.id == 3, f.tick.saturating_sub(c.start_tick) as f32 / 60.0));
         self.new_trick = false;
         self.modified_trick = false;
         self.close_tricks = false;
@@ -465,6 +565,10 @@ impl Runtime {
                 self.finish(slot, complete, false);
             }
             if self.collector == Collector::Air {
+                if complete && self.body_flip_count != 0 {
+                    self.stat_events.push(StatEvent::BodyFlips(self.body_flip_count.unsigned_abs()));
+                    self.seq_flipped = true;
+                }
                 if complete {
                     for (i, reward) in self.air_metrics.into_iter().enumerate() {
                         // Skate 3 ExitAir82DA86B4..86F4 credits built-in metric
@@ -629,6 +733,9 @@ impl Runtime {
             {
                 // 82DA8EB8 retains signed +2348 after the grab/flip is released.
                 let count = if f.front_flip { 1 } else { -1 };
+                if self.body_flip_count == 0 {
+                    self.stat_events.push(StatEvent::BodyFlipAttempt);
+                }
                 if count != self.body_flip_count {
                     self.body_flip_count = count;
                     self.modified_trick = true;
@@ -748,6 +855,10 @@ impl Runtime {
             self.sequence_score =
                 self.session
                     .publish_sequence(&self.data.session_rules(), 1., bailout, true);
+            if self.banked.len() < BANKED_CAP {
+                self.banked.push(BankedSequence { score: self.sequence_score as i32, wiped_out: bailout, tricks: self.seq_tricks, flipped: self.seq_flipped });
+            }
+            (self.seq_tricks, self.seq_flipped) = ([0; SEQUENCE_CATEGORIES], false);
             bevy::log::info!(target: "scoring", "SCORING_BANK tick={} state={} raw={} applied_multiplier={} reward={} next_multiplier={} line={} line_expired={} bail={} teleport={}", f.tick, f.state, raw_reward, applied_multiplier, self.sequence_score, self.session.combo.multiplier, self.session.holder.snapshot.line, self.session.line.expired, bailout, f.teleported);
             if !bailout
                 && !f.teleported

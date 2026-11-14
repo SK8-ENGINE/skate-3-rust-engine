@@ -10,7 +10,7 @@ use crate::be::{f32_at, u8_at, u16_at, u32_at};
 pub struct Member {
     /// `+0` sample index (= the bank's n-th stream).
     pub sample: u16,
-    /// `+3` output route byte (255 = none; not modelled).
+    /// `+3` output route byte (255 = none; not modeled).
     pub route: u8,
     /// `+4` gain, `+8` pitch ratio, `+12` second rate factor (1.0 on every disc member).
     pub gain: f32,
@@ -26,7 +26,7 @@ pub struct Member {
     pub fade_in_end: f32,
     pub fade_out_start: f32,
     pub curve: u8,
-    /// `+44` gain spread, `+48` pitch randomisation, `+52` delay randomisation.
+    /// `+44` gain spread, `+48` pitch randomization, `+52` delay randomization.
     pub gain_spread: f32,
     pub pitch_rand: f32,
     pub delay_rand: f32,
@@ -44,7 +44,7 @@ pub struct Group {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Record {
-    /// `+8` gain, `+12` pitch factor base, `+16` its randomisation.
+    /// `+8` gain, `+12` pitch factor base, `+16` its randomization.
     pub gain: f32,
     pub pitch_base: f32,
     pub pitch_rand: f32,

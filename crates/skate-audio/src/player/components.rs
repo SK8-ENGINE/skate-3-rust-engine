@@ -14,7 +14,7 @@
 //! - [`FootDrag`] `Class_foot_drag` (`FOOT_DRAG.abk`), owner `SFXObj_Contacts`: trigger
 //!   `sub_824BB540`, constructor `sub_824AF498`, updater `sub_824BEEE8`, surface `sub_824BA390`.
 //!
-//! Not modelled (marked in the words): the bool-class word (`0x11A631878B239355` through a global
+//! Not modeled (marked in the words): the bool-class word (`0x11A631878B239355` through a global
 //! setting; 0 in free skate as far as we know) and `[[owner+16]+64]` (taken as 0 for the local
 //! player).
 use super::state::NO_MATERIAL;
@@ -159,7 +159,7 @@ impl Grind {
         w[9] = self.surface.clamp(0, 14);
         w[10] = layer;
         w[11] = trunc_clamp(v * 32767.0, i32::MIN, i32::MAX);
-        w[12] = 0; // bool class 0x11A631878B239355 (global setting, not modelled)
+        w[12] = 0; // bool class 0x11A631878B239355 (global setting, not modeled)
         w[13] = i32::from(s.local); // local && [[owner+16]+64] == 0
         w[14] = i32::from(s.local);
         w[15] = if s.local { out.level(6) } else { 0 };
@@ -252,6 +252,18 @@ impl Grind {
                 slot.off = sound;
             }
         }
+    }
+
+    /// The owner's release: stop every held grind on / off sound and drop the queued starts.
+    pub fn release_sounds(&mut self, host: &mut dyn super::contacts::SpliceHost) {
+        for slot in self.hits.iter_mut() {
+            for sound in [&mut slot.on, &mut slot.off] {
+                if let Some(id) = sound.take() {
+                    host.release(id);
+                }
+            }
+        }
+        self.pending.clear();
     }
 
     /// `sub_824C42A8` (the end of the Rail updater): per slot the on and the off sound, gain =
@@ -422,7 +434,7 @@ impl SenseOfSpeed {
 // ----------------------------------------------------------------------------------- foot drag
 
 /// `Class_foot_drag` (15 words), fired while braking (`+336`), manual-braking (`+339`) or the
-/// off-board hold has expired (`+310`, not modelled: 0). Tuning: class `0xC26949FCB638A2CA`
+/// off-board hold has expired (`+310`, not modeled: 0). Tuning: class `0xC26949FCB638A2CA`
 /// `default` (speed offset 0.5 / divisor 50 m/s·3.6; w9..w12 = 4000, 4500, 4000, 22500) and
 /// eEQChain tweak 7 (both the brake and the manual-brake key).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -546,7 +558,7 @@ impl Skid {
         w[9] = Self::surface(s, t).clamp(0, 4);
         w[10] = trunc_clamp(s.slip * 90.0, 0, 90);
         (w[11], w[12]) = (SKID_WORDS.0, SKID_WORDS.1);
-        w[13] = 0; // bool class 0x11A631878B239355 (global setting, not modelled)
+        w[13] = 0; // bool class 0x11A631878B239355 (global setting, not modeled)
         w[14] = i32::from(s.local);
         w[15] = i32::from(s.local);
         w[16] = if s.local { out.level(20).clamp(0, 32767) } else { 0 };

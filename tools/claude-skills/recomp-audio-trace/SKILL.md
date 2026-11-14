@@ -11,7 +11,7 @@ Xenia (from which rexglue's runtime pieces derive). Credit them in every doc and
 ## Rules: read first
 - **You need your own legally owned copy of Skate 3** and must build the recomp yourself. Nothing from the game
   (code, data, disassembly, decoded audio) is ever shared or committed.
-- skate3recomp has **no licence**: local research only. Never copy its code (or its Xenia-derived rexglue SDK) into
+- skate3recomp has **no license**: local research only. Never copy its code (or its Xenia-derived rexglue SDK) into
   skate-3-rust-engine. Only measurements (bank names, sample indices, timings, addresses) come back, cited as
   "measured from a local recompiled build".
 - Codegen output (`<recomp checkout>/generated`) is local.
@@ -81,12 +81,12 @@ Check failures with `grep -m5 " error:\|FAILED" <log>`.
   `src/research/hooks_*.cpp` with a shared `trace_common.h`: see skill `recomp-research` for how to write them and
   skill `recomp-scripted-runs` for the trace line formats. Rebuild after editing hooks.
 - A published set of these research hooks exists as a `research-hooks` branch of a skate3recomp fork; the
-  `tools/recomp-code-search/README.md` of upstream PR #37 links it.
+  `tools/recomp-code-search/README.md` in the repo links it.
 
 ## Analysis
 1. From `READ` lines on `data/audio/*.big`: which bank file range was loaded at which guest address range.
 2. Each `XMA` input address -> containing loaded bank -> offset in the bank -> SNR stream index, using the scanner in
-   `tools/asset_pipeline/audio_formats.py` (`scan_snr` / `splc_streams`, audio branches) on the same bank (from the
+   `tools/asset_pipeline/audio_formats.py` (`scan_snr` / `splc_streams`) on the same bank (from the
    BIG via `tools/owned_game/big.py`). The index matches `audio_manifest.json` bank indices for exported banks.
 3. Fallback if EA copies packets to a separate buffer: match the packet bytes against bank data.
 4. Find EA's AEMS post-event function from call stacks to log event ids; name them from the `.csi` MOIR records

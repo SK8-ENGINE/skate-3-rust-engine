@@ -147,3 +147,38 @@ fn malformed_native_counts_and_inverted_authored_bounds_are_errors() {
     rail.native.as_mut().unwrap()[28+80..28+84].copy_from_slice(&2f32.to_le_bytes());
     assert!(spline::build_rails(&[rail]).is_err());
 }
+
+#[test]
+fn rail_view_puts_static_rails_first_then_props_then_cars_under_one_cap() {
+    use props::{car_owner, prop_owner, PosedRails, PropRail, PropRailPoses, PropSegment, CAR_OWNER_TAG, PROP_OWNER_TAG};
+    let rails: Vec<Rail> = (0..3).map(|i| Rail {
+        name: format!("static {i}"), points: vec![[i as f32 * 0.1, 0.0, 0.0], [i as f32 * 0.1, 0.0, 1.0]], closed: false, native: None,
+    }).collect();
+    let provider = StaticProvider::authored(&rails).unwrap();
+    let segment = PropSegment { start: [0.0, 0.0, 0.0, 1.0], end: [1.0, 0.0, 0.0, 1.0], min: [0.0; 3], max: [1.0, 0.0, 0.0] };
+    let posed = |id: u32, tag: u64, x: f32| PosedRails {
+        id, tag, origin: [x, 0.5, 0.5], basis: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], scale: [1.0; 3],
+        rails: vec![PropRail { guids: [1, 2], segments: vec![segment; 2] }].into(),
+    };
+    let poses = PropRailPoses(vec![posed(4, PROP_OWNER_TAG, 0.0), posed(9, PROP_OWNER_TAG, 0.2)]);
+    let cars = PropRailPoses(vec![posed(4, CAR_OWNER_TAG, 0.1)]);
+    let view = RailView { rails: &provider, props: Some(&poses), cars: Some(&cars), skip: None, rules: RailRules::default() };
+    let hits = view.query([-1.0; 3], [2.0; 3]).unwrap();
+    assert_eq!(hits.len(), 9);
+    assert_eq!(hits[7].primitive.owner, car_owner(4, 0), "cars come after the props");
+    assert_ne!(car_owner(4, 0), prop_owner(4, 0));
+    assert!(hits[..3].iter().all(|h| h.primitive.owner <= 3), "static rails come first");
+    assert_eq!(hits[3].primitive.owner, prop_owner(4, 0));
+    assert_eq!((hits[3].primitive.start, hits[3].primitive.end), ([0.0, 0.5, 0.5, 1.0], [1.0, 0.5, 0.5, 1.0]));
+    assert_eq!(hits[5].primitive.owner, prop_owner(9, 0));
+    let capped = RailView { rules: RailRules { cap: 4, ..RailRules::default() }, ..view }.query([-1.0; 3], [2.0; 3]).unwrap();
+    assert_eq!(capped.len(), 4);
+    let skipped = RailView { skip: Some(4), ..view }.query([-1.0; 3], [2.0; 3]).unwrap();
+    assert_eq!(skipped.iter().filter(|h| h.primitive.owner == prop_owner(4, 0)).count(), 0);
+    assert_eq!(skipped.iter().filter(|h| h.primitive.owner == car_owner(4, 0)).count(), 2, "the held-prop skip never hides a car");
+    let off = RailView { rules: RailRules { props: false, cars: false, ..RailRules::default() }, ..view }.query([-1.0; 3], [2.0; 3]).unwrap();
+    assert_eq!(off.len(), 3);
+    let no_cars = RailView { rules: RailRules { cars: false, ..RailRules::default() }, ..view }.query([-1.0; 3], [2.0; 3]).unwrap();
+    assert_eq!(no_cars.len(), 7);
+    assert!(view.query([0.0; 3], [0.0; 3]).unwrap().is_empty(), "the degenerate-box gate covers the providers too");
+}

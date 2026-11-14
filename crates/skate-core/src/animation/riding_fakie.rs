@@ -19,7 +19,7 @@ pub struct Physical {
     pub external_velocity: [f32; 4],
     pub ground_projected_speed: f32,
 }
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct State {
     slowly_backwards: f32,
     after_teleport: f32,

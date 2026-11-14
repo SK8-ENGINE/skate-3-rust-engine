@@ -56,6 +56,16 @@ impl Host for Audit {
         Ok(Value::Undefined)
     }
 }
+/// `new class(args)`: a plain object with the class prototype, then the constructor (the VM's own `construct`
+/// was folded into its opcode handling).
+fn construct(vm: &mut Vm, class: usize, args: Vec<Value>, host: &mut impl Host) -> Result<usize, String> {
+    let id = vm.object(ObjectKind::Plain);
+    if let Value::Object(proto) = vm.get(class, "prototype") {
+        vm.objects[id].prototype = Some(proto);
+    }
+    vm.call_function(class, id, args, host)?;
+    Ok(id)
+}
 fn main() -> Result<(), String> {
     let path = std::env::args_os()
         .nth(1)
@@ -103,7 +113,7 @@ fn main() -> Result<(), String> {
     println!("APT class initialized; {} objects", vm.objects.len());
     let screen = initial_tree(&mut vm, &json, 0, 0)?;
     vm.begin_update();
-    let instance = vm.construct(class, vec![Value::Object(screen)], &mut Audit)?;
+    let instance = construct(&mut vm, class, vec![Value::Object(screen)], &mut Audit)?;
     for name in [
         "mcTrickAnim0",
         "mcTrickAnim1",

@@ -2,7 +2,7 @@
 # into $Out (shot_<unix ms>.jpg; the trace's CLOCK line gives its unix-ms time zero) until $Stop exists. Uses PrintWindow PW_RENDERFULLCONTENT,
 # like the recomp's own F6 screenshot; also drops the recomp to below-normal priority once found
 # (unless -KeepPriority).
-# The dev build is recognised by its exe folder: -ExeDir or $env:RECOMP_EXE_DIR (set by recomp_script_run.sh).
+# The dev build is recognized by its exe folder: -ExeDir or $env:RECOMP_EXE_DIR (set by recomp_script_run.sh).
 param([string]$Out, [string]$Stop, [double]$Every = 2, [switch]$KeepPriority, [string]$ExeDir = $env:RECOMP_EXE_DIR)
 if (-not $ExeDir) { Write-Host 'set RECOMP_EXE_DIR or pass -ExeDir'; exit 2 }
 $prefix = $ExeDir.TrimEnd('\') + '\*'

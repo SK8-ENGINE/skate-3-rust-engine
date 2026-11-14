@@ -1,30 +1,50 @@
 //! Installed map discovery and the default pointer, shared by startup and the menu.
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct Entry {
     pub label: String,
     pub path: Option<PathBuf>,
+    /// The world row to load the map as (dist_megapark_full): which skate.Park layout it places (park_layout.rs).
+    /// None = the stream's own row.
+    pub world: Option<String>,
+}
+
+/// The Skate 3 names setup wrote into `maps.json` (`display`, user 2026-10-20: retail names for every map), by the
+/// map file's name; the file stem stays the map's id.
+fn display_names(install: &Path) -> std::collections::HashMap<String, String> {
+    let Ok(bytes) = std::fs::read(install.join("maps.json")) else { return Default::default() };
+    let Ok(rows) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) else { return Default::default() };
+    rows.iter()
+        .filter_map(|r| {
+            let file = Path::new(r.get("path")?.as_str()?).file_name()?.to_string_lossy().to_lowercase();
+            Some((file, r.get("display")?.as_str()?.to_owned()))
+        })
+        .collect()
 }
 
 pub(crate) fn discover(assets: &Path) -> Vec<Entry> {
     let mut maps = Vec::new();
-    let root = assets.parent().unwrap_or(assets).join("maps");
+    let install = assets.parent().unwrap_or(assets);
+    let names = display_names(install);
+    let root = install.join("maps");
     for directory in [&root, &root.join("private")] {
         if let Ok(entries) = std::fs::read_dir(directory) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_file() && path.extension().is_some_and(|e| e.eq_ignore_ascii_case("skate")) {
+                    let file = path.file_name().unwrap().to_string_lossy().to_lowercase();
                     maps.push(Entry {
-                        label: path.file_stem().unwrap().to_string_lossy().replace('_', " "),
+                        label: names.get(&file).cloned().unwrap_or_else(|| path.file_stem().unwrap().to_string_lossy().replace('_', " ")),
                         path: Some(path.canonicalize().unwrap_or(path)),
+                        world: None,
                     });
                 }
             }
         }
     }
     maps.sort_by(|a, b| a.label.to_lowercase().cmp(&b.label.to_lowercase()));
-    maps.insert(0, Entry { label: "Test world".into(), path: None });
+    maps.insert(0, Entry { label: "Test world".into(), path: None, world: None });
     maps
 }
 
@@ -63,6 +83,19 @@ pub(crate) fn save_default(assets: &Path, map: Option<&Path>) -> Result<(), Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// maps.json's `display` names the map in the lists; a map without one keeps its file name.
+    #[test]
+    fn maps_show_their_skate_3_names_from_maps_json() {
+        let root = std::env::temp_dir().join(format!("skate-map-names-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("maps")).unwrap();
+        std::fs::write(root.join("maps/MaloofMoneyCupDLC.skate"), b"").unwrap();
+        std::fs::write(root.join("maps/Old_Map.skate"), b"").unwrap();
+        std::fs::write(root.join("maps.json"), br#"[{"name":"MaloofMoneyCupDLC","path":"maps/MaloofMoneyCupDLC.skate","display":"Maloof Money Cup 2010 NYC"},{"name":"Old_Map","path":"maps/Old_Map.skate"}]"#).unwrap();
+        let labels: Vec<_> = discover(&root.join("assets")).into_iter().map(|e| e.label).collect();
+        std::fs::remove_dir_all(root).unwrap();
+        assert_eq!(labels, ["Test world", "Maloof Money Cup 2010 NYC", "Old Map"]);
+    }
+
     #[test]
     fn default_pointer_round_trips_map_and_explicit_test_world() {
         let root = std::env::temp_dir().join(format!("skate-map-pointer-{}", std::process::id()));

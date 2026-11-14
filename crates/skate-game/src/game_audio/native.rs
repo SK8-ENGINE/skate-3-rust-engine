@@ -111,6 +111,11 @@ pub(crate) struct NativeDecoder {
 impl Iterator for NativeDecoder {
     type Item = f32;
     fn next(&mut self) -> Option<f32> {
+        // A replay export pulls the runtime itself (one frame of sound per exported frame); the device plays
+        // silence meanwhile so the two never take the same blocks.
+        if crate::replay::export_run::DEVICE_MUTED.load(std::sync::atomic::Ordering::Relaxed) {
+            return Some(0.0);
+        }
         if self.at >= self.buffer.len() {
             match super::timing::lock(&self.shared, &super::timing::AUDIO_LOCK) {
                 Ok(mut runtime) => {
@@ -280,6 +285,7 @@ impl Native {
         runtime.eval.continue_nodes(first_node);
         let mut mod_projects = Vec::new();
         for file in &files.projects {
+            crate::startup_loading::detail(|| format!("sound project {file}"));
             let bytes = library.read(file).map_err(|e| format!("{file}: {e}"))?;
             let project = Project::parse(file, &bytes).map_err(|e| e.to_string())?;
             let token = runtime.install_project(&project);
@@ -288,8 +294,10 @@ impl Native {
                 mod_projects.push((file.clone(), library.stamp(file), token));
             }
         }
+        crate::startup_loading::mark("audio: projects");
         let mixmap = match &files.mixmap {
             Some(file) => {
+                crate::startup_loading::detail(|| format!("mix map {file}"));
                 let bytes = library.read(file).map_err(|e| format!("{file}: {e}"))?;
                 let file = skate_audio::mixmap::MixMapFile::parse(&bytes).map_err(|e| e.to_string())?;
                 let m = MixMap::new(&file, &world.mixmap_instances());
@@ -304,6 +312,8 @@ impl Native {
                 None
             }
         };
+        crate::startup_loading::mark("audio: mix map");
+        crate::startup_loading::detail(|| "rolling grain recordings".to_owned());
         let bed = if mixmap.is_some() { super::grain_bed::Bed::new(library) } else { None };
         let player = mixmap.as_ref().map(|_| {
             super::player_audio::PlayerAudio::new(library.player_tuning(), true)
@@ -333,6 +343,7 @@ impl Native {
             resident: Vec::new(),
             mod_projects,
         };
+        crate::startup_loading::mark("audio: grain bed");
         // The environment (reverb) network and the eEQChain buses (optional install data).
         let (presets, eq) = library.bus_tuning();
         if !presets.is_empty() || !eq.is_empty() {
@@ -353,7 +364,9 @@ impl Native {
             runtime.mixer.buses.submix.enabled = true;
         }
         native.ensure_bank(library, "emitter_utility")?;
+        crate::startup_loading::mark("audio: utility bank");
         native.load_player_banks(library);
+        crate::startup_loading::mark("audio: player banks");
         let mut runtime = native.shared.lock().map_err(|_| "audio lock poisoned")?;
         let utility = runtime.eval.class_id("c_emitter_utility").ok_or("no c_emitter_utility class")?;
         runtime.post(utility, &[]);
@@ -382,7 +395,10 @@ impl Native {
         native.emitter_class = runtime.eval.class_id("c_emitter");
         drop(runtime);
         // The front-end sounds (the session marker's cellphone UI; sk8_menu).
+        crate::startup_loading::detail(|| "front-end sounds".to_owned());
+        crate::startup_loading::mark("audio: boot utilities");
         native.frontend = super::frontend::FrontendHost::load(&native, library);
+        crate::startup_loading::mark("audio: front-end sounds");
         native.load_resident_banks(library);
         Ok(native)
     }
@@ -457,6 +473,8 @@ impl Native {
         if let Some(&id) = self.banks.get(stem) {
             return Ok(id);
         }
+        crate::startup_loading::detail(|| format!("sound bank {stem}"));
+        let _span = super::hitch_parts::span(super::hitch_parts::BANK_LOAD);
         let (bank, pcm) = match self.prefetch.take(stem) {
             Some(loaded) => loaded,
             None => library.bank_source(stem)?.load()?,
@@ -500,6 +518,7 @@ impl Native {
         // trigger sounds like every later one.
         let mut first = false;
         for (i, stem) in super::player_audio::SPLICE_BANKS.iter().enumerate() {
+            crate::startup_loading::detail(|| format!("board contact sounds {stem}"));
             match library.splice_bank(stem) {
                 Some((bank, pcm)) => {
                     if let Ok(mut runtime) = self.shared.lock() {
@@ -512,6 +531,7 @@ impl Native {
             }
         }
         // SFXObj_Wheels' spin-down recordings, decoded now (first trigger = later triggers).
+        crate::startup_loading::detail(|| "wheel spin recordings".to_owned());
         let streams: Vec<_> = super::player_audio::WHEEL_STREAMS.iter().map(|n| library.wheels_pcm(n)).collect();
         let wheels = streams.iter().all(Option::is_some);
         if let Ok(mut runtime) = self.shared.lock() {
@@ -626,18 +646,32 @@ impl Native {
 
     /// Unload every bank but the utility and the player's (map change); forget the prefetched ones.
     pub(crate) fn unload_map_banks(&mut self) {
-        self.map_epoch += 1;
         self.prefetch.clear();
+        self.unload_runtime_map_banks();
+    }
+
+    /// [`Native::unload_map_banks`] for a change to the map at `map`: the banks read ahead for it
+    /// during its load stay prefetched (`Prefetch::change_map`).
+    pub(crate) fn change_map(&mut self, map: Option<&std::path::Path>) {
+        self.prefetch.change_map(map);
+        self.unload_runtime_map_banks();
+    }
+
+    /// A bank a map change keeps loaded: the utility banks, the player's and the overlays' preloaded ones.
+    pub(crate) fn kept_across_maps(&self, stem: &str) -> bool {
+        stem == "emitter_utility" || stem == skate_audio::player::seams::UTILITY_BANK || super::player_audio::BANKS.contains(&stem) || super::player_audio::OPTIONAL_BANKS.iter().any(|b| b.contains(&stem))
+            || self.resident.iter().any(|r| r == stem)
+    }
+
+    fn unload_runtime_map_banks(&mut self) {
+        self.map_epoch += 1;
         let Ok(mut runtime) = self.shared.lock() else { return };
-        let resident = &self.resident;
-        self.banks.retain(|stem, id| {
-            let keep = stem == "emitter_utility" || stem == skate_audio::player::seams::UTILITY_BANK || super::player_audio::BANKS.contains(&stem.as_str()) || super::player_audio::OPTIONAL_BANKS.iter().any(|b| b.contains(&stem.as_str()))
-                || resident.iter().any(|r| r == stem);
-            if !keep {
-                runtime.unload_bank(*id);
+        let gone: Vec<String> = self.banks.keys().filter(|stem| !self.kept_across_maps(stem)).cloned().collect();
+        for stem in gone {
+            if let Some(id) = self.banks.remove(&stem) {
+                runtime.unload_bank(id);
             }
-            keep
-        });
+        }
     }
 
     pub(crate) fn has_bank(&self, library: &Library, stem: &str) -> bool {
@@ -741,10 +775,10 @@ pub(crate) fn hold_flag_inputs(m: &mut MixMap) {
 /// [`MAX_STEPS_PER_FRAME`]; none on a frame without a step, none while silenced). Written here:
 /// Master.in1–4 (in1..3 = the option volumes, `super::RetailVolumes`), Music.in1/2/5, Reverb.in0..6 (free-skate values, §7.4); through `player_audio`:
 /// PlayerPhysics 0–14, the two 3DObjPos blocks (skater COM and board, with relative speeds and the
-/// sign-flip bits), Jitter, Contacts 1/2/6, Rail 0/1, OffBoard 0; the board owner inputs
+/// sign-flip bits), Jitter, Contacts 1/2/6, Rail 0/1, OffBoard 0, HandGrabs 0 (the skitch latch); the board owner inputs
 /// (`grain_bed.rs`). Left at their free-skate 0: VU (no output meter; only the ambience reads it,
 /// not native yet), Menu / NIS / HOM / Challenge / Speech flags (no such modes in free skate),
-/// HandGrabs, Music.in3/6 (combo emphasis, not wired), and Pause.in0: nothing ticks while the menu
+/// Music.in3/6 (combo emphasis, not wired), and Pause.in0: nothing ticks while the menu
 /// or a replay silences the game (the stream itself is paused), so no evaluation would read it.
 /// Class_Seams' console cadence runs on every rendered frame that is not silenced
 /// ([`PlayerAudio::seam_frame`](super::player_audio::PlayerAudio::seam_frame), game time).
@@ -761,6 +795,7 @@ pub(super) fn mixmap_frame(
     teleport: Option<Res<crate::ui_audio::TeleportEffect>>,
     settings: Option<Res<super::AudioSettings>>,
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::MIXMAP_FRAME);
     let _timing = super::timing::scope(&super::timing::MIXMAP_FRAME);
     let silenced = super::silenced(menu.as_deref(), &replay);
     let Some(mut native) = native else {
@@ -815,6 +850,8 @@ pub(super) fn mixmap_frame(
         m.set_input(keys::MASTER, id, value);
     }
     m.set_input(keys::MASTER, 4, 32767);
+    // Master.in0: 32767 in replay, 0 otherwise, every pass (sub_824D5160 after the replay flag sub_8279E180).
+    m.set_input(keys::MASTER, 0, if replay.active { 32767 } else { 0 });
     for id in [1, 2, 5] {
         m.set_input(keys::MUSIC, id, 32767);
     }
@@ -878,6 +915,7 @@ pub(super) fn mixmap_frame(
 /// evaluations (MixMap ticks), the local player's update and SFXObj_Reverb's update. The world /
 /// NPC owners' update follows (`world_sources::post`, `npc_skaters::post`).
 pub(super) fn mixmap_tick(native: Option<ResMut<Native>>, inputs: Option<ResMut<super::mixmap_inputs::MixMapInputs>>, content: Option<Res<super::AudioContent>>) {
+    let _span = super::hitch_parts::span(super::hitch_parts::MIXMAP_TICK);
     let _timing = super::timing::scope(&super::timing::MIXMAP_FRAME);
     let Some(mut native) = native else { return };
     let native = &mut *native;
@@ -918,14 +956,93 @@ pub(super) struct Carry {
 /// first start, and every restart with the old runtime's [`Carry`]). False when it could not
 /// start (the error is logged; those sounds stay silent).
 pub(super) fn launch(world: &mut World, carry: Option<Carry>) -> bool {
-    static DSP: std::sync::Once = std::sync::Once::new();
     let Some(settings) = world.get_resource::<super::AudioSettings>() else { return false };
     let instances = carry.map_or_else(|| if settings.more_audible_world() { WorldInstances::MORE_AUDIBLE } else { WorldInstances::RETAIL }, |c| c.world);
     let Some(library) = world.get_resource::<Library>() else { return false };
-    // Which compiled copy of the DSP loops runs (hardware FMA or plain; same output bits): chosen
-    // once, before the first render (doc 11 "Hardware FMA dispatch").
-    DSP.call_once(|| info!("AUDIO_DSP {}", skate_audio::dsp::init_fma()));
+    choose_dsp();
     let (started, projects) = (Native::start_from(library, instances, carry.map_or(1, |c| c.first_node)), library.aems().projects.len());
+    install(world, started, projects, carry)
+}
+
+/// Which compiled copy of the DSP loops runs (hardware FMA or plain; same output bits): chosen
+/// once, before the first render (doc 11 "Hardware FMA dispatch").
+fn choose_dsp() {
+    static DSP: std::sync::Once = std::sync::Once::new();
+    DSP.call_once(|| info!("AUDIO_DSP {}", skate_audio::dsp::init_fma()));
+}
+
+/// The first start's runtime being built on its own thread (`begin_launch`).
+pub(super) struct Launching {
+    handle: std::thread::JoinHandle<Result<Native, String>>,
+    projects: usize,
+}
+
+impl Launching {
+    pub(super) fn is_finished(&self) -> bool {
+        self.handle.is_finished()
+    }
+}
+
+/// The first start begun at the top of `main` ([`begin_early`]): its inputs and the build thread.
+type Early = (std::path::PathBuf, WorldInstances, std::thread::JoinHandle<Result<Native, String>>);
+static EARLY: std::sync::Mutex<Option<Early>> = std::sync::Mutex::new(None);
+
+/// The first start's build: the install's library (no overlays) and the runtime, on the calling thread.
+fn build_first(root: &std::path::Path, instances: WorldInstances) -> Result<Native, String> {
+    crate::startup_loading::mark("audio: start thread");
+    let library = Library::load(root)?;
+    crate::startup_loading::mark("audio: library");
+    Native::start_from(&library, instances, 1)
+}
+
+fn spawn_first(root: std::path::PathBuf, instances: WorldInstances) -> Option<std::thread::JoinHandle<Result<Native, String>>> {
+    choose_dsp();
+    std::thread::Builder::new().name("audio-start".into()).spawn(move || build_first(&root, instances)).ok()
+}
+
+/// Begin the first start's build at the top of `main`, so its reads overlap the rest of the start
+/// (docs/hails-additions/08-setup-performance.md#audio-start-begins-in-main). [`begin_launch`] takes it when the inputs
+/// still match; else (or with mod overlays) it is dropped. `SKATE_EARLY_AUDIO=0` turns it off.
+pub(crate) fn begin_early(config: &crate::config::Config) {
+    if std::env::var("SKATE_EARLY_AUDIO").is_ok_and(|v| v == "0") || !Library::installed(&config.asset_root) {
+        return;
+    }
+    let instances = if super::AudioSettings::more_audible_world_at_start(config) { WorldInstances::MORE_AUDIBLE } else { WorldInstances::RETAIL };
+    if let Some(handle) = spawn_first(config.asset_root.clone(), instances) {
+        if let Ok(mut early) = EARLY.lock() {
+            *early = Some((config.asset_root.clone(), instances, handle));
+        }
+    }
+}
+
+/// The early build is not used (mod overlays are merged first): let it go.
+pub(super) fn drop_early() {
+    if let Ok(mut early) = EARLY.lock() {
+        early.take();
+    }
+}
+
+/// First audio start off the frame on its own thread (same `Library::load`); [`finish_launch`] spawns the stream.
+pub(super) fn begin_launch(world: &mut World) -> Option<Launching> {
+    let settings = world.get_resource::<super::AudioSettings>()?;
+    let instances = if settings.more_audible_world() { WorldInstances::MORE_AUDIBLE } else { WorldInstances::RETAIL };
+    let projects = world.get_resource::<Library>()?.aems().projects.len();
+    let root = world.get_resource::<crate::config::Config>()?.asset_root.clone();
+    let early = EARLY.lock().ok().and_then(|mut e| e.take());
+    let handle = match early {
+        Some((r, i, handle)) if r == root && i == instances => handle,
+        _ => spawn_first(root, instances)?,
+    };
+    Some(Launching { handle, projects })
+}
+
+/// Put the runtime the start thread built in place (as [`launch`] does on the frame).
+pub(super) fn finish_launch(world: &mut World, launching: Launching) -> bool {
+    let started = launching.handle.join().unwrap_or_else(|_| Err("the audio start thread panicked".into()));
+    install(world, started, launching.projects, None)
+}
+
+fn install(world: &mut World, started: Result<Native, String>, projects: usize, carry: Option<Carry>) -> bool {
     match started {
         Ok(mut native) => {
             info!("Game audio: native AEMS runtime on ({projects} projects)");
@@ -1032,6 +1149,7 @@ pub(super) fn reverb_frame(
     zones: Res<super::emitters::ReverbZones>,
     audio: Res<super::map_audio::MapAudio>,
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::REVERB);
     let (Some(native), Some(library)) = (native, library) else { return };
     let at = cues.riding.board;
     let key = audio.region_key(&library, "audio_reverb", at.x, at.z).unwrap_or(skate_audio::bus::env::DEFAULT_PRESET);

@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import zipfile
 
-from updater import REPO, PACKAGE, PREFIX, identity, program_metadata, package_name
+from release_meta import REPO, PACKAGE, PREFIX, identity, program_metadata, package_name
 
 TAG = 'experimental'
 
@@ -93,8 +93,8 @@ def publish(directory):
     commits = json.loads(changes)
     notes = (f"Rolling build **{meta['build']}**, commit `{meta['revision'][:12]}`.\n\n"
              f"[Download Windows ZIP](https://github.com/{REPO}/releases/download/{TAG}/{package})\n\n"
-             "Experimental builds may contain regressions. Choose Latest in the in-game Updates window "
-             "to receive these builds. Stable remains the default. Your existing maps and assets are kept.\n\n"
+             "Experimental builds may contain regressions. The Skate launcher installs and updates them "
+             "(a version with release `experimental`). Your existing maps and assets are kept.\n\n"
              "### Recent commits\n\n" + '\n'.join(
                  f"- {c['sha'][:8]} {c['commit']['message'].splitlines()[0]}" for c in commits))
     api(f"releases/{release['id']}", 'PATCH', dict(name='Experimental', body=notes,

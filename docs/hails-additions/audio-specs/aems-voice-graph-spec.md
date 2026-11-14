@@ -1,8 +1,8 @@
-# Skate 3 voice graph and output mix: behavioural spec for the native port
+# Skate 3 voice graph and output mix: behavioral spec for the native port
 
-Written 2026-10-02. This describes behaviour, formulas and constants in our own words, as the basis for a native Rust
+Written 2026-10-02. This describes behavior, formulas and constants in our own words, as the basis for a native Rust
 re-implementation (Phase B of the native-port plan (doc 11, "Native audio port")). Nothing here is code from PR #4 or the recomp; both have
-no licence and were read for behaviour only. Companion notes: `aems-reference.md` (banks, evaluator, property ids),
+no license and were read for behavior only. Companion notes: `aems-reference.md` (banks, evaluator, property ids),
 `rwaudio-prior-work.md` (RenderWare Audio prior art: b5-decomp, BP-Decomp, nfsmw), `ems-emitters-re.md` (ambience).
 
 ## 0. Sources and confidence tags
@@ -163,7 +163,7 @@ Only records with id ≥ 9 are read. Their value selects the bus:
 
 ## 4. Modules
 
-### 4.1 SndPlayer1 (source) — process `sub_82B34278` [T, gate-1], play `sub_82B32DC8` [T]
+### 4.1 SndPlayer1 (source): process `sub_82B34278` [T, gate-1], play `sub_82B32DC8` [T]
 
 **State.**
 - A ring of up to 20 48-byte play records (table offset +464; cursor +469; write index +467; ring size +470).
@@ -227,7 +227,7 @@ seek is "restart at 0, decode a 384-frame pre-roll, skip target − 384" [T].
   - the admission check `rate × span ≤ queued` (`play.rs`);
   - the spans +32/+36.
 
-### 4.2 Rechannel — `sub_82B2C8F0` [V]
+### 4.2 Rechannel: `sub_82B2C8F0` [V]
 - If the incoming count (pass +60) differs from its declared count (+42), the module converts through the route
   matrix (§6.1). The first route into an output overwrites, later routes add, and unrouted owned outputs are zeroed.
 - For non-standard counts it copies min(n, m) channels at unity and zero-pads.
@@ -235,7 +235,7 @@ seek is "restart at 0, decode a 384-frame pre-roll, skip target − 384" [T].
 - **No-op when the counts are equal**, which is always the case in the voice graph unless a stream's channel count
   differs from the descriptor's.
 
-### 4.3 Resample — prepare `sub_82B2DAC8` [V], process `sub_82B2DBA8` [T], kernel `sub_82B43FB8` [V]
+### 4.3 Resample: prepare `sub_82B2DAC8` [V], process `sub_82B2DBA8` [T], kernel `sub_82B43FB8` [V]
 
 **Parameters.**
 - +52 = pitch scale (property 0 / 4096);
@@ -279,7 +279,7 @@ bypass by default.
 
 **State.**
 - history per channel {x1, x2, y1, y2} at +56 + 16·ch (up to 8 channels);
-- coefficients {a1, a2, b0, b1, b2} at +184, already normalised by a0;
+- coefficients {a1, a2, b0, b1, b2} at +184, already normalized by a0;
 - cached ω at +204. The constructor stores the raw Hz there, so the first filtering block always rebuilds.
 
 **ω.** ω = f32(f32(fc / fs) × 2π_f32), with 2π_f32 = 6.2831855 and fs = the block's rate (48000 after Resample).
@@ -334,7 +334,7 @@ Measured retail values (session 20261001_211347 MOD lines):
 - History is written back after the block.
 - The recomp runs with flush-to-zero; Xenon hardware may not. This is mostly moot because of the bias. UNCERTAIN.
 
-### 4.6 Gain (Gai0) — `sub_82B23B50` [V: 185 replayed]
+### 4.6 Gain (Gai0): `sub_82B23B50` [V: 185 replayed]
 - Parameter 0 = target gain (+52, linear amplitude, class default 1.0). +56 = applied gain.
 - Per block:
   - **restart flag** (the pass's "module not yet reached in this graph's progress" flag, i.e. first/restarted block;
@@ -348,7 +348,7 @@ Measured retail values (session 20261001_211347 MOD lines):
 - So a **64-sample linear de-click on every gain change** (1.33 ms), then flat [PA confirms GAIN_DECLICK 64].
 - The retail GAIN trace hook logs +52/+56 (change-only).
 
-### 4.7 GainFader (GaF0) — `sub_82B238A8` [T] (grain voices, not the standard voice graph)
+### 4.7 GainFader (GaF0): `sub_82B238A8` [T] (grain voices, not the standard voice graph)
 - A fade request carries a start time (f64, sample-accurate), a duration, a target and a curve:
   - 0 linear; 1 square-root (rsqrte + one Newton step); else sine (four-lane sine kernel).
 - Length = max(1, trunc(duration × rate)) samples. It may span many blocks.
@@ -357,7 +357,7 @@ Measured retail values (session 20261001_211347 MOD lines):
 - Grain player usage: fader to 0 immediately, then attack to 1 over the attack time; release to 0 over the release
   time.
 
-### 4.8 Send (Sen0) — process `sub_82B31838` [V: 933,816 calls], configure `sub_82B31370` [T]
+### 4.8 Send (Sen0): process `sub_82B31838` [V: 933,816 calls], configure `sub_82B31370` [T]
 
 **Fields.**
 - +52 target gain (parameter 0); +112 current gain (constructor 1.0); +116 dirty;
@@ -396,10 +396,10 @@ matrix into the bus layout and added to the bus's delta array. At the bus's next
 
 **Mode values.**
 - PR #4's host sets suspend = 3 and resume = 1. That looks inverted against the kernels (1 = fade out, 3 = fade in);
-  retail `sub_82B1E8D8` / `sub_824A2E98` are unverified. **UNCERTAIN**: check before relying on pause behaviour.
+  retail `sub_82B1E8D8` / `sub_824A2E98` are unverified. **UNCERTAIN**: check before relying on pause behavior.
 - **Bad channel counts** 3, 5 and 7 hit empty route ranges and execute a garbage route once. Never send those.
 
-### 4.9 Pan2D1 (Pn21) — process `sub_82B29BE0` [T; its parts V]
+### 4.9 Pan2D1 (Pn21): process `sub_82B29BE0` [T; its parts V]
 
 **Instance.**
 - +748 source count (= the voice's channels); +752 destination count (6 for voices);
@@ -419,29 +419,29 @@ matrix into the bus layout and added to the bus's delta array. At the bus's next
 |---|---|---|
 | 0 | angle A, **degrees, positive = to the right** | 0 |
 | 1 | distance D (1 = on the speaker circle) | 1.0 |
-| 2 | entry radius about the centre (multichannel layout) | 1.0 |
+| 2 | entry radius about the center (multichannel layout) | 1.0 |
 | 3 | turn: degrees added for multichannel entries | 0 |
-| 4 | focus: centre-extraction weight, 0..1 | 1.0 |
+| 4 | focus: center-extraction weight, 0..1 | 1.0 |
 | 5 | level: output weight, 0..1 | 1.0 |
 | 6 | **LFE send level**, written raw (not × level or law) | 0.0 |
 | 7 | spread 1 (front pair angle) | 30 |
 | 8 | spread 2 (side pair angle) | 110 |
 | 9 | spread 3 (7.1 only) | 150 |
 
-The names are ours; DWARF lists 7 attributes: azimuth, radius, width, spread, focus, level, centre level [PA].
+The names are ours; DWARF lists 7 attributes: azimuth, radius, width, spread, focus, level, center level [PA].
 
 **Internal channel order** (6 outputs): **0 L (+30° internal), 1 C (0°), 2 R (−30°), 3 Ls (+110°), 4 Rs (−110°),
 5 LFE**.
 - The internal angle is θ = −A·π/180, so A = −30 is L and A = +30 is R.
 - The voice azimuth word maps as 65536 = 360°, × 360/65536 degrees (cell 0x822F88E8).
-- So **word 0 = front centre, increasing words turn clockwise** (to the right). This is consistent with the route
+- So **word 0 = front center, increasing words turn clockwise** (to the right). This is consistent with the route
   tables and the interleave [I, PA "positive degrees pans right"].
 - **UNCERTAIN**: no impulse test yet confirms that +A is right on a real console.
 
 **Source placement (mono).**
 - Position p = D·(cos θ, sin θ).
 - Unit-disc clamp on r² = |p|²:
-  - r² > 1 → normalise, r² = 1;
+  - r² > 1 → normalize, r² = 1;
   - 0.999 < r² < 1 → r² := 1, position kept;
   - otherwise unchanged.
 - D ≤ 0 reflects the stored angle by π.
@@ -461,21 +461,21 @@ The names are ours; DWARF lists 7 attributes: azimuth, radius, width, spread, fo
      - the remainder between Rs and R.
    - Pairwise VBAP: for speakers at α and β, g_b = sin(θ−α)/sin(β−α) and g_a = sin(β−θ)/sin(β−α), via a
      precomputed inverse 2×2 matrix per pair.
-   - **Front sector centre extraction**: share = min(gL, gR)·focus; subtract it from both; gC = 2cos(30°)·share =
+   - **Front sector center extraction**: share = min(gL, gR)·focus; subtract it from both; gC = 2cos(30°)·share =
      √3·share.
    - Scale the pair (or the L/R/C triple) by r² / √(Σ g²) (constant power, amplitude r²).
 3. **Final**: s = level × law gain. If r² < 1, also divide by √(Σ g² over the 5 slots). Multiply all by s.
 
-On the circle (D = 1): pure constant-power pairwise panning with centre extraction. Inside: a renormalised blend. At
+On the circle (D = 1): pure constant-power pairwise panning with center extraction. Inside: a renormalized blend. At
 D = 0: L/C/R 0.408 each, Ls/Rs 0.5 each.
 
 **Multichannel sources** (`sub_82B45C50` [T]):
-- The layout centre is D·(cos, sin)(−A·π/180). The constant used here is 1 ulp different from the mono path's.
-- Each entry is placed at centre + radius·(cos, sin)(−(A + turn)·π/180 ± spread·π/180), then clamped; its angle =
+- The layout center is D·(cos, sin)(−A·π/180). The constant used here is 1 ulp different from the mono path's.
+- Each entry is placed at center + radius·(cos, sin)(−(A + turn)·π/180 ± spread·π/180), then clamped; its angle =
   atan2.
   - 2 ch: ±spread 1. Spread 1 exactly 90 uses a mirrored pair.
   - 4 ch: ±s1, ±s2.
-  - 6 ch: entry 1 at the centre angle, 0/2 at ±s1, 3/4 at ±s2; the 6th input is LFE.
+  - 6 ch: entry 1 at the center angle, 0/2 at ±s1, 3/4 at ±s2; the 6th input is LFE.
   - 3, 5, 7 ch: nothing is placed.
 - With the open's defaults (distance 0, radius 1, spreads = speaker angles), source channel k lands on output k.
 
@@ -483,7 +483,7 @@ D = 0: L/C/R 0.408 each, Ls/Rs 0.5 each.
 - 6 or 8 inputs: the LFE input goes only to the LFE output, at parameter 6.
 - Otherwise every source row's LFE column = parameter 6. **Voices default 0, so the LFE output is normally silent.**
 
-**Stereo** (2 outputs): R = (y + 1)/2, L = 1 − R, normalised to unit power × level × law.
+**Stereo** (2 outputs): R = (y + 1)/2, L = 1 − R, normalized to unit power × level × law.
 
 **Matrix application, per block.**
 - Compare the 10 parameters with the cache (NaN counts as a change).
@@ -517,7 +517,7 @@ D = 0: L/C/R 0.408 each, Ls/Rs 0.5 each.
 
 ### 4.10 Bus-only modules (not per voice)
 
-| module | behaviour |
+| module | behavior |
 |---|---|
 | **HighShelfIir2 (HS20)** `sub_82B26740` [V: 2,996 replayed] | +52 corner Hz, +60 gain (linear plateau amplitude, A = √gain). Filters only if ω < CEIL **and** gain ≠ 1.0; otherwise bypass (history cleared once). RBJ high shelf, slope S = 1, α = sin ω × 0.70710653 (not exactly 1/√2). Used in the board chain graph 3 (5000 Hz, 0.65) and the stream bus. |
 | **PeakingIir2 (PI20)** `sub_82B2C658` [unit-tested only] | +52 Hz, +60 linear gain, +68 Q (clamped 0.2..20 for the math). ω is clamped to [FLOOR, CEIL]. Bypass only when gain == 1.0 exactly. RBJ peaking: A = √gain, α = sin ω/(2Q). Used on material buses and effect returns. Our MOD trace saw 36 PEAK modules around 930–1393 Hz, gain 0.1, Q 20, slowly drifting (probably music/radio processing; UNCERTAIN). |
@@ -574,7 +574,7 @@ Conversion matrices (unlisted gains are 1):
 | src → dst | matrix |
 |---|---|
 | 1→2, 1→4 | 0.707 to both fronts |
-| **1→6/8** | **centre only** |
+| **1→6/8** | **center only** |
 | 2→6/8 | L→L, R→R |
 | 4→6 | FL, FR, SL, SR |
 | **6→2** | **L = L + 0.707·C + Ls; R = R + 0.707·C + Rs; LFE dropped** |
@@ -599,7 +599,7 @@ The rest of the graph processes the sum like a voice.
 | **Board grain chain** (`sub_824C8878`) | graph 1: `Sub0 → HI20 → LI20 → FSS → Sen0 (→ graph 3) → Gai0 → Sen0 (→ graph 2)`.<br>graph 3: `Sub0 → DCl0 ±0.09 → Gai0 → HS20 5 kHz/0.65 → Sen0 (→ graph 2)`.<br>graph 2: `Sub0 → Sen0 (→ manager+116) → Sen0 (env, vfunc60(13)/32767) → Pn21 → Sen0 (→ default bus)`. |
 | **Default/master bus** (`[0x830CFDBC]+44` / `[0x830775EC]`) | **not recovered** (UNCERTAIN). The output stage reads 8 planes and the 6→8 route maps LFE to plane 7, so retail's master is most likely an 8-channel submix [I]. **PR #4's master (Sub0 → Del0 15 ms, 6 ch, order 255) is its own invention**: it reuses the effect-return delay. Do not copy the 15 ms delay without evidence. |
 
-### 6.3 Output stage (Dac) — `sub_82B21F58` → `sub_82B21D98` [V: 800 replayed]
+### 6.3 Output stage (Dac): `sub_82B21F58` → `sub_82B21D98` [V: 800 replayed]
 1. **Route planes.** The 8 master planes go to N outputs, where N = global byte 0x8306705D (0 in the static image;
    PR #4 sets 6; the retail runtime value is UNCERTAIN). Output tables at 0x820ED6CC/0x820ED6DC:
 
@@ -628,7 +628,7 @@ native 6 ch.
 - **Recomp capture** (`SKATE3_AUDIO_CAPTURE`, stereo f32 LE 48 kHz) uses the host conversion, **not game code**:
   Lc = 0.4·(FL + SL + 0.5·C), Rc = 0.4·(FR + SR + 0.5·C), LFE dropped. The same conversion feeds stereo playback in
   the recomp.
-  - A front-centre voice at amplitude a reaches the capture at 0.2a (−14 dB).
+  - A front-center voice at amplitude a reaches the capture at 0.2a (−14 dB).
   - A hard-left voice reaches it at 0.4a (−8 dB).
   - **Any level comparison against the capture must pass our 6-ch output through this exact conversion.**
 
@@ -707,7 +707,7 @@ per block, output block). Our crate's tests read those files (gitignored, regene
 - PR #4's numbers (**rolling −22.9 dBFS, takeoff +17.0 dB, landing +23.3 dB over the bed**) were measured on the
   **native 6-ch** output pass (hook on `sub_82B21F58`, the peak of the 6-ch block), not on the capture;
 - **re-measure them in capture space** before using them as capture targets. Expect absolute levels several dB lower
-  (rex 0.4 factor; centre at 0.2).
+  (rex 0.4 factor; center at 0.2).
 - **The relative numbers (+17 / +23.3 dB) are the primary criterion. Tolerance ±1.5 dB** (random sample choice and
   physics differences dominate).
 - Band profile per event class: ±1 dB per octave, 60 Hz–8 kHz.
@@ -718,7 +718,7 @@ per block, output block). Our crate's tests read those files (gitignored, regene
 - a Send hook fixed to log +52/+112 and the route pair;
 - the output-count byte 0x8306705D at runtime (settles 6 vs 2, and the 8-plane master question).
 
-**Helper**: `tools/recomp-trace/send_vectors.py` summarises SEND lines. It found that +80 is not a
+**Helper**: `tools/recomp-trace/send_vectors.py` summarizes SEND lines. It found that +80 is not a
 gain: all 6-ch cells read 0, and mono cells look like samples.
 
 ## 8. Open questions (priority order)

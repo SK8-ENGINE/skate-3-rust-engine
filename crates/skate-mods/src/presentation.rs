@@ -85,7 +85,7 @@ pub enum CameraAngle {
 }
 
 /// Replacement values for one stock camera shot (`camera_shots` collection), named
-/// after the retail attributes and in their units (metres, degrees, seconds). Unset
+/// after the retail attributes and in their units (meters, degrees, seconds). Unset
 /// fields keep the stock value. Applies to every place the shot is used, including
 /// blend trees that name it as a child.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
@@ -132,6 +132,110 @@ impl CameraShotTuning {
             && [self.smoothing_direction, self.smoothing_elevation, self.smoothing_yaw, self.smoothing_pitch]
                 .into_iter().all(|v| ok(v, 0.0, 100.0))
             && ok(self.transition_time, 0.0, 10.0)
+    }
+}
+
+/// Replacement values for the water look layer (family 33 water: DownTown
+/// fountains, the Aletown canal). Unset fields keep the player's / default
+/// value. `enabled = false` gives the plain retail `water_defaultPS` look.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WaterLookPatch {
+    pub enabled: Option<bool>,
+    /// Ripple texture scale multiplier (retail 1).
+    pub ripple_scale: Option<f32>,
+    /// Extra environment cube mip levels: a blurrier reflection (retail 0).
+    pub reflection_blur: Option<f32>,
+    /// Reflection color multiplier (retail 1, 1, 1).
+    pub reflection_tint: Option<[f32; 3]>,
+    /// Third, rotated wave sample against visible tiling.
+    pub third_wave: Option<bool>,
+    /// Calmer motion on small water bodies.
+    pub body_calming: Option<bool>,
+    /// Wave animation speed relative to retail's 30 Hz (retail 1).
+    pub wave_rate: Option<f32>,
+    /// Water texture scroll speed relative to retail (retail 1).
+    pub scroll_rate: Option<f32>,
+    /// Scroll clock that never visibly restarts (default on; false gives the
+    /// ported routine's restart every 10 s).
+    pub seamless_clock: Option<bool>,
+    /// The look on flowing water too (`water.flowing`: University's fountains; retail off).
+    pub flowing_water: Option<bool>,
+    /// Ripple texture scale multiplier on flowing water (retail 1).
+    pub flowing_ripple_scale: Option<f32>,
+    /// Splash in shallow water (fountains) as a share of the deep-water plume, 0 = none (retail none).
+    pub shallow_splash: Option<f32>,
+    /// Calm open-sea swells (`ocean.default`) as a slope amplitude, 0 = none (retail none).
+    pub ocean_swell: Option<f32>,
+    /// Wavelength of the longest swell in meters.
+    pub ocean_swell_length: Option<f32>,
+    /// Speed of the longest swell in m/s.
+    pub ocean_swell_speed: Option<f32>,
+    /// Fountain basins take the large water's waves, scaled down (retail off).
+    pub fountain_water: Option<bool>,
+    /// Meters per basin wave tile.
+    pub fountain_tile: Option<f32>,
+    /// Least wave strength on small basins, 0..1 (retail 0).
+    pub fountain_waves: Option<f32>,
+    /// Cascade scroll speed relative to retail (retail 1).
+    pub cascade_rate: Option<f32>,
+    /// Foam on cascades, 0 = none (retail none).
+    pub cascade_foam: Option<f32>,
+    /// Basin body color under the lighting (linear rgb, 0..1 each).
+    pub fountain_colour: Option<[f32; 3]>,
+    /// Basin reflection strength as a share of the material's own mask, 0..2.
+    pub fountain_reflection: Option<f32>,
+    /// Basin wave tilt gain, 0..8 (1 = the waves as the large water draws them).
+    pub fountain_ripple: Option<f32>,
+    /// Props in water sink or float by their own density, with water drag (retail: they fall through to the floor).
+    pub prop_water: Option<bool>,
+    /// Water density for prop buoyancy, kg/m3 (100..5000).
+    pub water_density: Option<f32>,
+    /// Linear water drag on submerged props, per second (0..20).
+    pub prop_water_drag: Option<f32>,
+    /// Angular water drag on submerged props, per second (0..20).
+    pub prop_water_spin_drag: Option<f32>,
+    /// Deep water carries every prop: its density counts as at most this, kg/m3 (10..5000).
+    pub prop_deep_float_density: Option<f32>,
+    /// Waves props bob on in deep water: height in m (0..1) and period in s (0.5..30).
+    pub prop_bob_height: Option<f32>,
+    pub prop_bob_period: Option<f32>,
+    /// Material density from which a prop always sinks, kg/m3 (10..20000).
+    pub prop_heavy_density: Option<f32>,
+    /// In water too deep to see the bottom: how far under (m) a sinking prop has faded out, 0..20 (0 = no fade).
+    pub prop_fade_depth: Option<f32>,
+    /// A sunk prop touching the floor below this speed (m/s, 0..5) gets no water forces and can sleep (ours).
+    pub prop_settle_speed: Option<f32>,
+}
+impl WaterLookPatch {
+    pub fn validate(&self) -> bool {
+        let ok = |v: Option<f32>, lo: f32, hi: f32| v.is_none_or(|v| range(v, lo, hi));
+        ok(self.ripple_scale, 0.1, 16.0)
+            && ok(self.water_density, 100.0, 5000.0)
+            && ok(self.prop_water_drag, 0.0, 20.0)
+            && ok(self.prop_water_spin_drag, 0.0, 20.0)
+            && ok(self.prop_deep_float_density, 10.0, 5000.0)
+            && ok(self.prop_bob_height, 0.0, 1.0)
+            && ok(self.prop_bob_period, 0.5, 30.0)
+            && ok(self.prop_heavy_density, 10.0, 20000.0)
+            && ok(self.prop_fade_depth, 0.0, 20.0)
+            && ok(self.prop_settle_speed, 0.0, 5.0)
+            && ok(self.fountain_tile, 0.5, 100.0)
+            && ok(self.fountain_waves, 0.0, 1.0)
+            && ok(self.cascade_rate, 0.0, 8.0)
+            && ok(self.cascade_foam, 0.0, 2.0)
+            && ok(self.fountain_reflection, 0.0, 2.0)
+            && ok(self.fountain_ripple, 0.0, 8.0)
+            && self.fountain_colour.is_none_or(|c| c.iter().all(|&v| range(v, 0.0, 1.0)))
+            && ok(self.flowing_ripple_scale, 0.1, 16.0)
+            && ok(self.shallow_splash, 0.0, 2.0)
+            && ok(self.ocean_swell, 0.0, 0.3)
+            && ok(self.ocean_swell_length, 1.0, 400.0)
+            && ok(self.ocean_swell_speed, 0.0, 40.0)
+            && ok(self.reflection_blur, 0.0, 8.0)
+            && self.reflection_tint.is_none_or(|t| t.iter().all(|&c| range(c, 0.0, 4.0)))
+            && ok(self.wave_rate, 0.0, 4.0)
+            && ok(self.scroll_rate, 0.0, 4.0)
     }
 }
 

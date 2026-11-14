@@ -35,9 +35,26 @@ image = { version = "=0.25.10", default-features = false, features = ["png", "jp
 skate-mods = { path = "../skate-mods" }
 skate-dynamics = { path = "../skate-dynamics" }
 skate-audio = { path = "../skate-audio" }
+# The music packer's converter (--pack-music-folder, doc 11 "Music banks"): the player's own files in most formats,
+# decoded in pure Rust (MP3, AAC / M4A, ALAC, Ogg Vorbis, FLAC, WAV, AIFF, MKV / WebM audio).
+symphonia = { version = "=0.5.4", default-features = false, features = ["mp3", "aac", "isomp4", "alac", "flac", "ogg", "vorbis", "wav", "pcm", "adpcm", "mkv", "aiff"] }
 gltf = { version = "=1.4.1", default-features = true }
 # SDL3 gamepad input for every platform, built from source and statically linked.
 sdl3 = { version = "=0.20.0", features = ["build-from-source-static"] }
+
+# Replay export (Save to PC): Windows' own encoder (Media Foundation) and the save dialog. The Media Foundation
+# functions are loaded at run time (`replay/export.rs`), so the exe still starts on N editions without it; 0.58 is the
+# version already in the lockfile.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "=0.58.0", features = ["Win32_Foundation", "Win32_Media_MediaFoundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_IO", "Win32_System_LibraryLoader", "Win32_System_Pipes", "Win32_UI_Shell", "Win32_UI_Shell_Common"] }
+
+# The stderr pump on Linux / macOS (`profiling.rs`): pipe, dup2, FIONREAD; the version already in the lockfile.
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.189"
+
+# Required for the Vulkan-only renderer to use MoltenVK.
+[target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "=27.0.1", default-features = false, features = ["vulkan-portability"] }
 
 [dev-dependencies]
 naga = { version = "=27.0.3", features = ["wgsl-in"] }

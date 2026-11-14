@@ -23,9 +23,16 @@ fn horizontal(mut v: Vector) -> Vector {
 ///Select the nearest record FIRST, then return that record's eligibility.
 ///An ineligible nearer record suppresses a farther eligible record.
 pub fn best_spline(records: &[Record], position: Vector) -> Option<Record> {
+    best_spline_excluding(records, position, None)
+}
+
+///82D4D150 mode 1 (Move Object's held update 82D44A10, path B re-grab): records
+///whose descriptor (+188 kind, +192 id) equals `exclude` are skipped entirely.
+pub fn best_spline_excluding(records: &[Record], position: Vector, exclude: Option<(u32,u32)>) -> Option<Record> {
     let mut distance = f32::from_bits(0x47c34ff3); //822F8FF0.
     let mut best = None;
     for record in records {
+        if exclude.is_some_and(|(kind,id)| record.0[47]==kind && record.0[48]==id) { continue; }
         let endpoints = record.endpoints();
         let delta = sub(closest_point(position,endpoints),position);
         let direction = horizontal(sub(endpoints[0],endpoints[1]));

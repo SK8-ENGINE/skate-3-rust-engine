@@ -17,6 +17,12 @@ pub struct Field {
 pub struct FieldArray {
     #[serde(default)]
     pub text_items: Vec<String>,
+    /// Elements of two text pointers each, resolved (the loading screen's hints: title, text).
+    #[serde(default)]
+    pub text_pairs: Vec<[String; 2]>,
+    /// The raw elements as big-endian hex.
+    #[serde(default)]
+    pub items: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -95,7 +101,30 @@ impl Collections {
                 ));
             }
         }
+        let mut data = data;
+        data.merge_dlc(&asset_root.join("private/stock/dlc"), &mut identities);
         Ok(data)
+    }
+
+    /// The player's DLC packs' rows (setup's `private/stock/dlc/<vault>-collections.json`, research b412 / b416): they
+    /// only add to the disc's (a disc row is never replaced; a repeated DLC row keeps the first) and inherit from them.
+    /// Files are read in name order; an unreadable file is skipped with a warning, so DLC never blocks the disc data.
+    fn merge_dlc(&mut self, folder: &Path, identities: &mut std::collections::BTreeSet<(String, String)>) {
+        let Ok(dir) = std::fs::read_dir(folder) else { return };
+        let mut files: Vec<_> = dir.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
+        files.sort();
+        for path in files {
+            let parsed = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b| serde_json::from_slice::<Self>(&b).map_err(|e| e.to_string()));
+            let Ok(extra) = parsed else {
+                eprintln!("DLC collections {}: {}", path.display(), parsed.err().unwrap_or_default());
+                continue;
+            };
+            for item in extra.collections {
+                if identities.insert((crate::attrib_hash::numeric_name(&item.class_name), crate::attrib_hash::numeric_name(&item.key))) {
+                    self.collections.push(item);
+                }
+            }
+        }
     }
 
     pub fn field(&self, class: &str, key: &str, name: &str) -> Result<&Field, String> {
@@ -192,6 +221,32 @@ fn decode_words<const N: usize>(text: &str) -> Result<[u32; N], String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// DLC rows (private/stock/dlc/*.json) add to the disc's and inherit from them; a disc row is never replaced.
+    #[test]
+    fn dlc_rows_add_to_the_disc_rows_and_inherit_from_them() {
+        let root = std::env::temp_dir().join(format!("skate-collections-dlc-{}", std::process::id()));
+        let stock = root.join("private/stock");
+        std::fs::create_dir_all(stock.join("dlc")).unwrap();
+        let row = |key: &str, parent: &str, value: &str| serde_json::json!({
+            "class": "world", "key": key, "parent": parent, "source": "fixture", "sha256": "", "vault": "pack",
+            "fields": { "WorldStream": { "type": "Attrib::StringKey", "data": value } }
+        });
+        std::fs::write(stock.join("skater-collections.json"), serde_json::json!({
+            "version": 1, "collections": [row("default", "", "DIST_Default"), row("dist_downtown", "", "DIST_DownTown")]
+        }).to_string()).unwrap();
+        std::fs::write(stock.join("dlc/pack-collections.json"), serde_json::json!({
+            "version": 1, "collections": [row("dist_downtown", "", "REPLACED"), {
+                "class": "world", "key": "dist_maloofmoneycupdlc", "parent": "default", "source": "fixture", "sha256": "",
+                "fields": {}
+            }]
+        }).to_string()).unwrap();
+        let data = Collections::load(&root).unwrap();
+        std::fs::remove_dir_all(&root).ok();
+        assert_eq!(data.entries().len(), 3);
+        assert_eq!(data.field("world", "dist_downtown", "WorldStream").unwrap().data, "DIST_DownTown");
+        assert_eq!(data.field("world", "dist_maloofmoneycupdlc", "WorldStream").unwrap().data, "DIST_Default");
+    }
 
     #[test]
     fn numeric_export_names_resolve_readable_manual_settings() {

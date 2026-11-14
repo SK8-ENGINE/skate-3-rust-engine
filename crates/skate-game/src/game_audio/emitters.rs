@@ -5,7 +5,7 @@
 //! The game side follows TU3 (audio-specs/ems-emitters-re.md; doc 11):
 //! - a record is a sphere when its three extents are equal, otherwise an
 //!   ellipsoid whose semi-axes are the extents along forward = scalars[1..4],
-//!   up and side; the listener's normalised distance `d` must be below 1;
+//!   up and side; the listener's normalized distance `d` must be below 1;
 //! - scalars[0] is an inner core: inside it the level is full, outside `d` is
 //!   rescaled over the rest;
 //! - level = attribute volume x falloff curve ((1-d)^2, 1-d or flat);
@@ -37,6 +37,111 @@ const MAX_ACTIVE: usize = 5;
 // (`sub_824A24F8`) loads them all and dispatches every record by its attribute's eVolumeType
 // (sound emitters 1, reverb zones 5, music zones 4); `music_` holds music zones, `speakers_` /
 // `crowds_` types 6 / 7.
+
+/// The winning music zone (`eVolumeType` 4; the emitter system's `+0xD0` block, `sub_828EB410` / `sub_824A2198`),
+/// read by the music's environment chooser (`music_zones::environment`). docs/hails-additions/11-audio.md#music-zones
+#[derive(Resource, Default, Clone, Debug, PartialEq)]
+pub(crate) struct MusicZone {
+    pub winner: Option<MusicZoneWinner>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MusicZoneWinner {
+    /// The record (`file << 32 | index`) and its attribute (sound id).
+    pub record: u64,
+    pub attribute: u64,
+    /// The attribute's `aud_playlists` record key.
+    pub playlist: u64,
+    /// Normalized distance in the zone (0 inside its core).
+    pub distance: f32,
+    pub level: f32,
+}
+
+struct MusicZoneRecord {
+    shape: Shape,
+    id: u64,
+    attribute: u64,
+    playlist: u64,
+    level: f32,
+}
+
+#[derive(Default)]
+pub(super) struct MusicZoneState {
+    map: Option<(String, u64, u64)>,
+    records: Vec<MusicZoneRecord>,
+    /// Reached records in discovery order (the active node list the reverb zones share).
+    active: Vec<usize>,
+}
+
+/// Per frame: the music zones holding the listener and the winner (sub_828EB410): the winner persists across frames;
+/// a reached zone of the winner's attribute keeps the smallest distance, a zone of another attribute takes over, so
+/// among different kinds the last reached wins. NOT RETAIL YET: the playlist preset gate (`+0x648`, 824A2330) passes
+/// every zone (its writer is not found).
+pub(super) fn music_zones(
+    mut state: Local<MusicZoneState>,
+    map: Res<crate::map_transition::CurrentMap>,
+    library: Option<Res<Library>>,
+    listener: Query<&GlobalTransform, With<super::GameAudioListener>>,
+    mut out: ResMut<MusicZone>,
+    content: Res<super::AudioContent>,
+    audio: Res<super::map_audio::MapAudio>,
+) {
+    let Some(library) = library else { return };
+    let state = &mut *state;
+    let identity = (map.name.clone(), map.generation, content.world_generation);
+    if state.map.as_ref() != Some(&identity) || audio.is_changed() {
+        state.records = audio
+            .records(&library)
+            .filter(|(_, r)| r.kind == 4 && r.flags == 0)
+            .filter_map(|(f, r)| {
+                let playlist = u64::from_str_radix(r.playlist.as_deref()?, 16).ok()?;
+                let s = r.scalars;
+                Some(MusicZoneRecord {
+                    shape: Shape { position: Vec3::from(r.position), extent: Vec3::from(r.extent), forward: Vec3::new(s[1], s[2], s[3]), core: s[0] },
+                    id: ((f as u64) << 32) | u64::from(r.index),
+                    attribute: u64::from_str_radix(&r.sound_id, 16).unwrap_or(0),
+                    playlist,
+                    level: r.zone_level.unwrap_or(0.0),
+                })
+            })
+            .collect();
+        state.active.clear();
+        if !state.records.is_empty() {
+            info!("Music zones: {} records on {}", state.records.len(), audio.stem);
+        }
+        state.map = Some(identity);
+        out.winner = None;
+    }
+    let Ok(listener) = listener.single() else { return };
+    let ear = listener.translation();
+    let reached: Vec<Option<f32>> = state.records.iter().map(|z| reach(&z.shape, ear)).collect();
+    state.active.retain(|&i| reached[i].is_some());
+    for (i, hit) in reached.iter().enumerate() {
+        if hit.is_some() && !state.active.contains(&i) {
+            state.active.push(i);
+        }
+    }
+    let mut kind = out.winner.as_ref().map(|w| w.attribute);
+    let mut best: Option<(usize, f32)> = None;
+    for &i in &state.active {
+        let (r, d) = (&state.records[i], reached[i].unwrap_or(1.0));
+        if Some(r.attribute) == kind {
+            if best.is_none_or(|(_, b)| d < b) {
+                best = Some((i, d));
+            }
+        } else {
+            kind = Some(r.attribute);
+            best = Some((i, d));
+        }
+    }
+    let winner = best.map(|(i, d)| {
+        let r = &state.records[i];
+        MusicZoneWinner { record: r.id, attribute: r.attribute, playlist: r.playlist, distance: d, level: r.level }
+    });
+    if out.winner != winner {
+        out.winner = winner;
+    }
+}
 
 /// The reverb-zone emitters (`eVolumeType` 5) the listener is inside this frame, in the order
 /// they were reached (retail's active node list, which `sub_82488278` walks for `SFXObj_Reverb`).
@@ -71,7 +176,7 @@ pub(super) struct ZoneState {
 const PUBLISHED_ZONE: u64 = 1 << 63;
 
 /// Per frame, before `native::reverb_frame`: which reverb zones hold the listener (the camera, as
-/// the emitter query's `0x820CFDD4`), with their normalised distance after the inner core
+/// the emitter query's `0x820CFDD4`), with their normalized distance after the inner core
 /// (`sub_828EA918`'s sphere / ellipsoid test, as for the sound emitters) and their attribute's
 /// preset (`99FD793BC30CF0FA`). Native runtime only.
 pub(super) fn reverb_zones(
@@ -201,7 +306,7 @@ struct Shape {
     core: f32,
 }
 
-/// Normalised distance of `listener` in the shape (0 at the core, 1 at the
+/// Normalized distance of `listener` in the shape (0 at the core, 1 at the
 /// edge), or None outside.
 fn reach(shape: &Shape, listener: Vec3) -> Option<f32> {
     let delta = listener - shape.position;
@@ -334,6 +439,27 @@ fn prefetch_near(state: &mut State, native: &mut Native, library: &Library, ear:
     }
 }
 
+/// The emitter banks of the map being loaded (its emitter `records`, its path `map`) within
+/// [`AHEAD`] of its spawn point, nearest first, queued on the prefetch worker; the same banks and
+/// order the listener's first frame there asks for (`prefetch_near`). Returns how many were queued.
+///
+/// [`AHEAD`]: super::native::prefetch::AHEAD
+pub(super) fn read_ahead_banks<'a>(records: impl Iterator<Item = &'a super::library::EmitterRecord>, library: &Library, native: &mut Native, map: &std::path::Path, spawn: Vec3) -> usize {
+    use super::native::prefetch::AHEAD;
+    let mut near: Vec<(f32, &str)> = Vec::new();
+    for r in records {
+        let Some(bank) = r.bank.as_deref().filter(|b| r.kind == 1 && r.flags == 0 && native.has_bank(library, b) && !native.kept_across_maps(b)) else { continue };
+        let d = Vec3::from(r.position).distance(spawn) - Vec3::from(r.extent).max_element();
+        match near.iter_mut().find(|(_, b)| *b == bank) {
+            Some(n) => n.0 = n.0.min(d),
+            None => near.push((d, bank)),
+        }
+    }
+    near.retain(|(d, _)| *d <= AHEAD);
+    near.sort_by(|a, b| a.0.total_cmp(&b.0));
+    near.into_iter().filter(|(_, stem)| library.bank_source(stem).is_ok_and(|source| native.prefetch.request_next(map, source))).count()
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn update(
     mut state: Local<State>,
@@ -353,6 +479,7 @@ pub(super) fn update(
     mut stats: ResMut<crate::world_audio::WorldEmitterStats>,
     rules: Res<super::mod_rules::AudioRules>,
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::EMITTERS);
     let _timing = super::timing::scope(&super::timing::EMITTERS);
     // No native runtime: the emitters are silent (its start logged why).
     let (Some(library), Some(mut native)) = (library, native) else { return };
@@ -385,7 +512,11 @@ pub(super) fn update(
             }
         }
         if map_changed {
-            native.unload_map_banks();
+            if runtime_changed {
+                native.unload_map_banks();
+            } else {
+                native.change_map(map.path.as_deref());
+            }
         }
         let stem = audio.stem.as_str();
         // Retail's emitter system loads every file of the map's database entry and dispatches by
@@ -415,7 +546,8 @@ pub(super) fn update(
             };
             state.emitter_bank.push(b);
         }
-        state.bank_status = vec![BankStatus::Idle; state.banks.len()];
+        // Banks read ahead during the map's load are requested already (and dropped when left behind).
+        state.bank_status = state.banks.iter().map(|b| if native.prefetch.contains(b) { BankStatus::Requested } else { BankStatus::Idle }).collect();
         state.map_len = state.emitters.len();
         state.dynamic.clear();
         state.map = Some(identity);
@@ -444,7 +576,7 @@ pub(super) fn update(
                 info!("AUDIO_EMITTER stop {} #{}", state.emitters[node.record].bank, node.record);
                 if api.events.on() {
                     let e = &state.emitters[node.record];
-                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner() });
+                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner(), hit: None });
                 }
             }
             if let Some(post) = node.post {
@@ -508,11 +640,11 @@ pub(super) fn update(
                 // sound placed at the owner plays at the record, with the record's reach.
                 let muted = rules.set.as_deref().is_some_and(|r| {
                     let site = (e.shape.position, super::mod_voices::Reach { extent: e.shape.extent, forward: e.shape.forward, core: e.shape.core, curve: e.falloff });
-                    r.mutes_at_published(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner() }, Some(site), node.entity.map(Entity::to_bits))
+                    r.mutes_at_published(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner(), hit: None }, Some(site), node.entity.map(Entity::to_bits))
                 });
                 node.post = if muted { None } else { native.post_emitter(&payload) };
                 if api.events.on() && (node.post.is_some() || muted) {
-                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner() });
+                    api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStart, source: super::mod_audio::Source::Emitter, class: super::mod_audio::intern(&e.bank), slot: "", id: e.patch, owner: node.owner(), hit: None });
                 }
             }
             Err(error) => warn!("AUDIO_EMITTER {}: {error}", e.bank),
@@ -582,7 +714,7 @@ fn sync_dynamic(
             return true;
         }
         if node.started && api.events.on() {
-            api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: "", slot: "", id: 0, owner: entity.to_bits() });
+            api.events.push(super::mod_audio::EventRow { kind: super::mod_audio::EventKind::EmitterStop, source: super::mod_audio::Source::Emitter, class: "", slot: "", id: 0, owner: entity.to_bits(), hit: None });
         }
         if let Some(post) = node.post {
             native.release(post);
@@ -607,6 +739,52 @@ mod tests {
     /// emitter in turn. Each frame's `prefetch_near` only queues / drops decodes: the runtime's
     /// banks, evaluator random state and blocks stay untouched; requested = the banks within
     /// `AHEAD` m that are not loaded; far away everything is dropped. Prints its cost per call.
+    /// A district's emitter banks read ahead for a spawn point (data-gated) are the banks the
+    /// listener's first frame there asks for, and at the map change they are its requested banks.
+    #[test]
+    #[ignore = "needs the private install data"]
+    fn banks_read_ahead_for_the_spawn_are_the_first_frames_banks() {
+        let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets"));
+        let Ok(library) = Library::load(root) else { panic!("missing private data: no audio install") };
+        let Ok(mut native) = Native::start(&library) else { panic!("missing private data: no AEMS install") };
+        let records: Vec<_> = super::super::map_audio::tests::old_ems_files("DownTown").iter().flat_map(|f| library.emitters(f)).collect();
+        let map = std::path::Path::new("maps/DownTown.skate");
+        let mut checked = 0;
+        for r in records.iter().filter(|r| r.kind == 1 && r.bank.is_some()).step_by(25) {
+            let spawn = Vec3::from(r.position);
+            // The first frame's requests without a read-ahead.
+            let mut state = State::default();
+            for r in &records {
+                let Some(bank) = r.bank.clone().filter(|b| r.kind == 1 && r.flags == 0 && native.has_bank(&library, b)) else { continue };
+                let s = r.scalars;
+                state.emitters.push(Emitter {
+                    shape: Shape { position: Vec3::from(r.position), extent: Vec3::from(r.extent), forward: Vec3::new(s[1], s[2], s[3]), core: s[0] },
+                    volume: r.volume, falloff: r.falloff, bank: bank.clone(), patch: r.patch,
+                });
+                let b = state.banks.iter().position(|x| *x == bank).unwrap_or_else(|| {
+                    state.banks.push(bank);
+                    state.banks.len() - 1
+                });
+                state.emitter_bank.push(b);
+            }
+            state.bank_status = vec![BankStatus::Idle; state.banks.len()];
+            native.change_map(None);
+            prefetch_near(&mut state, &mut native, &library, spawn);
+            let mut first: Vec<String> = native.prefetch.stems().map(str::to_owned).filter(|s| !native.kept_across_maps(s)).collect();
+            first.sort();
+            native.change_map(None);
+            let queued = read_ahead_banks(records.iter().copied(), &library, &mut native, map, spawn);
+            native.change_map(Some(map));
+            let mut ahead: Vec<String> = native.prefetch.stems().map(str::to_owned).collect();
+            ahead.sort();
+            assert_eq!(ahead, first, "spawn {spawn}");
+            assert_eq!(queued, ahead.len());
+            checked += 1;
+        }
+        native.change_map(None);
+        assert!(checked > 3, "{checked} spawn points");
+    }
+
     #[test]
     #[ignore = "needs the private install data"]
     fn the_prefetch_follows_the_listener_and_touches_no_runtime_state() {
@@ -823,7 +1001,7 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(native);
         world.insert_resource(library);
-        world.insert_resource(crate::map_transition::CurrentMap { path: None, name: "Test world".into(), spawn: [0.0; 3], heading: 0.0, generation: 0, audio_tag: None });
+        world.insert_resource(crate::map_transition::CurrentMap { path: None, name: "Test world".into(), spawn: [0.0; 3], heading: 0.0, generation: 0, audio_tag: None, layout: None });
         world.init_resource::<super::super::map_audio::MapAudio>();
         world.init_resource::<super::super::AudioContent>();
         world.init_resource::<super::super::mod_audio::AudioApi>();
@@ -835,7 +1013,7 @@ mod tests {
         world.init_resource::<super::super::mod_rules::AudioRules>();
         // `extra` = the default settings (own instances since 2026-10-04); else the "shared" option.
         let saved = if extra { super::super::SavedSettings::default() } else { super::super::SavedSettings { mod_emitter_slots: super::super::ModEmitterSlots::Shared, ..Default::default() } };
-        world.insert_resource(super::super::AudioSettings { saved, path: std::env::temp_dir().join("skate-emitter-test-audio.json"), muted: true, volume_overrides: Default::default() });
+        world.insert_resource(super::super::AudioSettings { saved, path: std::env::temp_dir().join("skate-emitter-test-audio.json"), muted: true, volume_overrides: Default::default(), speech_decoded: false });
         let listener = world.spawn((super::super::GameAudioListener, Transform::default(), GlobalTransform::default())).id();
         (world, listener)
     }

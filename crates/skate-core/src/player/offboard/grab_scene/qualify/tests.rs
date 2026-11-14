@@ -40,3 +40,19 @@ fn qualification_requires_real_approach_facing_and_box() {
     let mut remote=bounds;remote.frame[3]=[5.,0.,0.,0.];
     assert!(!qualify(&r,[0.,0.,1.,0.],remote,limits));
 }
+/// 82D2D550 (research b148): the skitch grab point follows a bent spline (the chord would not), counts from the other
+/// end with the reverse bit (+200 0x20), and holds the ends at or past +-half (+180).
+#[test]
+fn along_lookup_follows_the_spline_and_its_reverse_bit() {
+    let mut r=spline(vec![[0.;4],[1.,0.,0.2,0.],[2.,0.,0.,0.]]);
+    r.0[45]=1.0f32.to_bits();
+    let p=polyline::at_along(&r,0.0);
+    assert!((p[0]-1.).abs()<1e-6 && (p[2]-0.2).abs()<1e-6,"the middle is on the bend: {p:?}");
+    let p=polyline::at_along(&r,-0.5);
+    assert!((p[0]-0.5).abs()<1e-6 && (p[2]-0.1).abs()<1e-6,"{p:?}");
+    r.0[50]^=0x20<<24;
+    let p=polyline::at_along(&r,-0.5);
+    assert!((p[0]-1.5).abs()<1e-6 && (p[2]-0.1).abs()<1e-6,"the reverse bit counts from the far end: {p:?}");
+    assert_eq!(polyline::at_along(&r,-1.0),r.endpoints()[0]);
+    assert_eq!(polyline::at_along(&r,1.5),r.endpoints()[1]);
+}

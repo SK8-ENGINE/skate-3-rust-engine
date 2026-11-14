@@ -58,12 +58,67 @@ pub struct Item {
     pub help: String,
 }
 
+/// A front-end screen template (retail table 0x8302F1A8 in TU3, 16-byte records {name, swf path, type, -1}):
+/// the screen manager registers them in table order, so a screen's AS id is 600 + its index.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ScreenTemplate {
+    pub name: String,
+    /// Path under `source/screens/` (`main/core_menu.swf`); empty for the "Ignore" record.
+    pub path: String,
+    pub kind: u32,
+}
+
+/// One FE screen stack record. Numeric ids differ between builds (TU3 inserts two), so `id` is the identity.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FeScreen {
+    /// Stable identity: `key`, or `key:n` (n = position among the records sharing that key) when shared.
+    pub id: String,
+    /// The 64-bit value at +16 as 16 hex digits (posted as the focus message; four keys are shared by 2 to 5
+    /// screens, e.g. TU3 ids 0 / 32 / 49).
+    pub key: String,
+    /// Byte +4: the world behind this screen blurs while it is on top (the pause crossbar has it set).
+    pub blur: bool,
+    /// Byte +0: open suspends gameplay (context 3), close resumes it.
+    #[serde(default)]
+    pub suspends_gameplay: bool,
+    /// Byte +1: the chyron shows while it is open.
+    #[serde(default)]
+    pub chyron: bool,
+    /// Word +8: HUD mode while it is the main stack's top (0 on, 1 off, 2 online HUDs only, 3 keep).
+    #[serde(default = "hud_off")]
+    pub hud: i32,
+    /// Byte +12: pad input its own handler leaves goes on to the movie's UpdateInput.
+    #[serde(default)]
+    pub input_to_movie: bool,
+}
+
+fn hud_off() -> i32 {
+    1
+}
+
+/// One row of the career stats table (the Stats object's +0x18 table, TU3 0x83043AE8, 12-byte records: enabled
+/// byte, label string id, value): the loading screen's Stats panel and the Skate Profile read it (doc 31 "Loading
+/// screen (FE 52)", research b589).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StatRow {
+    pub label: String,
+    pub enabled: bool,
+}
+
+/// One sub-option kind's row: label and helper string ids by column ("" = empty).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SubOptionRow {
+    pub labels: Vec<String>,
+    pub helpers: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AptKey {
     pub name: String,
     /// The game input action polled for this key.
     pub action: u32,
-    /// The key code the movies see (AptUp, AptNext, ...).
+    /// The Apt key code in the record (record + 8). Retail does NOT register this: AptUp etc. are set to the
+    /// key's INDEX in the table (ScreenManagerReady 825D9450), the same index UpdateInput passes.
     pub apt_key: u32,
     pub released: bool,
     pub kind: u32,
@@ -91,6 +146,19 @@ pub struct ModeMenu {
     pub vtable: String,
 }
 
+/// The Trick Guide screen's tables (FE screen 14, template TrickTutorial; doc 31 "Trick Guide").
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct TrickGuideTables {
+    /// The top-level list in menu order: Attrib keys of `scoring_trickcategory` records, 16 hex digits (TU3
+    /// 0x830274B0, 8 keys; read by the list fill sub_82619368 and sub_82618C10).
+    pub categories: Vec<String>,
+    /// Gesture animation names by a slot's gesture id (TU3 0x830273C8, 58 names; GetMenuItemGesturesButtons
+    /// 825AE968).
+    pub gestures: Vec<String>,
+    /// Button names by a slot's button id (TU3 0x83027350, 28 names; sub_82619FC0).
+    pub buttons: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MenuTables {
     pub schema: u32,
@@ -102,6 +170,47 @@ pub struct MenuTables {
     pub items: Vec<Item>,
     pub keys: Vec<AptKey>,
     pub modes: Vec<ModeMenu>,
+    /// Screen templates in registration order (empty in tables extracted before they were added).
+    #[serde(default)]
+    pub templates: Vec<ScreenTemplate>,
+    /// FE screens in id order (screen stack info table, 24-byte records; TU3 0x83026088, 72 records, the disc
+    /// build has 70). Empty in tables extracted before it was added.
+    #[serde(default)]
+    pub screens: Vec<FeScreen>,
+    /// Game Settings screen titles per settings screen index (string ids; TU3 0x83026E90, 13 pointers, read by
+    /// GameSettings_GetScreenTitle 825A6DA8). Empty in tables extracted before they were added.
+    #[serde(default)]
+    pub settings_titles: Vec<String>,
+    /// Crossbar sub-option rows per sub-option kind (0 parks, 1 contacts, 2 host options, 3 Skate Reel, 4 on-screen
+    /// help, 5 online team, 6 party): labels (TU3 0x83027958) and helper texts (0x83027A00), 7 x 6 string ids,
+    /// "" for an empty slot. Empty in tables extracted before they were added.
+    #[serde(default)]
+    pub sub_options: Vec<SubOptionRow>,
+    /// The Trick Guide's category order and slot name tables. Empty in tables extracted before they were added.
+    #[serde(default)]
+    pub trick_guide: TrickGuideTables,
+    /// The career stats rows in index order (65 in TU3). Empty in tables extracted before they were added.
+    #[serde(default)]
+    pub career_stats: Vec<StatRow>,
+    /// The eSk8Characters speaker names in id order (104; TU3 0x82232694, the Speech presentation handler's map,
+    /// research b874 / doc 42 "Presentation speech"): `SkateCoach` = 31. Empty in tables extracted before they were
+    /// added.
+    #[serde(default)]
+    pub speakers: Vec<String>,
+    /// The soundtrack's track names in IPOD enum order (track k = entry k - 1; table 0x8302E048 after
+    /// `IPOD_INVALID`, research b1015): the localized `IPOD_<NAME>_ARTIST` / `_TITLE` / `_ALBUM` keys.
+    #[serde(default)]
+    pub ipod_tracks: Vec<String>,
+    /// The playlist song id of each soundtrack track, same order (the IPOD id table after the names, 0x8302E108;
+    /// research music-zones-dj §7): an `aud_playlists` IPodSongInfo id -> track k = position + 1.
+    #[serde(default)]
+    pub ipod_ids: Vec<u32>,
+    /// The DJ world music pieces (names after `DJ_INTERACTIVE_INVALID`, e.g. `Del_Beastin_Main`; 0x8302E1C8) and their playlist ids (0x8302E230): a
+    /// DJSongInfo id -> the world.mpf `dj` value = position + 1.
+    #[serde(default)]
+    pub dj_pieces: Vec<String>,
+    #[serde(default)]
+    pub dj_ids: Vec<u32>,
     /// Table addresses in this build (diagnostics only).
     pub addresses: std::collections::BTreeMap<String, String>,
 }
@@ -528,12 +637,337 @@ fn modes(img: &Image, categories: &[Category], items: &[Item]) -> Vec<ModeMenu> 
     out
 }
 
+// ---------------------------------------------------------------- screen templates
+
+fn template(img: &Image, at: u32) -> Option<ScreenTemplate> {
+    let name = img.string_at(at)?;
+    let path_ptr = img.word(at + 4)?;
+    let path = if path_ptr == 0 { String::new() } else { img.cstr(path_ptr)? };
+    let kind = img.word(at + 8)?;
+    (!name.is_empty() && (path.is_empty() || path.ends_with(".swf")) && kind <= 1 && img.word(at + 12)? == u32::MAX)
+        .then_some(ScreenTemplate { name, path, kind })
+}
+
+/// Located by content: the record whose path is "main/core_menu.swf" (the pause menu), then every valid record
+/// before and after it.
+fn templates(img: &Image) -> Result<(u32, Vec<ScreenTemplate>), String> {
+    let anchor = img
+        .pointers_to_string("main/core_menu.swf")
+        .into_iter()
+        .map(|p| p - 4)
+        .find(|at| template(img, *at).is_some())
+        .ok_or("screen template table not found")?;
+    let mut start = anchor;
+    while template(img, start - 16).is_some() {
+        start -= 16;
+    }
+    let mut out = Vec::new();
+    let mut at = start;
+    while let Some(t) = template(img, at) {
+        out.push(t);
+        at += 16;
+    }
+    Ok((start, out))
+}
+
+// ---------------------------------------------------------------- crossbar sub-options
+
+const SUB_OPTION_KINDS: u32 = 7;
+const SUB_OPTION_COLUMNS: u32 = 6;
+
+/// Located by content: the label table starts with a pointer to "ID_CROSSBAR_NEW_PARK" (kind 0, column 0); the
+/// helper table follows it directly (7 x 6 pointers each, null = empty).
+fn sub_options(img: &Image) -> Result<(u32, Vec<SubOptionRow>), String> {
+    let size = SUB_OPTION_KINDS * SUB_OPTION_COLUMNS * 4;
+    let entry = |at: u32| -> Option<String> {
+        match img.word(at)? {
+            0 => Some(String::new()),
+            p => img.cstr(p).filter(|s| s.starts_with("ID_")),
+        }
+    };
+    let start = img
+        .pointers_to_string("ID_CROSSBAR_NEW_PARK")
+        .into_iter()
+        .find(|at| (0..size * 2).step_by(4).all(|o| entry(at + o).is_some()))
+        .ok_or("crossbar sub-option tables not found")?;
+    let rows = (0..SUB_OPTION_KINDS)
+        .map(|kind| {
+            let cell = |table: u32, column: u32| entry(table + (kind * SUB_OPTION_COLUMNS + column) * 4).unwrap_or_default();
+            SubOptionRow {
+                labels: (0..SUB_OPTION_COLUMNS).map(|c| cell(start, c)).collect(),
+                helpers: (0..SUB_OPTION_COLUMNS).map(|c| cell(start + size, c)).collect(),
+            }
+        })
+        .collect();
+    Ok((start, rows))
+}
+
+// ---------------------------------------------------------------- career stats
+
+/// Located by content: the record whose label points at "ID_RECORD_DMO_01" and that starts a run of 12-byte records
+/// (enabled byte 0 / 1, label "ID_RECORD_*"); the run ends at the first record that is not one.
+fn career_stats(img: &Image) -> Result<(u32, Vec<StatRow>), String> {
+    let row = |at: u32| -> Option<StatRow> {
+        let enabled = *img.image.at(at, 1)?.first()?;
+        let label = img.string_at(at + 4).filter(|l| l.starts_with("ID_RECORD_"))?;
+        (enabled <= 1).then_some(StatRow { label, enabled: enabled == 1 })
+    };
+    img.pointers_to_string("ID_RECORD_DMO_01")
+        .into_iter()
+        .map(|label_at| label_at - 4)
+        .map(|start| (start, (0..).map_while(|i| row(start + i * 12)).collect::<Vec<_>>()))
+        .filter(|(_, rows)| rows.len() >= 40)
+        .max_by_key(|(_, rows)| rows.len())
+        .ok_or_else(|| "career stats table not found".into())
+}
+
+// ---------------------------------------------------------------- settings screen titles
+
+/// Located by content: two consecutive pointers to "ID_GAMESETTINGS_TITLE" (screens 0 and 1), then one string id
+/// per settings screen.
+fn settings_titles(img: &Image, screens: usize) -> Result<(u32, Vec<String>), String> {
+    let start = img
+        .pointers_to_string("ID_GAMESETTINGS_TITLE")
+        .into_iter()
+        .find(|at| img.string_at(at + 4).as_deref() == Some("ID_GAMESETTINGS_TITLE"))
+        .ok_or("settings screen title table not found")?;
+    let titles: Vec<String> = (0..screens as u32)
+        .map_while(|i| img.string_at(start + 4 * i).filter(|t| t.starts_with("ID_GAMESETTINGS_")))
+        .collect();
+    if titles.len() != screens {
+        return Err(format!("settings screen title table has {} titles for {screens} screens", titles.len()));
+    }
+    Ok((start, titles))
+}
+
+// ---------------------------------------------------------------- FE screen info table
+
+const SCREEN_INFO_RECORD: u32 = 24;
+
+/// Located by code: the FE screen stack init (TU3 sub_825E8C40) loads the table with `lis rH,hi; li rN,count;
+/// addi rT,rH,lo` and stores the count with `stw rN,132(rStack)` a few instructions later.
+fn screen_info(img: &Image) -> Result<(u32, Vec<FeScreen>), String> {
+    let words: Vec<u32> = img.image.image.chunks_exact(4).map(|w| u32::from_be_bytes([w[0], w[1], w[2], w[3]])).collect();
+    let op = |w: u32| w >> 26;
+    let rd = |w: u32| (w >> 21) & 31;
+    let ra = |w: u32| (w >> 16) & 31;
+    let imm = |w: u32| w & 0xFFFF;
+    let mut found = Vec::new();
+    for i in 1..words.len().saturating_sub(8) {
+        let (o, n_reg, a, count) = (op(words[i]), rd(words[i]), ra(words[i]), imm(words[i]));
+        if o != 14 || a != 0 || !(16..=256).contains(&count) {
+            continue;
+        }
+        let (lo_op, h_reg, lo) = (op(words[i + 1]), ra(words[i + 1]), imm(words[i + 1]));
+        let (hi_op, hi_reg, hi_a, hi) = (op(words[i - 1]), rd(words[i - 1]), ra(words[i - 1]), imm(words[i - 1]));
+        if lo_op != 14 || hi_op != 15 || hi_a != 0 || hi_reg != h_reg {
+            continue;
+        }
+        let stores_count = words[i + 2..i + 8].iter().any(|w| op(*w) == 36 && rd(*w) == n_reg && imm(*w) == 132);
+        if !stores_count {
+            continue;
+        }
+        let table = (hi << 16).wrapping_add(lo as i16 as i32 as u32);
+        let flags: Option<Vec<FeScreen>> = (0..count)
+            .map(|id| {
+                let record = img.image.at(table + id * SCREEN_INFO_RECORD, SCREEN_INFO_RECORD as usize)?;
+                let key = record[16..24].iter().map(|b| format!("{b:02x}")).collect();
+                let hud = i32::from_be_bytes([record[8], record[9], record[10], record[11]]);
+                ([0, 1, 4, 12].iter().all(|i| record[*i] <= 1) && (0..=3).contains(&hud)).then(|| FeScreen {
+                    id: String::new(),
+                    key,
+                    blur: record[4] == 1,
+                    suspends_gameplay: record[0] == 1,
+                    chyron: record[1] == 1,
+                    hud,
+                    input_to_movie: record[12] == 1,
+                })
+            })
+            .collect();
+        if let Some(mut flags) = flags {
+            for i in 0..flags.len() {
+                let key = flags[i].key.clone();
+                let before = flags[..i].iter().filter(|s| s.key == key).count();
+                let shared = flags.iter().filter(|s| s.key == key).count() > 1;
+                flags[i].id = if shared { format!("{key}:{before}") } else { key };
+            }
+            found.push((table, flags));
+        }
+    }
+    match found.len() {
+        1 => Ok(found.remove(0)),
+        0 => Err("FE screen info table not found".into()),
+        n => Err(format!("FE screen info table ambiguous ({n} candidates)")),
+    }
+}
+
+// ---------------------------------------------------------------- trick guide
+
+/// A table of string pointers around a pointer to `anchor`: entry 0 points at "", every other entry at a non-empty
+/// string (walked back from the anchor to the "" entry, then forward to the last string).
+fn name_table(img: &Image, anchor: &str) -> Option<(u32, Vec<String>)> {
+    let named = |at: u32| img.string_at(at).filter(|s| !s.is_empty());
+    img.pointers_to_string(anchor).into_iter().find_map(|at| {
+        let mut start = at;
+        while named(start - 4).is_some() {
+            start -= 4;
+        }
+        start -= 4;
+        if img.string_at(start).as_deref() != Some("") {
+            return None;
+        }
+        let mut names = vec![String::new()];
+        let mut cursor = start + 4;
+        while let Some(name) = named(cursor) {
+            names.push(name);
+            cursor += 4;
+        }
+        Some((start, names))
+    })
+}
+
+/// Located by code: the list fill (TU3 sub_82619368) and the level reset (sub_82618C10) both copy the category keys
+/// with `lis rH,hi; addi rT,rH,lo; ...; ld; ...; addi rN,rN,8; addi rX,rT,size; cmpw rN,rX`. The one table copied that
+/// way from two places; size / 8 keys.
+fn trick_categories(img: &Image) -> Result<(u32, Vec<String>), String> {
+    let words: Vec<u32> = img.image.image.chunks_exact(4).map(|w| u32::from_be_bytes([w[0], w[1], w[2], w[3]])).collect();
+    let op = |w: u32| w >> 26;
+    let rd = |w: u32| (w >> 21) & 31;
+    let ra = |w: u32| (w >> 16) & 31;
+    let imm = |w: u32| w & 0xFFFF;
+    let mut sites: std::collections::BTreeMap<(u32, u32), usize> = Default::default();
+    for i in 40..words.len().saturating_sub(3) {
+        let (step, end, cmp) = (words[i], words[i + 1], words[i + 2]);
+        if op(step) != 14 || rd(step) != ra(step) || imm(step) != 8 {
+            continue;
+        }
+        let (cursor, bound, table_reg, size) = (rd(step), rd(end), ra(end), imm(end));
+        if op(end) != 14 || size % 8 != 0 || !(16..=256).contains(&size) {
+            continue;
+        }
+        // cmpw cr, cursor, bound (X-form, xo 0).
+        if op(cmp) != 31 || (cmp >> 1) & 0x3FF != 0 || ra(cmp) != cursor || (cmp >> 11) & 31 != bound {
+            continue;
+        }
+        let body = &words[i - 40..i];
+        let loads_u64 = body.iter().any(|w| op(*w) == 58 && w & 3 == 0);
+        let Some(j) = body.iter().rposition(|w| op(*w) == 14 && rd(*w) == table_reg && ra(*w) != 0) else { continue };
+        let hi_reg = ra(body[j]);
+        let Some(hi) = body[j.saturating_sub(12)..j].iter().rev().find(|w| op(**w) == 15 && rd(**w) == hi_reg && ra(**w) == 0) else {
+            continue;
+        };
+        if loads_u64 {
+            let table = (imm(*hi) << 16).wrapping_add(imm(body[j]) as i16 as i32 as u32);
+            *sites.entry((table, size / 8)).or_default() += 1;
+        }
+    }
+    let found: Vec<(u32, u32)> = sites.into_iter().filter(|(_, n)| *n >= 2).map(|(k, _)| k).collect();
+    let [(table, count)] = found[..] else {
+        return Err(format!("trick guide category table not found ({} candidates)", found.len()));
+    };
+    let keys = (0..count)
+        .map(|i| img.image.at(table + i * 8, 8).map(|b| b.iter().map(|b| format!("{b:02x}")).collect::<String>()))
+        .collect::<Option<Vec<_>>>()
+        .ok_or("trick guide category table outside the image")?;
+    Ok((table, keys))
+}
+
+fn trick_guide(img: &Image) -> Result<(u32, u32, u32, TrickGuideTables), String> {
+    let (categories_at, categories) = trick_categories(img)?;
+    // Gesture names end with "revert"; button names include "Stick_Left_Up" (both located by content).
+    let (gestures_at, gestures) = name_table(img, "revert").ok_or("trick guide gesture names not found")?;
+    let (buttons_at, buttons) = name_table(img, "Stick_Left_Up").ok_or("trick guide button names not found")?;
+    Ok((categories_at, gestures_at, buttons_at, TrickGuideTables { categories, gestures, buttons }))
+}
+
+// ---------------------------------------------------------------- speakers
+
+/// The last speaker name; the names after it in the block are other strings.
+const LAST_SPEAKER: &str = "Teammate4";
+const SPEAKER_COUNT: usize = 104;
+
+/// The speaker names: a block of NUL-terminated names, each starting on a 4-byte boundary, beginning "Player",
+/// "Fairfax" and ending with "Teammate4" (104 names).
+fn speakers(img: &Image) -> Result<(u32, Vec<String>), String> {
+    let data = &img.image.image;
+    let start = find(data, b"Player\0\0Fairfax\0").ok_or("speaker names not found")?;
+    let mut names = Vec::new();
+    let mut at = start;
+    while names.len() < SPEAKER_COUNT + 8 {
+        let name = img.cstr(img.image.base_address + at as u32).filter(|n| !n.is_empty()).ok_or("speaker names end early")?;
+        at = (at + name.len() + 1 + 3) & !3;
+        let last = name == LAST_SPEAKER;
+        names.push(name);
+        if last {
+            break;
+        }
+    }
+    if names.len() != SPEAKER_COUNT || names.last().map(String::as_str) != Some(LAST_SPEAKER) {
+        return Err(format!("speaker names: {} found", names.len()));
+    }
+    Ok((img.image.base_address + start as u32, names))
+}
+
+/// The IPOD enum's names: the pointer table that starts with `IPOD_INVALID`; the names after it up to the first
+/// entry that is not a string. Empty when the table is not found (the now-playing popup then stays off).
+/// The ids registered with an enum name table (sub_82499938): an array of u32 at the first 8-byte boundary after the
+/// `count` name pointers that start at `names_at`, the first (the INVALID entry) 0; one id per name after it.
+fn enum_ids(img: &Image, names_at: u32, count: usize) -> Vec<u32> {
+    let end = names_at + 4 * (count as u32 + 1);
+    let at = (end + 7) & !7;
+    if names_at == 0 || img.word(at) != Some(0) {
+        return Vec::new();
+    }
+    (1..=count as u32).map_while(|i| img.word(at + 4 * i)).collect()
+}
+
+/// The DJ world music piece names: the pointer table that starts with `DJ_INTERACTIVE_INVALID`.
+fn dj_pieces(img: &Image) -> (u32, Vec<String>) {
+    // Names may hold spaces ("Del_Prototype 3_Main"); the list ends at the id table's first word (0).
+    let named = |at: u32| img.string_at(at).filter(|s| !s.is_empty());
+    img.pointers_to_string("DJ_INTERACTIVE_INVALID").into_iter().find_map(|start| {
+        let mut names = Vec::new();
+        let mut cursor = start + 4;
+        while let Some(name) = named(cursor) {
+            if names.len() > 200 { return None; }
+            names.push(name);
+            cursor += 4;
+        }
+        (!names.is_empty()).then_some((start, names))
+    }).unwrap_or_default()
+}
+
+fn ipod_tracks(img: &Image) -> (u32, Vec<String>) {
+    let named = |at: u32| img.string_at(at).filter(|s| !s.is_empty());
+    img.pointers_to_string("IPOD_INVALID").into_iter().find_map(|start| {
+        let mut names = Vec::new();
+        let mut cursor = start + 4;
+        while let Some(name) = named(cursor) {
+            if name.contains(' ') || names.len() > 200 { return None; }
+            names.push(name);
+            cursor += 4;
+        }
+        (names.len() >= 20).then_some((start, names))
+    }).unwrap_or_default()
+}
+
 pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
     let img = Image { image };
     let (rows_at, settings_rows, settings_screens) = settings(&img)?;
     let (items_at, items, categories_at, categories) = crossbar(&img)?;
     let (keys_at, keys) = keys(&img)?;
     let modes = modes(&img, &categories, &items);
+    let (templates_at, templates) = templates(&img)?;
+    let (screen_info_at, screens) = screen_info(&img)?;
+    let (titles_at, settings_titles) = settings_titles(&img, settings_screens.len())?;
+    let (sub_options_at, sub_options) = sub_options(&img)?;
+    let (trick_categories_at, gestures_at, buttons_at, trick_guide) = trick_guide(&img)?;
+    let (stats_at, career_stats) = career_stats(&img)?;
+    let (speakers_at, speakers) = speakers(&img)?;
+    let (ipod_at, ipod_tracks) = ipod_tracks(&img);
+    let ipod_ids = enum_ids(&img, ipod_at, ipod_tracks.len());
+    let (dj_at, dj_pieces) = dj_pieces(&img);
+    let dj_ids = enum_ids(&img, dj_at, dj_pieces.len());
     if modes.is_empty() {
         return Err("no per-mode crossbar menus found".into());
     }
@@ -543,6 +977,17 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
         ("crossbar_categories", categories_at),
         ("crossbar_items", items_at),
         ("apt_keys", keys_at),
+        ("screen_templates", templates_at),
+        ("screen_info", screen_info_at),
+        ("settings_titles", titles_at),
+        ("sub_options", sub_options_at),
+        ("trick_guide_categories", trick_categories_at),
+        ("trick_guide_gestures", gestures_at),
+        ("trick_guide_buttons", buttons_at),
+        ("career_stats", stats_at),
+        ("speakers", speakers_at),
+        ("ipod_tracks", ipod_at),
+        ("dj_pieces", dj_at),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_owned(), hex(v)))
@@ -556,6 +1001,17 @@ pub fn extract(image: &XexImage) -> Result<MenuTables, String> {
         items,
         keys,
         modes,
+        templates,
+        screens,
+        settings_titles,
+        sub_options,
+        trick_guide,
+        career_stats,
+        speakers,
+        ipod_tracks,
+        ipod_ids,
+        dj_pieces,
+        dj_ids,
         addresses,
     })
 }
@@ -620,6 +1076,8 @@ impl MenuTables {
                         .collect(),
                 })
                 .collect(),
+            // The Challenge Map tree comes from the vault collections, not these tables (added by the game's loader).
+            map_nodes: Vec::new(), map_pictures: Default::default(), map_markers: Default::default(), map_debug: Default::default(),
         }
     }
 }

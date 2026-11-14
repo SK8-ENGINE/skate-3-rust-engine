@@ -33,6 +33,8 @@ pub struct Runtime {
     env_sum: Box<[f32; BLOCK]>,
     /// The Splice one-shot player (`SPLC` banks); its voices live in [`Runtime::mixer`].
     pub splice: SplicePlayer,
+    /// The in-game music stream (decoded music bank segments, back to back; doc 11 "Music banks").
+    pub music: crate::music::player::MusicPlayer,
     /// Our own user-volume scales (1 = retail level): AEMS voices of world banks and of the
     /// player's banks ([`crate::mixer::GROUP_PLAYER`]); the bed has its own.
     pub aems_gain: f32,
@@ -61,6 +63,7 @@ impl Runtime {
             npc_grains: None,
             env_sum: Box::new([0.0; BLOCK]),
             splice: SplicePlayer::new(),
+            music: crate::music::player::MusicPlayer::new(),
             aems_gain: 1.0,
             player_gain: 1.0,
             bus: Box::new([[0.0; BLOCK]; 6]),
@@ -182,7 +185,9 @@ impl Runtime {
             }
             (a, b) => a.or(b),
         };
-        self.mixer.render_with_env(&mut self.bus, env);
+        // Only the local player's chains post a FlangeSub send level (level(21) / (22)).
+        let flange = if bed { self.grains.flange_send() } else { None };
+        self.mixer.render_with_env(&mut self.bus, env, flange);
         if bed {
             self.grains.add_to(&mut self.bus);
         }
@@ -191,6 +196,7 @@ impl Runtime {
                 n.add_to(&mut self.bus);
             }
         }
+        self.music.add_to(&mut self.bus);
         if !self.scheduled.is_empty() {
             let now = self.blocks;
             let mut i = 0;

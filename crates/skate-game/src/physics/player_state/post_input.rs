@@ -44,7 +44,10 @@ struct Services<'a> {
     trajectory_input: skate_core::air::trajectory::SelectorInput,
     trajectory_board_position: [f32; 4],
     world: &'a skate_core::physics::board_world::BoardWorld,
+    /// The props' collision layer for the trajectory's grind surface probes.
+    prop_world: Option<&'a skate_core::physics::board_world::BoardWorld>,
     grab_records: [Option<skate_core::player::offboard::grab_scene::Record>; 2],
+    grab_geometry: &'a mut [Option<std::sync::Arc<skate_core::player::offboard::grab_scene::Geometry>>; 2],
     error: Option<String>,
 }
 impl PostInputServices for Services<'_> {
@@ -73,7 +76,7 @@ impl PostInputServices for Services<'_> {
             self.processed,
             self.trajectory_board_position,
         );
-        match self.trajectory.update(input, self.world, grind_context) {
+        match self.trajectory.update(input, self.world, self.prop_world, grind_context) {
             Ok(valid) => u8::from(valid),
             Err(error) => {
                 self.error = Some(error);
@@ -90,10 +93,10 @@ impl PostInputServices for Services<'_> {
             CandidateRegistration::Second2176 => 1,
         };
         match &self.grab_records[index] {
-            Some(record) => copy_grab_record_82762ab0(
-                &mut self.processed.grab_records_1888_2176[index],
-                &record.0,
-            ),
+            Some(record) => {
+                copy_grab_record_82762ab0(&mut self.processed.grab_records_1888_2176[index], &record.0);
+                self.grab_geometry[index] = Some(record.1.clone());
+            }
             None => {
                 self.error = Some("Grab publication requested without a completed record".into())
             }
@@ -172,6 +175,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
             board: &mut physics.board,
             settings: &mut physics.settings,
             materials: &physics.grind_materials,
+            props: physics.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world),
         },
         result: None,
         processed: p,
@@ -179,7 +183,9 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         trajectory_input,
         trajectory_board_position,
         world: &physics.world,
+        prop_world: physics.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world),
         grab_records: publication.records,
+        grab_geometry: &mut skater.grab_geometry,
         error: None,
     };
     run_post_input(

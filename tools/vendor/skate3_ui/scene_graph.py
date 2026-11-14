@@ -153,7 +153,8 @@ class AssetCache:
                 Path(record["textures"]["manifest"]).parent
                 / texture["preview_file"]
             ).as_posix(),
-            "definition": metadata,
+            # The font's source path names the setup's temp folder: keep the file name (reproducible output).
+            "definition": dict(metadata, source=Path(metadata["source"]).name) if "source" in metadata else metadata,
         }
         if alias:
             result["requested_family"] = requested_family

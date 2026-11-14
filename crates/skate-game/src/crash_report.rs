@@ -223,6 +223,10 @@ pub(crate) fn entry() -> Option<i32> {
         present("Skate 3 diagnostic UI preview\nSynthetic report only; no game was started.\n");
         return Some(0);
     }
+    // Their exit code is the answer to the caller, not a crash.
+    if std::env::args_os().any(|a| a == "--check-assets" || a == "--validate-maps") {
+        return None;
+    }
     let capture = Arc::new(Mutex::new(Capture::default()));
     let start = Instant::now();
     let result = std::env::current_exe().and_then(|exe| {
@@ -257,6 +261,9 @@ pub(crate) fn entry() -> Option<i32> {
         start,
     );
     let status = child.wait();
+    // A killed or crashed game could not stop its pads' motors itself.
+    #[cfg(windows)]
+    crate::input::platform::stop_rumble_after_game();
     // A relay may inherit a pipe. Never wait indefinitely for its EOF.
     let deadline = Instant::now() + Duration::from_secs(2);
     while !(out.is_finished() && err.is_finished()) && Instant::now() < deadline {
@@ -286,6 +293,7 @@ pub(crate) fn entry() -> Option<i32> {
 
 fn install_panic_hook() {
     std::panic::set_hook(Box::new(|info| {
+        crate::input::platform::stop_rumble_on_exit();
         let payload = info
             .payload()
             .downcast_ref::<String>()
@@ -394,6 +402,11 @@ fn save(text: &str) -> std::io::Result<PathBuf> {
     }
     Err(error.unwrap())
 }
+/// Show a short message in the diagnostic report window (it is saved like a report).
+pub(crate) fn present_message(text: &str) {
+    present(text);
+}
+
 fn present(text: &str) {
     match save(text) {
         Ok(path) => {

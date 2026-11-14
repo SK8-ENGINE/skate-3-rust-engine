@@ -36,8 +36,37 @@ struct Vertex {
 #[derive(Component)]
 struct MarkerHudRoot;
 
+/// The camera of the session marker layer (29): the marker HUD and the teleport effect screen.
+#[derive(Component)]
+struct MarkerCamera;
+
 pub(super) fn install(app: &mut App) {
-    app.add_systems(Startup, load).add_systems(Update, present);
+    app.add_systems(Startup, load).add_systems(Update, present).add_systems(
+        PostUpdate,
+        gate_marker_camera.after(bevy::camera::visibility::VisibilitySystems::VisibilityPropagate),
+    );
+}
+
+/// The marker camera runs only while something on its layer is visible (doc 34 "Session marker camera off while
+/// empty"). It clears nothing and 2D cameras do no tonemapping, so with nothing drawn it only re-wrote the same image;
+/// off, the output camera writes that image last. `SKATE_MARKER_CAMERA_GATE=0` keeps it always on (A/B checks).
+fn gate_marker_camera(
+    mut cameras: Query<&mut Camera, With<MarkerCamera>>,
+    drawn: Query<(&RenderLayers, &InheritedVisibility), Without<Camera>>,
+) {
+    static GATE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let gate = *GATE.get_or_init(|| {
+        let gate = std::env::var("SKATE_MARKER_CAMERA_GATE").map_or(true, |v| v != "0");
+        info!("MARKER_CAMERA_GATE {}", if gate { "on" } else { "off" });
+        gate
+    });
+    let layer = RenderLayers::layer(29);
+    let active = !gate || drawn.iter().any(|(layers, visible)| visible.get() && layers.intersects(&layer));
+    for mut camera in &mut cameras {
+        if camera.is_active != active {
+            camera.is_active = active;
+        }
+    }
 }
 
 pub(super) fn overlay_path(root: &Path) -> PathBuf {
@@ -63,6 +92,7 @@ fn load(
         },
         Msaa::Off,
         layer.clone(),
+        MarkerCamera,
     ));
     let folder = overlay_path(&config.asset_root);
     let read = || -> Result<Hud, String> {
@@ -174,5 +204,28 @@ fn present(
         };
         transform.translation = Vec3::new(-window.width() / 2., window.height() / 2., 0.);
         transform.scale = Vec3::splat(scale);
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    #[test]
+    fn marker_camera_runs_only_while_its_layer_shows_something() {
+        let mut app = App::new();
+        app.add_systems(Update, gate_marker_camera);
+        let camera = app.world_mut().spawn((Camera::default(), MarkerCamera)).id();
+        let other = app.world_mut().spawn((RenderLayers::layer(31), InheritedVisibility::VISIBLE)).id();
+        let marker = app.world_mut().spawn((RenderLayers::layer(29), InheritedVisibility::HIDDEN)).id();
+        app.update();
+        assert!(!app.world().get::<Camera>(camera).unwrap().is_active, "only another layer is visible");
+        app.world_mut().entity_mut(marker).insert(InheritedVisibility::VISIBLE);
+        app.update();
+        assert!(app.world().get::<Camera>(camera).unwrap().is_active, "a visible layer 29 entity turns it on");
+        app.world_mut().entity_mut(marker).insert(InheritedVisibility::HIDDEN);
+        app.world_mut().entity_mut(other).insert(RenderLayers::from_layers(&[29, 31]));
+        app.update();
+        assert!(app.world().get::<Camera>(camera).unwrap().is_active, "an entity on several layers counts");
     }
 }

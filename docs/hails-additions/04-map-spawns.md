@@ -18,7 +18,7 @@ when the player picks one. So the baked spawn must be right for every map.
 
 `tools/asset_pipeline/map_writer.py` (`SpawnSelector`) chose, for every
 district except University, the **upward-wound collision triangle nearest the
-world origin** and spawned 1 m above its centre. Two properties of the retail
+world origin** and spawned 1 m above its center. Two properties of the retail
 data defeat that:
 
 1. Skate-park origins sit at a corner of the park, not its middle.
@@ -40,14 +40,14 @@ locators (below). The converter never read them.
 ## Intermediate attempt (kept as a fallback)
 
 A geometric `ground_spawn()` was added first: ignore winding, search outward
-from the area-weighted centre of flat surfaces, and accept a point that is
+from the area-weighted center of flat surfaces, and accept a point that is
 the lowest surface at its XZ, has ≥ 2.5 m headroom, and has no flat surface
 within 25 m (by triangle extent) more than 1 m lower.
 
 **Regression found in play:** applied to city maps, the search starts from the
-area-weighted centre of the whole district. For Industrial (a port) that point
-is out in the harbour: the spawn became (−864.7, −3.0, 414.1), on a 1,604 m²
-collision-only floor at y −4.0 with nothing above it (likely the harbour bed)
+area-weighted center of the whole district. For Industrial (a port) that point
+is out in the harbor: the spawn became (−864.7, −3.0, 414.1), on a 1,604 m²
+collision-only floor at y −4.0 with nothing above it (likely the harbor bed)
 and no visible geometry nearby, so the world looked invisible while collision
 held the player up. (An earlier version of this note said "under the streets";
 collision analysis at that point showed otherwise.) The streaming map validator
@@ -64,11 +64,11 @@ change moves every map's startup position, so all maps must be checked.
 New `tools/asset_pipeline/map_starts.py` resolves each district's start from
 the game's own data, in priority order:
 
-1. **`world` row start locator** — field `Hash_3735C5C12E8E7AE1` in
+1. **`world` row start locator**: field `Hash_3735C5C12E8E7AE1` in
    `skatercollections` names the start locator of each skate park
    (`dist_megapark` → `Z_MegaPark_SkatePark`, etc.).
 2. **Chosen `fe_locations` row** for districts with several authored
-   locations and no single start (`DEFAULT_LOCATIONS`, a project choice —
+   locations and no single start (`DEFAULT_LOCATIONS`, a project choice;
    see below).
 3. **The district's only `fe_locations` row** (BlackBoxPark, SkateSchool).
 
@@ -127,9 +127,9 @@ Previous University spawn was a fixed point next to Super-Ultra Mega-Park,
 ## Files
 
 - `tools/asset_pipeline/map_starts.py` (new)
-- `tools/asset_pipeline/install.py` — computes starts before conversion;
+- `tools/asset_pipeline/install.py`: computes starts before conversion;
   `convert_map` uses them.
-- `tools/asset_pipeline/map_writer.py` — `ground_spawn`, `GROUND_*`
+- `tools/asset_pipeline/map_writer.py`: `ground_spawn`, `GROUND_*`
   constants, `SpawnSelector` changes, `spawn_point` no longer prunes by
   distance for non-University districts, `write(..., prepared_heading=)`.
 - `tools/asset_pipeline/test_map_writer.py`, `tools/asset_pipeline/test_map_starts.py`.

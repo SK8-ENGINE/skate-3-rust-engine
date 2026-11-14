@@ -2,6 +2,7 @@
 mod audio;
 mod canvas;
 mod graphics_dynamic;
+mod world_props;
 mod vehicle_camera;
 pub(crate) mod bridge;
 pub(crate) mod replication;
@@ -17,8 +18,14 @@ mod camera_stream;
 pub(crate) use participation::{player_suspended, peer_suspended};
 mod session;
 mod volumes;
+mod career;
+mod challenges;
+mod music;
+mod minimap;
 mod world_audio;
+pub(crate) mod world_tuning;
 mod triggers;
+mod living_world_events;
 mod capture;
 pub(crate) mod player_physics;
 
@@ -83,6 +90,10 @@ pub(crate) struct Mods {
     skater_remote: BTreeMap<u64, observation::WireObs>,
     pending_remote_teleport: Option<skate_mods::TeleportOptions>,
     volumes: BTreeMap<(String, String), volumes::Volume>,
+    /// `sdk.minimap` icons by (mod, key).
+    minimap: BTreeMap<(String, String), skate_core::minimap::Icon>,
+    /// The last `MODS_BUSY` reason logged.
+    logged_busy: Option<&'static str>,
     pub(crate) custom_menus: BTreeMap<(String,String), skate_mods::extensions::MenuOptions>,
 }
 
@@ -165,11 +176,14 @@ impl Plugin for ModdingPlugin {
         audio::install(app);
         world_audio::install(app);
         graphics_dynamic::install(app);
+        world_props::install(app);
         capture::install(app);
         triggers::install(app);
-        app.add_systems(
+        living_world_events::install(app);
+        app.add_systems(Startup, start_startup_ground)
+        .add_systems(
             PreUpdate,
-            maintenance.after(crate::map_transition::MapTransitionSet),
+            (finish_startup_ground, maintenance.after(crate::map_transition::MapTransitionSet)),
         )
         .add_systems(
             FixedUpdate,
@@ -231,17 +245,43 @@ pub(crate) fn player_attached(mods: &Mods) -> bool {
 
 impl Mods {
     fn runtime_busy(&self) -> bool {
-        self.manager.packages.values().any(|p| p.running())
-            || !self.manager.commands.is_empty()
-            || !self.manager.retired.is_empty()
-            || !self.bodies.is_empty()
-            || !self.graphics.is_empty()
-            || !self.overlays.is_empty()
-            || !self.joints.is_empty()
-            || self.attach.is_some()
-            || !self.canvases.is_empty()
-            || !self.skater_proxies.is_empty()
-            || !self.volumes.is_empty()
+        self.busy_reason().is_some()
+    }
+
+    /// Whether the per-frame snapshot has a reader (a running mod or state mods left); proxies alone do not count.
+    fn snapshot_has_reader(&self) -> bool {
+        self.busy_reason_except_proxies().is_some()
+    }
+
+    /// Whether the mods' Rapier world steps this tick: same rule as [`Self::snapshot_has_reader`].
+    fn needs_dynamics_step(&self) -> bool {
+        self.snapshot_has_reader()
+    }
+
+    fn busy_reason_except_proxies(&self) -> Option<&'static str> {
+        self.busy_reasons().find_map(|(busy, why)| (busy && why != PROXIES).then_some(why))
+    }
+
+    fn busy_reasons(&self) -> impl Iterator<Item = (bool, &'static str)> {
+        [
+            (self.manager.packages.values().any(|p| p.running()), "a running mod"),
+            (!self.manager.commands.is_empty(), "pending commands"),
+            (!self.manager.retired.is_empty(), "retired mods"),
+            (!self.bodies.is_empty(), "bodies"),
+            (!self.graphics.is_empty(), "graphics"),
+            (!self.overlays.is_empty(), "overlays"),
+            (!self.joints.is_empty(), "joints"),
+            (self.attach.is_some(), "an attach"),
+            (!self.canvases.is_empty(), "canvases"),
+            (!self.skater_proxies.is_empty(), PROXIES),
+            (!self.volumes.is_empty(), "volumes"),
+        ]
+        .into_iter()
+    }
+
+    /// What keeps the runtime busy (`runtime_busy`), for the `MODS_BUSY` log line.
+    fn busy_reason(&self) -> Option<&'static str> {
+        self.busy_reasons().find_map(|(busy, why)| busy.then_some(why))
     }
 }
 
@@ -368,20 +408,83 @@ fn net_wire_key(owner: &str, key: &str) -> String {
     }
 }
 
-fn ensure_ground(world: &World, mods: &mut Mods) -> Result<(), String> {
+/// The mods' dynamics ground for a map, built by the map loader off the game thread (`map_transition`); the first
+/// fixed tick on that map installs it instead of building it (2026-10-17: a 1 to 2 s frame after every map switch).
+#[derive(Resource)]
+pub(crate) struct PreparedGround {
+    /// The `CurrentMap` generation it belongs to.
+    pub generation: u64,
+    pub ground: Option<Result<skate_dynamics::GroundCollider, String>>,
+}
+
+/// The first map's ground, built on a `mod-ground` thread from startup as the map loader does for a switch: the
+/// startup loading screen waits for it, so the first fixed tick installs it instead of building it on the game
+/// thread (2026-10-17: a 1.7 s first frame of play on the desktop, with or without mods).
+#[derive(Resource)]
+struct StartupGround(std::sync::Mutex<Option<std::thread::JoinHandle<Result<skate_dynamics::GroundCollider, String>>>>);
+
+fn start_startup_ground(
+    mut commands: Commands,
+    physics: Option<Res<crate::physics::GamePhysics>>,
+    startup: Option<ResMut<crate::startup_loading::StartupLoading>>,
+) {
+    let (Some(physics), Some(mut startup)) = (physics, startup) else { return };
+    let triangles = ground_triangles(&physics);
+    let job = std::thread::Builder::new()
+        .name("mod-ground".into())
+        .spawn(move || bevy::log::tracing::info_span!("build_mod_ground").in_scope(|| skate_dynamics::DynamicsWorld::build_ground(triangles.into_iter())));
+    match job {
+        Ok(job) => {
+            startup.hold("mod_ground", "Building the world");
+            commands.insert_resource(StartupGround(std::sync::Mutex::new(Some(job))));
+        }
+        Err(e) => warn!("Mods' ground: no startup builder ({e}); the first fixed tick builds it"),
+    }
+}
+
+/// Hand the finished startup ground to `ensure_ground` and let the loading screen go on.
+fn finish_startup_ground(
+    mut commands: Commands,
+    ground: Option<Res<StartupGround>>,
+    map: Res<crate::map_transition::CurrentMap>,
+    startup: Option<ResMut<crate::startup_loading::StartupLoading>>,
+) {
+    let Some(ground) = ground else { return };
+    let mut slot = ground.0.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.as_ref().is_some_and(|job| !job.is_finished()) {
+        return;
+    }
+    let built = slot.take().map(|job| job.join().unwrap_or_else(|_| Err("the mods' ground builder panicked".to_string())));
+    commands.insert_resource(PreparedGround { generation: map.generation, ground: built });
+    commands.remove_resource::<StartupGround>();
+    if let Some(mut startup) = startup {
+        startup.release("mod_ground");
+    }
+}
+
+/// The world's collision triangles as the mods' ground takes them.
+pub(crate) fn ground_triangles(physics: &crate::physics::GamePhysics) -> Vec<[[f32; 3]; 3]> {
+    physics.world_triangles().iter().map(|t| t.triangle.vertices.map(|p| [p.x, p.y, p.z])).collect()
+}
+
+fn ensure_ground(world: &mut World, mods: &mut Mods) -> Result<(), String> {
     if mods.ground_ready {
         return Ok(());
     }
-    mods.world.set_ground(
-        world
-            .resource::<crate::physics::GamePhysics>()
-            .world_triangles()
-            .iter()
-            .map(|t| t.triangle.vertices.map(|p| [p.x, p.y, p.z])),
-    )?;
+    let generation = world.resource::<crate::map_transition::CurrentMap>().generation;
+    let prepared = world
+        .get_resource_mut::<PreparedGround>()
+        .filter(|p| p.generation == generation)
+        .and_then(|mut p| p.ground.take());
+    match prepared {
+        Some(ground) => mods.world.install_ground(ground?),
+        None => mods.world.set_ground(ground_triangles(world.resource::<crate::physics::GamePhysics>()).into_iter())?,
+    }
     mods.ground_ready = true;
     Ok(())
 }
+
+const PROXIES: &str = "skater proxies";
 
 fn maintenance(world: &mut World) {
     world.resource_scope(|world, mut mods: Mut<Mods>| {
@@ -437,11 +540,14 @@ fn audio_reloads(world: &mut World, mods: &mut Mods) {
 
 /// Audio content overlays follow the running mods (`game_audio::AudioContent`): a mod that
 /// starts, changes, stops or fails changes the set, and the audio restarts once at the next pass.
+/// The career's progression overlays follow the same set.
 fn sync_audio_content(world: &mut World, mods: &Mods) {
-    let Some(mut content) = world.get_resource_mut::<crate::game_audio::AudioContent>() else { return };
-    let content = content.bypass_change_detection();
-    content.scanned = true;
-    content.sync(mods.manager.packages.iter().filter(|(_, p)| p.running()).map(|(id, p)| (id.as_str(), p.root.as_path(), p.content_fingerprint())));
+    if let Some(mut content) = world.get_resource_mut::<crate::game_audio::AudioContent>() {
+        let content = content.bypass_change_detection();
+        content.scanned = true;
+        content.sync(mods.manager.packages.iter().filter(|(_, p)| p.running()).map(|(id, p)| (id.as_str(), p.root.as_path(), p.content_fingerprint())));
+    }
+    career::sync_content(world, mods);
 }
 
 fn camera_position(world: &mut World) -> Option<[f32; 3]> {
@@ -538,6 +644,9 @@ fn snapshot_ro(world: &World, mods: &mut Mods, camera: Option<[f32; 3]>) -> serd
         "detach_pending": mods.detach_pending.is_some(),
         "map": {"name": map.name, "generation": map.generation},
         "triggers": triggers::snapshot(world),
+        "challenges": challenges::snapshot(world),
+        "career": career::snapshot(world),
+        "music": music::snapshot(world),
         "menus": crate::retail_menus::snapshot(world),
         "tick": physics.ticks,
         "keys": keys,
@@ -551,10 +660,12 @@ fn snapshot_ro(world: &World, mods: &mut Mods, camera: Option<[f32; 3]>) -> serd
         "controllers": controllers,
         "paused": world.resource::<crate::graphics_menu::Menu>().open,
         "replay": world.resource::<crate::replay::Replay>().active,
+        "replay_state": world.resource::<crate::replay::Replay>().state(),
         // Read-only frame-time statistics (`frame_timing`); null before the plugin runs.
         "frame": world.get_resource::<crate::frame_timing::FrameTiming>().map(|t| t.snapshot()),
         "camera": camera.map(|position| json!({"position": position})),
         "camera_angle": camera_angle_snapshot(world),
+        "water_look": world.get_resource::<crate::water_look::WaterLookSettings>().map_or(Value::Null, |s| s.snapshot()),
         "physics": {"bodies": {}, "contacts": []},
         "network": net,
     })
@@ -569,16 +680,17 @@ fn fixed(world: &mut World) {
     world.resource_scope(|world, mut mods: Mut<Mods>| {
         bridge::take_reactions(&mut mods, &mut world.resource_mut::<crate::physics::GamePhysics>());
         let camera = camera_position(world);
-        if mods.runtime_busy()
-            || mods.manager.packages.values().any(|package| package.running())
-        {
+        if mods.snapshot_has_reader() {
             mods.manager.snapshot = std::sync::Arc::new(snapshot_ro(world, &mut mods, camera));
         }
-        if let Err(e) = ensure_ground(world, &mut mods) {
+        if let Err(e) = bevy::log::tracing::info_span!("mods.ensure_ground").in_scope(|| ensure_ground(world, &mut mods)) {
             warn!("dynamics ground: {e}");
         }
         // Enter/exit events of this tick's trigger update, before on_fixed_update.
-        triggers::dispatch(world, &mut mods);
+        bevy::log::tracing::info_span!("mods.triggers").in_scope(|| triggers::dispatch(world, &mut mods));
+        challenges::dispatch(world, &mut mods);
+        career::dispatch(world, &mut mods);
+        music::dispatch(world, &mut mods);
         let ids: Vec<_> = mods
             .manager
             .packages
@@ -587,7 +699,7 @@ fn fixed(world: &mut World) {
             .map(|(id, _)| id.clone())
             .collect();
         let player_shapes = if mods.suspended_by.is_empty() && mods.attach.is_none() {
-            bridge::player_shapes(world)
+            bevy::log::tracing::info_span!("mods.player_shapes").in_scope(|| bridge::player_shapes(world))
         } else { Vec::new() };
         for id in ids {
             let _span = bevy::log::tracing::info_span!("mods.fixed_callback", mod_id = %id).entered();
@@ -700,11 +812,14 @@ fn fixed(world: &mut World) {
             let skater = world.resource::<crate::physics::SkaterRuntime>();
             bridge::push_skater_into_rapier(&mut mods, physics, skater);
         }
-        if !mods.bodies.is_empty() || mods.ground_ready || !mods.skater_proxies.is_empty() {
+        if mods.needs_dynamics_step() {
             let _span = bevy::log::tracing::info_span!("mods.dynamics_step").entered();
             mods.world.step(dt as f32);
             mods.last_contacts = mods.world.drain_contacts();
+        } else {
+            mods.last_contacts.clear();
         }
+        let _sync = bevy::log::tracing::info_span!("mods.sync").entered();
         triggers::sync_tracked(world, &mods);
         sync_graphics(world, &mut mods);
         sync_attach(world, &mut mods);
@@ -716,7 +831,20 @@ fn fixed(world: &mut World) {
 fn update(world: &mut World) {
     let _span = bevy::log::tracing::info_span!("mods.update").entered();
     world.resource_scope(|world, mut mods: Mut<Mods>| {
+        let reason = mods.busy_reason();
+        if reason != mods.logged_busy {
+            info!("MODS_BUSY {}", reason.unwrap_or("idle"));
+            mods.logged_busy = reason;
+        }
         if !mods.runtime_busy() {
+            return;
+        }
+        // Proxies only: no work below, except building the snapshot while the overlay is open or around a folder scan.
+        let frame = world.resource::<Time<Real>>().delta();
+        if !mods.snapshot_has_reader()
+            && !world.resource::<crate::graphics_menu::Menu>().open
+            && !mods.manager.scan_due_within(frame * 2)
+        {
             return;
         }
         let camera = camera_position(world);
@@ -747,6 +875,20 @@ fn clear_camera_angle(world: &mut World, owner: Option<&str>) {
     }
 }
 
+/// The ped chase alerts a mod hid: one mod (`Some`) or every mod (`None`).
+fn clear_chase_alerts(world: &mut World, owner: Option<&str>) {
+    if let Some(mut alerts) = world.get_resource_mut::<crate::living_world::ped_alerts::PedAlerts>() {
+        alerts.clear_owner(owner);
+    }
+}
+
+/// Water look patch of one mod (`Some`) or of every mod (`None`).
+fn clear_water_look(world: &mut World, owner: Option<&str>) {
+    if let Some(mut settings) = world.get_resource_mut::<crate::water_look::WaterLookSettings>() {
+        settings.clear_owner(owner);
+    }
+}
+
 fn camera_angle_snapshot(world: &World) -> Value {
     let shot = world.get_resource::<crate::camera::CameraRuntime>().map_or("", |c| c.selected_shot());
     world.get_resource::<crate::camera::CameraAngleSettings>().map_or(Value::Null, |s| s.snapshot(shot))
@@ -755,9 +897,13 @@ fn camera_angle_snapshot(world: &World) -> Value {
 fn clear_runtime(world: &mut World, mods: &mut Mods) {
     replication::reset(world,mods);
     audio::clear(world);
+    crate::rumble::clear_mods(world);
     world_audio::clear(world);
     crate::game_audio::clear_mods_runtime(world);
+    world_tuning::clear_all(world);
     graphics_dynamic::clear(world);
+    world_props::clear(world);
+    if let Some(mut replay) = world.get_resource_mut::<crate::replay::Replay>() { replay.clear_mods(); }
     canvas::clear_owner(world, &mut mods.canvases, None);
     detach_player(world, mods, true);
     let keys: Vec<_> = mods.graphics.keys().cloned().collect();
@@ -793,9 +939,15 @@ fn clear_runtime(world: &mut World, mods: &mut Mods) {
     mods.skater_remote.clear();
     mods.pending_remote_teleport = None;
     volumes::clear(world, mods);
+    minimap::clear(world, mods);
     triggers::clear(world);
+    challenges::clear(world);
+    career::clear(world);
+    music::clear(world);
     capture::clear(world);
     clear_camera_angle(world, None);
+    clear_water_look(world, None);
+    clear_chase_alerts(world, None);
     world.resource_mut::<crate::physics::GamePhysics>().set_external_queries(None);
     mods.world = DynamicsWorld::default();
     mods.ground_ready = false;
@@ -826,13 +978,23 @@ fn apply(world: &mut World, mods: &mut Mods) {
         mods.command_results.retain(|(owner,_),_|owner!=id);
         mods.input_overrides.retain(|_,(owner,_)|owner!=id);
         audio::stop_owner(world, id, true);
+        crate::rumble::stop_owner(world, id);
         world_audio::clear_owner(world, id);
         crate::game_audio::clear_mod(world, id);
+        world_tuning::clear_owner(world, id);
         graphics_dynamic::clear_owner(world, id);
+        world_props::clear_owner(world, id);
+        if let Some(mut replay) = world.get_resource_mut::<crate::replay::Replay>() { replay.clear_owner(id); }
         volumes::clear_owner(world, mods, id);
+        minimap::clear_owner(world, mods, id);
         triggers::clear_owner(world, id);
+        challenges::clear_owner(world, id);
+        career::clear_owner(world, id);
+        music::clear_owner(world, id);
         capture::clear_owner(world, id);
         clear_camera_angle(world, Some(id));
+        clear_water_look(world, Some(id));
+        clear_chase_alerts(world, Some(id));
         player_physics::clear(world,Some(id));
         mods.custom_menus.retain(|(owner,_),_|owner!=id);
         crate::retail_menus::clear_owner(world, id);
@@ -903,13 +1065,23 @@ fn apply(world: &mut World, mods: &mut Mods) {
             mods.manager.fail(&id, e);
             mods.input_overrides.retain(|_,(owner,_)|owner!=&id);
             audio::stop_owner(world, &id, true);
+            crate::rumble::stop_owner(world, &id);
             world_audio::clear_owner(world, &id);
             crate::game_audio::clear_mod(world, &id);
+            world_tuning::clear_owner(world, &id);
             graphics_dynamic::clear_owner(world, &id);
+            world_props::clear_owner(world, &id);
+            if let Some(mut replay) = world.get_resource_mut::<crate::replay::Replay>() { replay.clear_owner(&id); }
             volumes::clear_owner(world, mods, &id);
+            minimap::clear_owner(world, mods, &id);
             triggers::clear_owner(world, &id);
+            challenges::clear_owner(world, &id);
+            career::clear_owner(world, &id);
+            music::clear_owner(world, &id);
             capture::clear_owner(world, &id);
             clear_camera_angle(world, Some(&id));
+            clear_water_look(world, Some(&id));
+            clear_chase_alerts(world, Some(&id));
             player_physics::clear(world,Some(&id));
             mods.custom_menus.retain(|(owner,_),_|owner!=&id);
             crate::retail_menus::clear_owner(world, &id);
@@ -933,13 +1105,23 @@ fn apply(world: &mut World, mods: &mut Mods) {
             mods.manager.fail(&id, e);
             mods.input_overrides.retain(|_,(owner,_)|owner!=&id);
             audio::stop_owner(world, &id, true);
+            crate::rumble::stop_owner(world, &id);
             world_audio::clear_owner(world, &id);
             crate::game_audio::clear_mod(world, &id);
+            world_tuning::clear_owner(world, &id);
             graphics_dynamic::clear_owner(world, &id);
+            world_props::clear_owner(world, &id);
+            if let Some(mut replay) = world.get_resource_mut::<crate::replay::Replay>() { replay.clear_owner(&id); }
             volumes::clear_owner(world, mods, &id);
+            minimap::clear_owner(world, mods, &id);
             triggers::clear_owner(world, &id);
+            challenges::clear_owner(world, &id);
+            career::clear_owner(world, &id);
+            music::clear_owner(world, &id);
             capture::clear_owner(world, &id);
             clear_camera_angle(world, Some(&id));
+            clear_water_look(world, Some(&id));
+            clear_chase_alerts(world, Some(&id));
             player_physics::clear(world,Some(&id));
             mods.custom_menus.retain(|(owner,_),_|owner!=&id);
             crate::retail_menus::clear_owner(world, &id);
@@ -949,6 +1131,10 @@ fn apply(world: &mut World, mods: &mut Mods) {
     let menu_events = world.get_resource_mut::<crate::retail_menus::RetailMenus>().map(|mut m| m.drain_events()).unwrap_or_default();
     for (owner, payload) in menu_events {
         mods.manager.call(&owner, "on_event", payload);
+    }
+    let loading_events = world.get_resource_mut::<crate::tips_loader_host::LoadingMods>().map(|mut m| m.drain_events()).unwrap_or_default();
+    for payload in loading_events {
+        mods.manager.dispatch("on_event", payload);
     }
     let mut row = 0;
     for entity in mods.overlays.values() {
@@ -985,11 +1171,24 @@ fn apply_one(
             if mods.input_overrides.get(&action).is_some_and(|(o,_)|o!=id) { return Err("input action owned by another mod".into()); }
             if let Some(value)=value {mods.input_overrides.insert(action,(id.to_owned(),value));} else {mods.input_overrides.remove(&action);}
         }
+        Command::InputRumble {pad,channel,low,high,rate} => {
+            let pad = match pad { Some(p) => usize::from(p), None => world.resource::<crate::input::ControllerInput>().active_slot().ok_or("no controller connected")? };
+            world.resource_mut::<crate::rumble::RumbleOutput>().start_mod(id, pad, channel, skate_core::rumble::Rumble { low, high, rate });
+        }
+        Command::InputStopRumble {pad} => world.resource_mut::<crate::rumble::RumbleOutput>().stop_mod(id, pad.map(usize::from)),
         Command::NativeImpulse {body,impulse,point,angular} => {
             if mods.attach.is_some() || !mods.suspended_by.is_empty() {return Err("native player is attached or suspended".into());}
             player_physics::impulse(world,&body,impulse,point,angular)?;
         }
         Command::UiCanvas { key, options } => canvas::set(world, &mut mods.canvases, id, key, options)?,
+        Command::UiChaseAlerts { enabled } => {
+            if let Some(mut alerts) = world.get_resource_mut::<crate::living_world::ped_alerts::PedAlerts>() {
+                if enabled { alerts.clear_owner(Some(id)); } else { alerts.hidden_by = Some(id.to_owned()); }
+            }
+        }
+        Command::UiCentralMessage { text, seconds } => {
+            world.write_message(crate::hud_central::CentralMessage { seconds, ..crate::hud_central::CentralMessage::new(text) });
+        }
         Command::UiRemove { key } => {
             let slot = (id.to_owned(), key);
             canvas::remove(world, &mut mods.canvases, &slot);
@@ -1033,6 +1232,46 @@ fn apply_one(
             crate::game_audio::set_mixmap_input(world, id, &slot, object, instance, input, value)?
         }
         Command::AudioSeed { seed } => crate::game_audio::set_seed(world, id, seed)?,
+        Command::WorldSetTuning { domain, patch } => world_tuning::set(world, id, &domain, patch)?,
+        Command::WorldResetProp { id } => {
+            if let Some(mut physics) = world.get_resource_mut::<crate::physics::GamePhysics>() {
+                physics.reset_prop(id);
+            }
+        }
+        Command::WorldUprightProp { id } => {
+            if let Some(mut physics) = world.get_resource_mut::<crate::physics::GamePhysics>() {
+                physics.upright_prop(id);
+            }
+        }
+        Command::WorldSpawnProp { key, from, position, yaw, velocity, spin } => {
+            world_props::spawn(world, id, key, from, position, yaw, velocity, spin)?
+        }
+        Command::WorldRemoveProp { key } => world_props::remove(world, id, &key),
+        Command::ReplayOpen {} => {
+            if world.get_resource::<crate::multiplayer::Multiplayer>().is_some_and(|n| n.active()) {
+                return Err("replay_open: refused in multiplayer".into());
+            }
+            let mut replay = world.resource_mut::<crate::replay::Replay>();
+            if !replay.can_open() {
+                return Err("replay_open: not enough recorded yet".into());
+            }
+            replay.enter();
+        }
+        Command::ReplayMarker { label } => world.resource_mut::<crate::replay::Replay>().add_marker(id, label)?,
+        Command::ReplaySetLimits { max_frames, byte_budget, share_max_seconds } => world.resource_mut::<crate::replay::Replay>().set_limits(id, max_frames, byte_budget, share_max_seconds),
+        Command::ReplaySetCamera { collide, radius, leash, follow_eye, fill_section, playback_collide } => {
+            let follow_eye = follow_eye.map(|f| match f.as_str() {
+                "skater" => crate::replay::camera_key::FollowEye::Skater,
+                "camera_full" => crate::replay::camera_key::FollowEye::CameraFull,
+                _ => crate::replay::camera_key::FollowEye::Camera,
+            });
+            world.resource_mut::<crate::replay::Replay>().set_camera(id, collide, radius, leash, follow_eye, fill_section, playback_collide)
+        }
+        Command::WorldResetMovedProps {} => {
+            if let Some(mut physics) = world.get_resource_mut::<crate::physics::GamePhysics>() {
+                physics.reset_moved_props();
+            }
+        }
         Command::AudioRule { key, rule } => crate::game_audio::set_rule(world, id, &key, rule, |world, path| audio::load_native_clip(world, mods, id, path))?,
         Command::WorldAudioSpawn { key, object, options } => world_audio::spawn(world, mods, id, key, object, options)?,
         Command::WorldAudioUpdate { key, options } => world_audio::update(world, mods, id, &key, options)?,
@@ -1317,6 +1556,12 @@ fn apply_one(
         Command::CameraAngle { angle } => {
             world.resource_mut::<crate::camera::CameraAngleSettings>().force(id, angle.map(Into::into))?;
         }
+        Command::WaterLook { patch } => {
+            world
+                .get_resource_mut::<crate::water_look::WaterLookSettings>()
+                .ok_or("water look is not available")?
+                .patch(id, patch)?;
+        }
         Command::CameraShotTune { shot, patch } => {
             if !world.resource::<crate::camera::CameraRuntime>().has_shot(&shot) {
                 return Err(format!("unknown camera shot {shot}"));
@@ -1377,12 +1622,42 @@ fn apply_one(
         Command::SessionTeleport { peer, options } => session::teleport(world, mods, &peer, options)?,
         Command::VolumeBox { key, options } => volumes::set(world, mods, id, key, options)?,
         Command::VolumeRemove { key } => volumes::remove(world, mods, id, &key),
+        Command::MinimapIcon { key, options } => minimap::set(world, mods, id, key, options)?,
+        Command::MinimapRemove { key } => minimap::remove(world, mods, id, &key),
+        Command::MinimapShow { shown } => minimap::show(world, id, shown),
         Command::TriggerBox { key, options } => triggers::set_box(world, id, key, options)?,
         Command::TriggerRemove { key } => triggers::remove_box(world, id, &key),
+        Command::TriggerTeleporter { key, options } => triggers::set_teleporter(world, id, key, options)?,
         Command::TriggerEnable { id: volume, enabled } => triggers::enable(world, id, &volume, enabled)?,
         Command::TriggerTrack { key, options } => triggers::track(world, mods, id, key, options)?,
         Command::TriggerUntrack { key } => triggers::untrack(world, id, &key),
         Command::TriggerConfigure { options } => triggers::configure(world, id, options)?,
+        Command::ChallengeStart { id: challenge } => challenges::start(world, &challenge)?,
+        Command::ChallengeAbort {} => challenges::abort(world)?,
+        Command::ChallengeEnable { id: challenge, enabled } => challenges::enable(world, id, &challenge, enabled)?,
+        Command::ChallengeConfigure { id: challenge, options } => challenges::configure(world, id, challenge, options)?,
+        Command::MusicPlaylist { path, queue, soundtrack, shuffle } => music::playlist(world, mods, id, &path, queue, soundtrack, shuffle)?,
+        Command::MusicSoundtrack { track } => music::soundtrack(world, id, track)?,
+        Command::MusicStop {} => music::stop(world, id)?,
+        Command::MusicSkip {} => music::skip(world)?,
+        Command::MusicVolume { level } => music::volume(world, id, level)?,
+        Command::MusicVar { name, value } => music::var(world, name, value)?,
+        Command::MusicPost { event } => music::post(world, event)?,
+        Command::MusicCaption { options } => music::caption(world, id, options)?,
+        Command::CareerAddSales { amount, reason } => career::add_sales(world, id, amount, reason)?,
+        Command::CareerAddMoney { amount } => career::add_money(world, id, amount)?,
+        Command::CareerArmAction { id: action } => career::arm_action(world, id, &action)?,
+        Command::CareerSetFlag { name, value } => career::set_flag(world, id, &name, value)?,
+        Command::CareerGrantAchievement { name } => career::grant_achievement(world, id, &name)?,
+        Command::CareerGrantUnlock { category, name } => career::grant_unlock(world, id, category, &name)?,
+        Command::CareerGrantReward { id: reward, big } => career::grant_reward(world, id, &reward, big)?,
+        Command::CareerSkipStart {} => career::skip_start(world, id)?,
+        Command::CareerActivateChallenge { id: challenge } => career::activate(world, id, &challenge, false)?,
+        Command::CareerActivateGroup { id: group } => career::activate(world, id, &group, true)?,
+        Command::CareerTeamName { name } => career::team_name(world, id, None, &name)?,
+        Command::CareerTeammateName { n, name } => career::team_name(world, id, Some(n as usize), &name)?,
+        Command::CareerTeammatePreset { n, id: preset } => career::teammate_preset(world, id, n as usize, &preset)?,
+        Command::CareerTeammateLook { n, profile } => career::teammate_look(world, id, n as usize, profile)?,
         Command::CameraCapture { key, options } => { capture::set(world, id, key, options)?; }
         c @ (Command::MenuCategory { .. } | Command::MenuItem { .. } | Command::MenuSetting { .. } | Command::MenuHide { .. }
             | Command::MenuHandle { .. } | Command::MenuUnhandle { .. } | Command::MenuSetValue { .. }) => {
@@ -1408,9 +1683,36 @@ fn apply_one(
             let mut movies = world.get_resource_mut::<crate::retail_menu_movies::RetailMenuMovies>().ok_or("menu movies are not ready")?;
             movies.set_mod_bitmap(id, &movie, bitmap, image)?;
         }
+        Command::MenuBackdrop { screen, options } => {
+            world.resource_mut::<crate::fe_backdrop::FeBackdrop>().set_mod(id, screen, options);
+        }
+        Command::MenuTrickGuide { entry, key, options } => {
+            let mut mods = world.get_resource_mut::<crate::trick_guide_host::TrickGuideMods>().ok_or("menus are not ready")?;
+            mods.set(id, &entry, &key, options);
+        }
+        Command::MenuPopup { key, options } => {
+            let mut popups = world.get_resource_mut::<crate::popup_host::PopupMods>().ok_or("menus are not ready")?;
+            popups.set(id, &key, options);
+        }
+        Command::MenuProfile { page, key, options } => {
+            let mut profile = world.get_resource_mut::<crate::offline_profile_host::ProfileMods>().ok_or("menus are not ready")?;
+            profile.set(id, &page, &key, options);
+        }
+        Command::MenuCredits { key, lines } => {
+            let mut credits = world.get_resource_mut::<crate::extras_host::CreditsMods>().ok_or("menus are not ready")?;
+            credits.set(id, &key, lines);
+        }
+        Command::LoadingLine { key, line } => loading_mods(world)?.set_line(id, &key, line),
+        Command::LoadingRetail { shown } => loading_mods(world)?.set_retail(id, shown),
+        Command::LoadingHold { key, held } => loading_mods(world)?.set_hold(id, &key, held),
+        Command::LoadingTiming { show, outro } => loading_mods(world)?.set_timing(id, (show.is_some() || outro.is_some()).then_some((show, outro))),
         Command::CameraClearCapture { key } => capture::remove(world, id, &key),
     }
     Ok(())
+}
+
+fn loading_mods(world: &mut World) -> Result<Mut<'_, crate::tips_loader_host::LoadingMods>, String> {
+    world.get_resource_mut::<crate::tips_loader_host::LoadingMods>().ok_or_else(|| "menus are not ready".into())
 }
 
 /// The runtime audio API (`game_audio::mod_audio`) for a mod command.
@@ -1826,6 +2128,8 @@ impl Mods {
             skater_remote: BTreeMap::new(),
             pending_remote_teleport: None,
             volumes: BTreeMap::new(),
+            minimap: BTreeMap::new(),
+            logged_busy: None,
             custom_menus: BTreeMap::new(),
             suspended_by: BTreeSet::new(),
             hidden_players: BTreeMap::new(),
@@ -1877,5 +2181,75 @@ fn dispatch_profiled(manager: &mut skate_mods::Manager, callback: &str, payload:
     for id in ids {
         let _span = bevy::log::tracing::info_span!("mods.callback", mod_id = %id, callback).entered();
         manager.call(&id, callback, payload.clone());
+    }
+}
+
+#[cfg(test)]
+mod snapshot_reader_tests {
+    use super::*;
+
+    /// The living world's proxies keep the runtime busy but give the snapshot no reader; anything a mod owns does.
+    #[test]
+    fn skater_proxies_alone_need_no_snapshot() {
+        let dir = std::env::temp_dir().join(format!("skate-snapshot-reader-{}", std::process::id()));
+        let mut mods = Mods::new(skate_mods::Manager::new(dir.clone(), dir));
+        assert!(!mods.runtime_busy() && !mods.snapshot_has_reader(), "nothing at all");
+        mods.skater_proxies.insert(3, 7);
+        assert!(mods.runtime_busy(), "the proxies still step and sync");
+        assert_eq!(mods.busy_reason(), Some(PROXIES));
+        assert!(!mods.snapshot_has_reader(), "but no mod reads the snapshot");
+        mods.volumes.insert(("m".into(), "v".into()), volumes::Volume { position: Vec3::ZERO, size: Vec3::ONE, rotation: Quat::IDENTITY, visible: false, color: [1.; 3], opacity: 1., entity: None });
+        assert!(mods.snapshot_has_reader(), "a reason after the proxies in the list still counts");
+        mods.volumes.clear();
+        mods.bodies.insert(("m".into(), "b".into()), 9);
+        assert!(mods.snapshot_has_reader(), "a mod's body");
+    }
+
+    /// No mod and nothing mod-made: the mods' world (ground + skater proxies only) does not step (ask 79).
+    #[test]
+    fn dynamics_step_only_with_something_a_mod_owns() {
+        let dir = std::env::temp_dir().join(format!("skate-dynamics-step-{}", std::process::id()));
+        let mut mods = Mods::new(skate_mods::Manager::new(dir.clone(), dir));
+        mods.ground_ready = true;
+        mods.skater_proxies.insert(3, 7);
+        assert!(!mods.needs_dynamics_step(), "ground and proxies alone");
+        mods.bodies.insert(("m".into(), "b".into()), 9);
+        assert!(mods.needs_dynamics_step(), "a mod's body");
+        mods.bodies.clear();
+        mods.volumes.insert(("m".into(), "v".into()), volumes::Volume { position: Vec3::ZERO, size: Vec3::ONE, rotation: Quat::IDENTITY, visible: false, color: [1.; 3], opacity: 1., entity: None });
+        assert!(mods.needs_dynamics_step(), "a mod's volume");
+    }
+}
+
+#[cfg(test)]
+mod startup_ground_tests {
+    use super::*;
+
+    #[test]
+    fn the_startup_ground_is_handed_to_the_first_tick_and_releases_the_loading_screen() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(crate::map_transition::CurrentMap { path: None, name: "Test".into(), spawn: [0.0; 3], heading: 0.0, generation: 3, audio_tag: None, layout: None });
+        let mut startup = crate::startup_loading::StartupLoading::new();
+        startup.hold("mod_ground", "Building the world");
+        app.insert_resource(startup);
+        let tris = vec![[[-40., 0., -40.], [40., 0., -40.], [40., 0., 40.]], [[-40., 0., -40.], [-40., 0., 40.], [40., 0., 40.]]];
+        let job = std::thread::spawn(move || skate_dynamics::DynamicsWorld::build_ground(tris.into_iter()));
+        app.insert_resource(StartupGround(std::sync::Mutex::new(Some(job))));
+        app.add_systems(PreUpdate, finish_startup_ground);
+        for _ in 0..200 {
+            app.update();
+            if app.world().get_resource::<PreparedGround>().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let prepared = app.world_mut().remove_resource::<PreparedGround>().expect("the built ground is handed over");
+        assert_eq!(prepared.generation, 3, "tagged with the current map");
+        let mut world = skate_dynamics::DynamicsWorld::default();
+        world.install_ground(prepared.ground.expect("a result").expect("built"));
+        assert!(world.has_ground());
+        assert!(app.world().get_resource::<StartupGround>().is_none());
+        assert!(!app.world().resource::<crate::startup_loading::StartupLoading>().holding("mod_ground"));
     }
 }

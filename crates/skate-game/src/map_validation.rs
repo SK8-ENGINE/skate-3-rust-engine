@@ -182,7 +182,7 @@ fn check_map(shared: &Shared, request: &str, result: &mut MapCheck) -> Result<()
             result.warnings = report.warnings;
             if let Some(drop) = report.support_drop {
                 // The floor the board lands on must be visible: collision-only
-                // floors (e.g. Industrial's harbour bed) or volumes look like
+                // floors (e.g. Industrial's harbor bed) or volumes look like
                 // an invisible map with working collision.
                 let floor = map.spawn[1] - drop;
                 let gap = visible_heights(&map, map.spawn[0], map.spawn[2])

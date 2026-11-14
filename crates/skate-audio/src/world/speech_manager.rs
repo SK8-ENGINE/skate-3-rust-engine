@@ -232,6 +232,11 @@ pub fn request_words(event: u16, block: &[u32; 10]) -> Vec<u32> {
 /// challenge types; `tools/asset_pipeline/world_audio.speech_tuning`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct EventTuning {
+    /// `+0`: seconds from the line taking its stream to its voice starting (`sub_82C5DC80`; unit inferred: the
+    /// library clock is a time, research `speech-stream-start`).
+    pub start_delay: f32,
+    /// `+4`: seconds the line's stream takes no new line once idle (`sub_82C5DA88`).
+    pub stream_gap: f32,
     /// `+8`: seconds since this speaker's last line of any event.
     pub gap: f32,
     /// `+16`: priority (the interrupt rules, [`super::speech_player`]).
@@ -270,6 +275,8 @@ impl Default for EventTuning {
     /// The vault's `default` record (events without their own tuning inherit it).
     fn default() -> Self {
         Self {
+            start_delay: 0.0,
+            stream_gap: 0.0,
             gap: 0.0,
             priority: 50,
             interrupt: false,

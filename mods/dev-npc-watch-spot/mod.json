@@ -1,0 +1,10 @@
+{
+  "id": "dev-npc-watch-spot",
+  "api": 2,
+  "name": "NPC Watch Spot (dev)",
+  "version": "0.1.0",
+  "author": "Hails",
+  "description": "Dev only, for test runs: 3 s after the start, teleports the player on foot about 10 m from a DownTown NPC skater spawn spot, facing it, so NPC spawns and their fade-in are close to the camera. F8 repeats the teleport, Shift+F8 turns the heading round.",
+  "entry": "main.lua",
+  "enabled_by_default": false
+}

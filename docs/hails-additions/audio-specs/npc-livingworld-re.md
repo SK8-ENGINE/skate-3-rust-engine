@@ -1,7 +1,7 @@
 # Retail living world (NPCs, traffic, security): how TU3 does it
 
-From the TU3 image, the recompiled code and disc data (reference only; 2026-10-02). Addresses are
-evidence; never copy code or game data into the repo. Describe behaviour in our own words.
+From the TU3 (title update 3) image, the recompiled code and disc data (reference only; 2026-10-02). Addresses are
+evidence; never copy code or game data into the repo. Describe behavior in our own words.
 Tools: local research scripts (listed at the end). Data: local extracts.
 
 ## 0. Big picture
@@ -13,11 +13,11 @@ Tools: local research scripts (listed at the end). Data: local extracts.
   sub-types: MaleTeen, FemaleTeen, FemaleAdult, MaleAdult, BusinessMan/Woman, Female/MaleSkater,
   Female/MaleTourist, Granny, SecurityGuard, Bum, Jock, Pro. Vehicle types: Car, SportsCar, MuscleCar,
   SUV, Truck.
-- **Behaviour is data-driven**: AI state graphs ship as plain XML plus compiled `.stategraph` files in
+- **Behavior is data-driven**: AI state graphs ship as plain XML plus compiled `.stategraph` files in
   `data/big/miscload.big` (`data/state/livingworldentities/{pedestrian,vehicle,marquee,test_pro}/…`,
   `data/livingworld/PluginDescriptor/*`). 52 ped `aigraph/*.xml`, 18 motion graphs, 13 plugins
   (sit, ATM, vending machine, water fountain, newspaper box, trash bin, look-at, conversation,
-  spectate, actor-tracker spectate). The C++ side supplies named behaviours and conditions.
+  spectate, actor-tracker spectate). The C++ side supplies named behaviors and conditions.
 - **Tuning is in the attribute database** (`skatercollections.vlt` → our skater-collections.json):
   classes `livingworld`, `livingworld_census`, `livingworld_census_ranges`, `livingworld_categorygroups`,
   `livingworld_entitycategories`, `livingworld_entities` (157), `livingworld_models` (145),
@@ -28,7 +28,7 @@ Tools: local research scripts (listed at the end). Data: local extracts.
   Class and record names resolve by `name_id`; **field names are compiled out** (schema has only type
   names like `Sk8::LivingWorld::tLWCensusEntry`, `tLWGroupEntry`, `tLWCensusCircle`). Fields read by hash
   have code sites (`fieldxref.py`); fields with no site are read through the class layout by offset.
-- Navigation middleware: **NavPower (BabelFlux)** — `bfxSystem/bfxPlanner/bfxMover(3D)/bfxBuilder`
+- Navigation middleware: **NavPower (BabelFlux)**: `bfxSystem/bfxPlanner/bfxMover(3D)/bfxBuilder`
   0x8216E1AC.., `NavPower Runtime` 0x820BD170, `NavPower Crosswalks` 0x82077068, `NavPower Obstacle/Link`.
 - World scripts can drive NPCs: `WorldScriptSim::mPedestrianManager / mVehicleManager / mDmoManager /
   mSplineManager` 0x82176658.., commands Spawn/Unspawn/MoveToLocation/ReleaseToLW/KnockDown,
@@ -84,8 +84,8 @@ Tools: local research scripts (listed at the end). Data: local extracts.
 - LW census tick **sub_826B71F0** (called from sub_826BDB50 ← sub_82859E70). Per type, in several
   game modes: peds **sub_826B7530** (range record at census+104), vehicles **sub_826B7760** (+112),
   DMOs **sub_826B7980** (+128), props **sub_826B7BA8** (+120, cull only).
-- Peds: cull sub_826BA8B0 (circle centre, cull radius); spawn **sub_826B9940** (ring spawn) and
-  **sub_826B90F8** (larger; uses entity/category data, probably waypoint/plugin-placed peds — unverified).
+- Peds: cull sub_826BA8B0 (circle center, cull radius); spawn **sub_826B9940** (ring spawn) and
+  **sub_826B90F8** (larger; uses entity/category data, probably waypoint/plugin-placed peds; unverified).
   - Ring spawn: per tick 2 attempts and at most 1 spawn. Each attempt: random point in the ring
     (sub_82E17508, onto the nav mesh), random heading, then **sub_826B8B88** picks a category from the
     census at that point (census lookup sub_826B8A28 → `livingworld_census` accessor sub_8269AF00) and
@@ -100,20 +100,20 @@ Tools: local research scripts (listed at the end). Data: local extracts.
 
 ## 2. Paths and navigation (streams)
 cSim tile streams (RW type ids from the table at 0x830384A0: (id, name) pairs; 0x00EB000F = layer):
-- **0x00EB0027 NAVPOWERDATA**: 2 per DownTown tile (240) — NavPower nav meshes for peds.
+- **0x00EB0027 NAVPOWERDATA**: 2 per DownTown tile (240); NavPower nav meshes for peds.
 - **0x00EB0014 AIPATHDATA**: ~1 per tile (100 in DownTown). Header u32 count (e.g. 0x18) + u32 0x10,
   then 0x60-byte entries: bbox min/max (vec4), district tag (`dwtn`), 64-bit ids, offset + point count,
   a small int (1–3), 7, mask 0x3FFFFFFF_FFFFFFFF. Point records (36 bytes) hold a position at street
   height plus small floats and packed normals; a second block holds position + velocity triples with
-  upward components (2–3.5 m/s) and 0.85 — looks like **AI-skater lines with jump launches**, not roads.
+  upward components (2–3.5 m/s) and 0.85: looks like **AI-skater lines with jump launches**, not roads.
   Challenge versions: `data/content/aipaths/AIPATH_Challenge_*.rx2` (59 files, miscload.big).
 - **0x00EB001A WAYPOINTDATA** (18 in DownTown): waypoint groups with name strings, e.g.
   `gd_DMO_GLBL_DrPepperVendingMachine_1002 | WayPoints1 | WP_VM_position_1001` with position and
-  facing — the plugin anchors (`waypoint_vendingmachine`, `_atm`, `_sit`, `_patrol`, `_spectator`,
+  facing: the plugin anchors (`waypoint_vendingmachine`, `_atm`, `_sit`, `_patrol`, `_spectator`,
   `_conversation`, `_lookat`, … strings 0x82066F00). `DMO Waypoint Group (From Hotpoint)` 0x820BAD18:
   DMOs (vending machines, benches, trash bins) also create waypoints.
 - 0x00EB001D DMODATA (226 in DownTown): DMO placements.
-- 0x00EB0004 SPLINEDATA (~2/tile): straight segments at ledge height with editor GUIDs — grind splines,
+- 0x00EB0004 SPLINEDATA (~2/tile): straight segments at ledge height with editor GUIDs: grind splines,
   not roads.
 - **0x00EB0013 (table name "RAINDATA", really the road network)**: standalone arena in 52 DownTown
   tiles; loader sub_82C9B3A0 (registered in stream dispatcher sub_82C990A8). Header bbox (2× vec4) +
@@ -130,17 +130,17 @@ cSim tile streams (RW type ids from the table at 0x830384A0: (id, name) pairs; 0
 - Census layer lookup: sub_82C0EAC0(painter, layer index, pos); index 2 = npc census, 3 = vehicle census
   (via sub_826B8A28); fallback record `default`.
 
-## 3. Behaviour runtime (state graphs)
+## 3. Behavior runtime (state graphs)
 - Loader sub_826BC250 (from LW init sub_826D9040), path table base 0x821DE6BC. Each `.xml` has a
   `.stategraph` beside it = the same tree in binary with includes merged (tag, attr count, name/value
   pairs, children). Which one the runtime reads is unverified (no ".stategraph" literal).
-- Registration: static initialisers 0x82F76000–0x82F7B000 (peds) and 0x82F8C568–0x82F8CC88 (vehicle) call
-  sub_826C3D18(registry, name, factory) — name-sorted tree. Registries: behaviours 0x826C1670 (160),
+- Registration: static initializers 0x82F76000–0x82F7B000 (peds) and 0x82F8C568–0x82F8CC88 (vehicle) call
+  sub_826C3D18(registry, name, factory): name-sorted tree. Registries: behaviors 0x826C1670 (160),
   conditions 0x826C1730 (127), plugin-descriptor conditions 0x826C2458 (23), plugins 0x826C2518 (6:
   LookAt, UseWorldProp, PedestrianConversation, GatherBehaviourGeneric, SpectatorWaypointGeneric,
   ActorTrackerSpectate), motion-graph hooks 0x826C25D8. Full list `aireg.txt`
-  (762 incl. vehicle), `ai_registry.txt`. Condition evaluate = vtable slot 12, behaviour update = slot 13.
-- Example behaviour SuggestVelocity: factory 0x826C9488, vtable 0x8230A384, attribute `linear` → +32;
+  (762 incl. vehicle), `ai_registry.txt`. Condition evaluate = vtable slot 12, behavior update = slot 13.
+- Example behavior SuggestVelocity: factory 0x826C9488, vtable 0x8230A384, attribute `linear` → +32;
   begin sub_8269F6A8 sets the mover's suggested speed (mover vtable +168).
 - Managers: LWPedestrianCensusMan created in sub_82E25EE0 (712 B, vtable 0x8232D1C0); ExecutionMan
   sub_82E25CE8; per-frame ped tick probably sub_82E239A8 / sub_82E238C0 (unverified).
@@ -176,12 +176,12 @@ cSim tile streams (RW type ids from the table at 0x830384A0: (id, name) pairs; 0
 
 ## 5. Security guards and chases
 - `livingworld_security_guard_areas` (HighAlert_Area / NoSkateZone_Area, test sub_82C0E890 from
-  sub_8289B7E8) is **empty or absent on the shipped maps** — no area-painted zones in free roam.
+  sub_8289B7E8) is **empty or absent on the shipped maps**: no area-painted zones in free roam.
 - **CONCLUSION (2026-10-02): Skate 3 has no active security guards / busted system in free roam.** User
   source: Skate 2's MongoCorp guards chased and busted you in specific downtown areas; Skate 3 removed
   that to make Port Carverton a relaxed sandbox. Our evidence agrees: guard-area layer empty on all three
   districts; zero SECCHASE/SECTAKE/SECTAZE/SECZONE calls in both NPC runs. The guard code, chase records,
-  nsz types and `security_street01` census entries are Skate 2 leftovers. **Not part of the Skate 3 port** — but keep the guard research: the user wants Skate 2 support eventually (a planned item).
+  nsz types and `security_street01` census entries are Skate 2 leftovers. **Not part of the Skate 3 port**; but keep the guard research: the user wants Skate 2 support eventually (a planned item).
 - **But ordinary pedestrians DO chase and take you down (measured 2026-10-02, user session
   recomp session `npc_20261002_143554`, the user angering peds):** a regular ped (red jacket) got a
   **red down-arrow marker over its head** (angry), chased the player and tackled: SECTAKE attempt 59.04 s →
@@ -199,7 +199,7 @@ cSim tile streams (RW type ids from the table at 0x830384A0: (id, name) pairs; 0
   (`tools/stream_strings.py`); census groups do list `ped_class_security_street` (weights 0.05–0.1, e.g.
   `district_park01_peds_census`), which would spawn them anywhere in the painted census area. Open: patrol
   zones (`livingworld_entities_patrolzone` 5/10, EntityOfInterestIsInZone sub_826AF310) and where a guard's
-  zone centre comes from (spawn position? waypoint_patrol in another stream type? challenge hulls?).
+  zone center comes from (spawn position? waypoint_patrol in another stream type? challenge hulls?).
   The user offered a hand-played session angering peds/guards (a traced recomp session with the NPC hooks).
 - Scripted "wander" runs (make_wander_script.py) are open-loop and get stuck against walls (user saw it
   stuck in a corner): unsuitable for reaching NPCs. Use the user's passive session instead.
@@ -270,11 +270,11 @@ Every ped re-arms **25 PresenceCheckTimer 0.5 s** and **26 TrespassCheck 0.1 s**
 | 64.8–66.7 | mood → 1, timer 8 TimedRangeRandom 5.0 s; 71.7 timer 36 InterestTimer 3.5 s (5 s later); again 84.6 / 89.6 | post-chase interest |
 - So: warning (yellow) → 1.25 s StartChase hold → chase (red) → takedown (3 s attempt window) → gloat.
 - The entry-choice floats: f1 = 13.06 constant, f2 ≈ −126 drifting slowly; hypothesis: target position
-  components (x ≈ −126 lies in `ots_dwtn_05`'s X range where the player was) — unverified.
+  components (x ≈ −126 lies in `ots_dwtn_05`'s X range where the player was); unverified.
 - Not measurable from this session: how many bumps escalate (mood calls were rate-limited; 4 positives
   before the warn), chase speed (no positions logged), chase timers 2/3/16/17 (SECTIMER lost 956 of ~1,256
   calls to the 20/s limit during the chase). Hook fix (2026-10-02): SECTIMER named, unthrottled except
-  25/26 — see hooks_npc.cpp. Positions need a ped/skater position read (offset TBD).
+  25/26; see hooks_npc.cpp. Positions need a ped/skater position read (offset TBD).
 
 ## 5c. Second user session (`npc_20261002_144545`, ~200 s, many peds angered, improved hooks)
 Analysis: the local tool `ped_chase.py <trace>` (saved
@@ -292,9 +292,9 @@ Analysis: the local tool `ped_chase.py <trace>` (saved
   TimedRangeRandom 5 s), not escalations.
 - **No lasting cooldown:** the same ped (slot 3) chased three times in ~70 s.
 - **Takedown:** entry 1 chosen → AttemptTakeDownTimeout 3 s → success 0.06–0.22 s later (all three).
-  Entry-choice floats: f1 10.54, f2 −211.2…−211.7 here (13.06 / −126 last session) — per-chase constants,
+  Entry-choice floats: f1 10.54, f2 −211.2…−211.7 here (13.06 / −126 last session); per-chase constants,
   probably target position (hypothesis).
-- **Tazer (slot 8; §5d: tazer peds are FEMALE — 'heavy man' was a misread; YELLOW arrow = warn stage, not a chase):** draw at 142.87
+- **Tazer (slot 8; §5d: tazer peds are FEMALE; 'heavy man' was a misread; YELLOW arrow = warn stage, not a chase):** draw at 142.87
   and 144.63 (TazerIntoTime **0.13 s**, TazerWaitTime **1.5 s**), at 146.29 TazerPlayerDropTime **0.3 s**,
   TazerCycTime **2.0 s**; again 162.63. Screenshot 142.9 s: aiming the tazer at the player. So tazing is a
   warn-stage reaction of some ordinary peds (matches the mood data: warn + taze), no guard needed.
@@ -308,7 +308,7 @@ Analysis: the local tool `ped_chase.py <trace>` (saved
 - Still unmeasured: chase speed (no positions), how many bumps per escalation (bump events aren't hooked;
   mood hits don't carry the event id yet).
 
-## 5d. Third user session — reactions decoded (`npc_20261002_150519`, ~340 s, PEDXYZ/PEDSEE/MOODOUT hooks)
+## 5d. Third user session: reactions decoded (`npc_20261002_150519`, ~340 s, PEDXYZ/PEDSEE/MOODOUT hooks)
 Tool: the local `ped_chase.py <trace>` now prints decoded reactions.
 **MOODOUT decoded:** result list words = **want enum** (0x820646BC: 0 none, 1 angrychase, 2 warn, 3 taunt,
 4 returngreet, 5 greet, 6 startconversation, 7 alertto, 8 joinchase, 9 throwhandprop, 10 flee, 11 startle,
@@ -317,7 +317,7 @@ Tool: the local `ped_chase.py <trace>` now prints decoded reactions.
 6 = trick nearby, 8 = presence (greet/conversation), 16 = greeted (returngreet). Counts this session:
 startconversation 350, greet 117, returngreet 26, warn 11, slamreaction 7, angrychase 6, flee 5,
 nearbycollisionreaction 9, nearbyskatertrick 4. r7's first word = 1 for target-based results, 0 for event
-results; words 4/5 are floats on some results (5.0 / 0.5, 0.1, 0.8, 0.3) — likely duration/probability (?).
+results; words 4/5 are floats on some results (5.0 / 0.5, 0.1, 0.8, 0.3); likely duration/probability (?).
 **Escalation rule (measured):**
 - **Male peds: bump 1 → warn, bump 2 → angrychase**, every time: slot 8 (44.25 warn, 45.56 chase),
   slot 5 (75.69 → 76.96; again 121.34 → 122.41: the count resets after a chase), slot 10 (307.74 → 308.91;
@@ -325,17 +325,18 @@ results; words 4/5 are floats on some results (5.0 / 0.5, 0.1, 0.8, 0.3) — lik
   collision chases.
 - **Female peds (tazer users): bump → "warn + taze" (two results) or flee**, never chase: slot 6 (96.59
   warn+taze → 101.18 flee), slot 13 (61.0 flee, 142.41 flee, 148.55 warn+taze, 155.77 flee), slot 9 (190.28,
-  275.40, 286.10 warn+taze, 289.26 flee). Screenshot 190.3 s: a woman in a red top, yellow arrow — confirms
+  275.40, 286.10 warn+taze, 289.26 flee). Screenshot 190.3 s: a woman in a red top, yellow arrow; confirms
   the tazer ped is female (§5c's "heavy man" was wrong).
 - Tazer: TazerIntoTime 0.13 s + TazerWaitTime 1.5 s per draw (repeated draws while aiming); a hit adds
   TazerPlayerDropTime 0.3 s + TazerCycTime 2.0 s (slot 9 at 193.60 and 293.32).
 - Bystanders: event 11 → nearbycollisionreaction; slams nearby → slamreaction; tricks → nearbyskatertrick.
+
 **Speeds (PEDXYZ, 4 Hz per ped, horizontal):** walking median **1.30 m/s** (p90 1.57; 9,300 moving samples);
 during the 1.25 s StartChase hold ~0.8 m/s; chase bursts p90 **7–9 m/s** (graph: intercept 4–10 m/s).
 Takedowns 4/4 successful (attempt → success 0.10–0.13 s). Chases were short (player stayed close).
 
 ## 6. Traffic driving (beyond the graph)
-- Manoeuvre decider sub_82C41CD0 (from 82C3D830) → vehicle+4396 (1 lane change on a timer, 2 overtake a
+- Maneuver decider sub_82C41CD0 (from 82C3D830) → vehicle+4396 (1 lane change on a timer, 2 overtake a
   slow/stopped car, 3 pull over), target lane +4380. Impatience: stopped (≤0.1 m/s) + gap test.
 - Speed planner sub_82C3FA08 → target speed +3408 (lane speed + driver offset); look-ahead braking over
   20 m, 5 m stop/reverse distance. Car alarm stops after 8 s (+3716).
@@ -367,11 +368,11 @@ Tool: `py -3.13 tools/recomp-trace/veh_trace.py <trace> [--vehicle ADDR]` (saved
   car) → that car stops; standing in the lane in front of it (112 s) → it stays stopped and **traffic queues
   behind** (yellow cab, red car): 3 cars stop/go in step 84–107 s (2–4 s stops), then all held 14–20 s at
   108–123 s while the skater blocked the lane. Several later stops 125–140 s.
-- Manoeuvre (+4396) / target lane (+4380) changed only twice (→ 0 at 30.05 / 44.81 s): no lane changes or
-  overtakes around a blocking skater in this session — cars wait.
+- Maneuver (+4396) / target lane (+4380) changed only twice (→ 0 at 30.05 / 44.81 s): no lane changes or
+  overtakes around a blocking skater in this session; cars wait.
 - **+3408 is not a plain target speed:** it ranges −76…+5 (negative while stopped/queued). Treat as a speed
   delta / planner output (?) until decoded.
-- **Traffic light timers (TRAFPHASE, set once at load, 5.93 s):** 20 phase timers in two orders — 0.5 / 8.0 /
+- **Traffic light timers (TRAFPHASE, set once at load, 5.93 s):** 20 phase timers in two orders: 0.5 / 8.0 /
   0.5 / 7.0 / 1.0 and 0.5 / 7.0 / 1.0 / 0.5 / 8.0 s → per direction **green 7 or 8 s, amber 1 s, all-red 0.5 s**
   (interpretation; notes §6 had 7 / 1 / 0.5 / 0.4 from data).
 - **Horn / skid hooks fired only at load** (4 each at 6.15 s, constructors): actual honks/skids are not in this
@@ -383,14 +384,15 @@ Tool: `py -3.13 tools/recomp-trace/veh_trace.py <trace> [--vehicle ADDR]` (saved
 - The car's flags byte **+4403 becomes 0xC0 for the whole skitch** (484.15 → 508.46 s; seen nowhere else:
   91 of 12,740 VEHSTATE samples). User: no special skitch sounds, "the vehicle just changed its logic".
 - While 0xC0: the +3408 field locks at **0.20**, the car accelerates 5.5 → **16.8 m/s (≈60 km/h)** over ~4 s and
-  holds 13–16.8 m/s for ~24 s / ~270 m — faster than normal traffic (median 5.8, p90 14.9 m/s).
+  holds 13–16.8 m/s for ~24 s / ~270 m: faster than normal traffic (median 5.8, p90 14.9 m/s).
 - When 0xC0 clears (skater lets go): +3408 → −7.25 and the car **brakes to a stop**: 16.8 → 0.9 m/s in
   ~2.6 s (≈6.2 m/s²), then waits.
 - Before the skitch (472–477 s) the car crept/stopped (skater near it). Other +4403 bits: 0x10 toggles
-  often (braking/yield, 353 samples), 0x20 with manoeuvre 3 (pull over, 166), 0x08 on +3424 (28).
+  often (braking/yield, 353 samples), 0x20 with maneuver 3 (pull over, 166), 0x08 on +3424 (28).
 - Next: find who sets 0xC0 (store to +4403 with 0xC0 / 0x40 / 0x80 bits) = the skitch attach/detach code,
   and the skater side (skitch state, attach offset).
-**AI skaters — user (2026-10-02): "There are AI skaters ALL OVER", most at PCU Library; they skate what the
+
+**AI skaters, user (2026-10-02): AI skaters are all over the map, most at PCU Library; they skate what the
 player skates and features around him: grinding rails, small basic tricks off features.** Now traced: category
 `aiskater` (hooks_physics.cpp): `SKATEB` = every board's post-physics contact pass `sub_82C07D20` (player and
 AI, each frame), per board ≤4/s: contacts w0–w3 / front truck / back truck / deck, deck contact point
@@ -398,10 +400,11 @@ AI, each frame), per board ≤4/s: contacts w0–w3 / front truck / back truck /
 patterns 0000000 air 367, 1111000 rolling 362, **0000110 trucks only = grind 9**, 0000001 deck slide 32,
 0011000/1100000 manual 37. `SKATER` (GroundAnimation fill sub_82D34150) is event-driven, few lines. The
 skater list (index 0 = player, 1.. = AI) is `*(*(ctx+1588)+8)` (vtable +4 count, +12 get; position via
-skater+52 component vtable +12) — sub_82C74EB8 GetDistanceToNearestAISkater; manager string
+skater+52 component vtable +12): sub_82C74EB8 GetDistanceToNearestAISkater; manager string
 `Sk8::AI::TheAISkaterManager` (0x8218A99C), `IsAISkater` 0x820DCD00, `GetAISkatersSetting` 0x8221E670.
+
 **AI skaters' board audio (2026-10-03): the second CONTACT object `0x40C710A0` is the Player slot's 2nd instance, which
-retail gives to one NPC skater within 30 m of the camera — `world-npc-skater-audio.md`.**
+retail gives to one NPC skater within 30 m of the camera: `world-npc-skater-audio.md`.**
 Earlier note (wrong, kept for the record): **Other skating NPCs: no evidence in this trace.** No tracked LW ped moves at skating speed outside a chase
 (PEDXYZ). The two board-contact audio objects (CONTACT 0x40C70C80 / 0x40C710A0) are both the player's:
 frames where only the second fires (83.2 s, 277.9 s) show only the player. AI skaters (if they spawn in free
@@ -412,19 +415,19 @@ positions/states.
 
 ## 6d. Long combined session (`all_20261002_160126`, ~10.5 min, light-mode hooks, all 5 categories, NO crash)
 Light-mode tracing held under real play (the only crash record is the earlier 15:53 one). 526 of ~390k lines
-malformed (mostly empty) — parsers skip them (`trace.py` now ignores unparsable MARK/CLOCK/CAPTURE).
+malformed (mostly empty); parsers skip them (`trace.py` now ignores unparsable MARK/CLOCK/CAPTURE).
 **Peds:** 4 chases, 3 takedown attempts / 2 successes, reactions: slamreaction 13, nearbycollisionreaction 7,
 nearbyskatertrick 4, bump→angrychase 4, bump→warn 1. **Chase without a preceding warn** on a single bump
 (slot 2 at 242.96, slot 13 at 347.44), and slot 1: warn 290.39 → chase 291.49 → takedown 302 → next bump
 326.01 → chase immediately. With §5d (a ped re-warned 45 s after its chase) this suggests the "already
-warned" memory lasts ~35–45 s — or hard bumps skip the warn (?). **Hand-prop throws:** ThrowHandPropTimer
+warned" memory lasts ~35–45 s; or hard bumps skip the warn (?). **Hand-prop throws:** ThrowHandPropTimer
 0.20 / 0.92 s and ThrowHandPropReactionTimer 0.81 s on several peds (throwing held items).
 **Skitches (6, vehicle +4403 bits 0xC0):** 17.0 / 14.6 / 18.3 / 22.2 / 3.5 / 21.7 s. Speed at grab 0–17 m/s
 (grabbing a stopped car makes it drive), peak 15.6–22.7 m/s (56–82 km/h; one 27 = likely a jump), reached
 after 3–11 s, mean 8–14 m/s, 28–281 m per skitch. Release: the car does NOT always brake to a stop
 (2 of 7 with the §6c one); others keep driving at 7–19 m/s. Traffic overall: moving median 6.0, p90 14.9 m/s.
 **AI skaters (SKATEB):** player board 469434F0 + **72 AI boards** over the session (6 alive > 60 s; 4–14
-active per minute — they spawn/despawn around the player). Contact mix — player: rolling 60.5 %, air
+active per minute; they spawn/despawn around the player). Contact mix, player: rolling 60.5 %, air
 27.4 %, manual 5.3 %, slide 2.8 %, grind 0.2 %; AI: rolling 70.5 %, air 15.2 %, manual 6.0 %, slide 2.7 %,
 grind 0.6 %. Speed |v| moving: player median 8.05 / p90 13.3 m/s; AI median 8.2 / p90 11.8 m/s.
 **Gap:** SKATEB's position is the deck contact point only (239 of 6,375 AI samples), so "skate the same
@@ -448,7 +451,7 @@ Int_c<n>_<partner> (ped-ped conversation), Rct_c2; cell phone HelCel → ConCell
 bums PanHndle/RandmBum; guard radio RadioChirps / secg2_radio; player grinds → GrindLand / GrindMid; Gasp,
 grunt; cameraman `704_40_spot_ots` (own-the-spot). Levels: this session had no `dsp` category (levels 0);
 The all-categories session now includes dsp.
-Second speech session (all_20261002_163809, 260 s, WITH voice levels — dsp on): bump→warn → `501_<voice>_Warn_n`
+Second speech session (all_20261002_163809, 260 s, WITH voice levels, dsp on): bump→warn → `501_<voice>_Warn_n`
 (also for warn+taze, e.g. 501_49_adtf4_Warn_n); collision nearby → SpecCol / `HImpRct_n` (high-impact
 reaction) / Gasp; slam nearby → Slam_n / `Rct_c14_tour`; maincast pro lines around the player (`104_21_Ladd_Slam`,
 `130_21_Ladd_col`, `101_09_Ratt_pos`). Levels (GAIN×SEND, linear) in its report.md: Skate_Collisions median
@@ -464,16 +467,16 @@ skater shoes 0.014 / 0.146, sirens up to 0.26, people_yelling up to 0.20.
   guard radio RadioChirps/secg1_radio, pro lines (Duff_pos, Duff_AiSlam, Cole_col). 168 clips.
 - **Skitches:** 5 (1.6–14.1 s). Traffic moving median 6.0 / p90 14.7 m/s.
 - **AI skaters (positions valid now):** 54 boards; distance to player median 76 m (p10 27, p90 108), within
-  10 m only 2 %; their grinds/slides never within 2 m of the player's grind/slide spots. **User: "they don't
-  skate the same thing as you all the time, but you might skate something and do it over and over and find an
-  AI skater has come to hit that spot as well."** Measured: at 5 of 6 spots the player hit ≥3 times, an AI came
+  10 m only 2 %; their grinds/slides never within 2 m of the player's grind/slide spots. **User: they do not
+  always skate the same thing as you, but if you skate one spot over and over, an AI skater may come
+  to hit that spot as well.** Measured: at 5 of 6 spots the player hit ≥3 times, an AI came
   within 8 m (e.g. (−174, 650): player 6 hits 138–165 s, an AI 13 samples within 8 m rolling/manual; (−400, 429):
   player 342–346 s, AIs arrived 386 s and 397 s). Not yet seen: an AI grinding the same feature. Next: find the
   AI skater's spot/target selection (Sk8::AI::TheAISkaterManager, AIPATH skate lines §2, `nearbysession`
   mood / session spots) and hook its target choice.
 - Levels: the report of recomp session `all_20261002_164620` (GAIN 90,231 / SEND 77,650).
-- **All sessions use the user's 100 % completion save** (user: "they will skate all over"): AI skater density
-  (4–14 around the player, 54–72 per session) may depend on progression — check the AI skater spawn rules
+- **All sessions use the user's 100 % completion save** (the user: they skate all over): AI skater density
+  (4–14 around the player, 54–72 per session) may depend on progression; check the AI skater spawn rules
   (`GetAISkatersSetting` 0x8221E670) before porting the counts.
 - Traffic/world levels (GAIN×SEND, linear; median / p90): Traffic_Horn 115 starts 0.000 / 0.207, Traffic_Skid
   139: 0.003 / 0.164, Tire_Squeals 0.018 / 0.088, car_alarms 0.024 / 0.516, truck horns ~0.02 / 0.06–0.15,
@@ -482,19 +485,19 @@ skater shoes 0.014 / 0.146, sirens up to 0.26, people_yelling up to 0.20.
   footsteps fstep_livingworld 0.010 / 0.086; sirens Siren_city_* up to 0.19.
 
 ## 7. Hook plan (recomp trace, kind prefix NPC*/TRAF*/SEC*)
-1. NPCPOP — sub_826B7530 / 7760 exit: speed, lerped ranges, census circle; sub_826B9940 / 9B90 entry
+1. NPCPOP: sub_826B7530 / 7760 exit: speed, lerped ranges, census circle; sub_826B9940 / 9B90 entry
    (f1/f2 ring, r7 fill flag) + spawn result; sub_826BA8B0 / BAAB8 culls (id, distance). → population,
    spawn/despawn radii, rates.
-2. NPCMOOD — sub_82E41EB0 / sub_82BFE010: entity, event, chosen result, roll → reaction probabilities.
-3. SECCHASE — sub_826AC668 (escape), sub_826AC898 (rest), sub_826AD690, sub_826AD3F8 results;
+2. NPCMOOD: sub_82E41EB0 / sub_82BFE010: entity, event, chosen result, roll → reaction probabilities.
+3. SECCHASE: sub_826AC668 (escape), sub_826AC898 (rest), sub_826AD690, sub_826AD3F8 results;
    sub_82E40940 timer sets (r4 index, f1 length; indices 1–4, 15, 25, 26) → chase timings per guard.
-4. NPCSEE — sub_82E26F38 result with distance/angle → perception.
-5. NPCSTATE — sub_8269F6A8 (suggested speed per state), factories InterceptChasee 0x826C75A8, Scatter
+4. NPCSEE: sub_82E26F38 result with distance/angle → perception.
+5. NPCSTATE: sub_8269F6A8 (suggested speed per state), factories InterceptChasee 0x826C75A8, Scatter
    0x826C8618, PedestrianColliding 0x826C5D90 → state timeline.
-6. SECTAKE — sub_826A49D8 / sub_826A4E50 / sub_82E3C000 → takedown success rule.
-7. TRAFSTATE — vehicle slot-13 handlers: id, state, speed, +3408, +4396/+4380; sub_82C41CD0 exit.
-8. TRAFSND / TRAFLIGHT — horn/skid constructors, alarm +3716, sub_82E156D8.
-9. Stream — sub_82C9B3A0 / 82C9B250 / 82C9B4F0: which road/nav/AIPATH blobs load where.
+6. SECTAKE: sub_826A49D8 / sub_826A4E50 / sub_82E3C000 → takedown success rule.
+7. TRAFSTATE: vehicle slot-13 handlers: id, state, speed, +3408, +4396/+4380; sub_82C41CD0 exit.
+8. TRAFSND / TRAFLIGHT: horn/skid constructors, alarm +3716, sub_82E156D8.
+9. Stream: sub_82C9B3A0 / 82C9B250 / 82C9B4F0: which road/nav/AIPATH blobs load where.
 Guard every read with Readable(). Short scripted runs: stand still in a census area (population), bump a
 ped 3× (mood), skate past a guard (chase), stand on a road (traffic).
 
@@ -519,7 +522,7 @@ Run: Locations Midtown_Promenade then Hotel_District, standing still 45 s each (
   from 8241C06C ← 82C16424/82416114: the state-graph runtime).
 - **AI stream blobs** (`sub_82C9B250/B4F0/B3A0`): r6 = asset type **0x00EB0027 (26), 0x00EB0014 (24),
   0x00EB0013 (15)**, r8 = 0x34, f1 = streaming distance (13–36). Map these types to road/nav/AIPATH next.
-- No security chase calls (SECCHASE/SECTAKE) on this route — expected: Skate 3 has no active guards (§5).
+- No security chase calls (SECCHASE/SECTAKE) on this route: expected: Skate 3 has no active guards (§5).
 - Trace writer: a few lines were interleaved (hooks fire on several threads; `audio_trace::line` isn't
   atomic per line). `first_pass.py` skips malformed lines.
 Next: name the fields (spawn result → ped type/category, cull distances, mood event/result), a guard-area
@@ -527,7 +530,7 @@ run (security), a bump run (pad script pushing into a ped: mood → warn/chase).
 
 ## 8. Export for our engine
 Census layers + census/category/entity records (done as text), road graphs (type 0x13) per district,
-waypoint groups (0x1A), AIPATH lines (0x14) for AI skaters, NavPower meshes (0x27; format unknown —
+waypoint groups (0x1A), AIPATH lines (0x14) for AI skaters, NavPower meshes (0x27; format unknown;
 probably replace with our own navmesh from collision), ai_skater_profiles trick weights, chase/
 perception/mood records, vehicle characteristics/drivers. State graphs: re-implement the structure in our
 own code (don't ship the XML).
@@ -536,10 +539,10 @@ own code (don't ship the XML).
 - Nothing upstream (PRs, issues) on retail NPCs, traffic AI or guards. Upstream main `crates/skate-dynamics`
   (Rapier island: spawn/remove bodies, convex colliders, kinematic proxies, spring rays, joints; cars
   composed in Lua) + `mods/Skyline_Drive_Mod`, branch `skyline-driving-update`; @andrewnakas fork
-  `mx/vehicle`, `mx/engine`, PR #1 "Mx/audio engine vehicles" — all player-driven. Reusable: traffic car
+  `mx/vehicle`, `mx/engine`, PR #1 "Mx/audio engine vehicles": all player-driven. Reusable: traffic car
   bodies as kinematic proxies on skate-dynamics (skater collision), engine-sound work for
   `aud_traffic_engine`. Upstream main is GPLv3 (`GPL-3.0-only`, since 2026-10-03, `4488651`); the
-  unmerged fork branches and PR #1 have no licence of their own: describe, don't copy.
+  unmerged fork branches and PR #1 have no license of their own: describe, don't copy.
 
 
 ## Tools (local research scripts, mostly not published; `veh_trace.py`, `first_pass.py`, `callctx.sh`,

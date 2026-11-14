@@ -90,6 +90,13 @@ pub struct GroundOutputFields {
     pub scalar_276: f32,
     pub scalar_292: f32,
     pub scalar_296: f32,
+    /// State 104 (`82D4C078`, b58): the grab height (graph "Crouch"), the axis-distance closing rate 956 (graph
+    /// "absorbspeed", IsSkitchingWithAbsorb) and the along ratio 936 (reader not found).
+    pub skitch_grab_height_280: f32,
+    pub skitch_absorb_284: f32,
+    pub skitch_along_288: f32,
+    /// State 104 (b61): the push speed 996 (graph "PushSpeed").
+    pub skitch_push_308: f32,
     pub flag_317: u8,
     pub flag_318: u8,
 }

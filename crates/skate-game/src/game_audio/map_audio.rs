@@ -56,6 +56,12 @@ impl MapAudio {
         library.region_key(&self.district, layer, x, z)
     }
 
+    /// Every zone key a layer's tiles can return on this map: the map's own boxes and its district's retail tiles.
+    pub(crate) fn region_tile_keys<'a>(&'a self, library: &'a Library, layer: &str) -> impl Iterator<Item = &'a str> + 'a {
+        let own = self.regions.get(layer).map_or(&[][..], Vec::as_slice);
+        own.iter().chain(library.region_tiles(&self.district, layer)).flat_map(|t| t.keys.iter().map(String::as_str))
+    }
+
     /// Every record the emitter system loads, with its file number (the reverb zones' ids keep
     /// retail's `file << 32 | index`): the `.ems` files' records, then the extra records as one
     /// more file.
@@ -129,7 +135,10 @@ pub(crate) fn retail_table(c: &skate_data::collections::Collections) -> HashMap<
     let mut rows: HashMap<String, (bool, String)> = HashMap::new();
     for row in c.entries().iter().filter(|e| e.class_name == "world") {
         let Ok(stream) = c.field("world", &row.key, "WorldStream") else { continue };
-        let Some(stem) = stream.data.strip_prefix("DIST_") else { continue };
+        let stem = crate::park_layout::stream_map(&stream.data);
+        if stem.len() == stream.data.len() {
+            continue;
+        }
         let own = row.key.eq_ignore_ascii_case(&format!("dist_{stem}"));
         let key = stem.to_ascii_lowercase();
         if rows.get(&key).is_none_or(|(was_own, _)| own && !was_own) {
@@ -174,10 +183,14 @@ fn retail(asset_root: &Path) -> Option<&'static HashMap<String, RetailMap>> {
 
 /// A map's own definition: the `.skate` `AUDO` extension, else the sidecar.
 fn own_definition(map: &crate::map_transition::CurrentMap) -> Option<(MapJson, &'static str)> {
-    let (bytes, source, at) = if let Some(tag) = map.audio_tag.as_deref() {
+    own_definition_at(map.audio_tag.as_deref(), map.path.as_deref())
+}
+
+fn own_definition_at(tag: Option<&[u8]>, map_path: Option<&Path>) -> Option<(MapJson, &'static str)> {
+    let (bytes, source, at) = if let Some(tag) = tag {
         (tag.to_vec(), "tag", "AUDO extension".to_owned())
     } else {
-        let path = map.path.as_deref()?.with_extension("audio.json");
+        let path = map_path?.with_extension("audio.json");
         let bytes = std::fs::read(&path).ok()?;
         (bytes, "sidecar", path.display().to_string())
     };
@@ -244,6 +257,7 @@ pub(super) fn update(
     config: Res<crate::config::Config>,
     mut audio: ResMut<MapAudio>,
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::MAP_AUDIO);
     let Some(library) = library else { return };
     let key = (map.path.clone(), map.generation, content.generation);
     if audio.key.as_ref() == Some(&key) {
@@ -257,6 +271,51 @@ pub(super) fn update(
         info!("Map audio {stem}: {:?}, {} .ems files, {} extra records, district {}, crossfade {:?}", built.sources, built.ems.len(), built.emitters.len(), built.district, built.crossfade_bank);
     }
     *audio = built;
+}
+
+/// While a map loads: its zone beds (the files `ambience::update` keeps resident) are read on the audio's read-ahead
+/// worker, so the first bed is not read on the game thread in the map's first frame (161 ms, desktop session
+/// 2026-10-23). Only when the bytes arrive changes. The `.skate` AUDO tag is known only after the load, so a map that
+/// names another district there reads the sidecar's guess and its own beds as before.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn read_ahead_next_map(
+    transition: Option<Res<crate::map_transition::MapTransition>>,
+    library: Option<ResMut<Library>>,
+    native: Option<ResMut<super::native::Native>>,
+    owners: Option<Res<super::world_sources::WorldOwners>>,
+    config: Res<crate::config::Config>,
+    mut requested: Local<Option<Option<std::path::PathBuf>>>,
+    // The next map's audio until its sound banks are queued (that waits for its spawn point).
+    mut banks: Local<Option<(std::path::PathBuf, MapAudio)>>,
+) {
+    let Some(entry) = transition.as_deref().and_then(|t| t.loading()) else {
+        *requested = None;
+        *banks = None;
+        // A load that ended without its map change (failed) leaves no banks queued; a committed one handed them over.
+        if let Some(mut native) = native.filter(|_| transition.as_deref().is_none_or(|t| !t.busy())) {
+            native.prefetch.drop_next();
+        }
+        return;
+    };
+    let Some(mut library) = library else { return };
+    if requested.as_ref() != Some(&entry.path) {
+        *requested = Some(entry.path.clone());
+        *banks = None;
+        let stem = entry.path.as_deref().and_then(|p| p.file_stem()).and_then(|s| s.to_str()).unwrap_or("").to_owned();
+        if stem.is_empty() {
+            return;
+        }
+        let next = build(&stem, own_definition_at(None, entry.path.as_deref()), &library, retail(&config.asset_root));
+        let files = library.zone_bed_files(next.region_tile_keys(&library, "audio_ambience"));
+        library.warm_files(files.iter());
+        info!("AUDIO_AMBIENCE beds read ahead for the next map {stem}: {}", files.len());
+        *banks = entry.path.clone().map(|path| (path, next));
+    }
+    let (Some(spawn), Some(mut native)) = (transition.as_deref().and_then(|t| t.loading_spawn()), native) else { return };
+    let Some((path, next)) = banks.take() else { return };
+    let emitters = super::emitters::read_ahead_banks(next.records(&library).map(|(_, r)| r), &library, &mut native, &path, Vec3::from(spawn));
+    let world = if owners.is_some_and(|o| o.expected) { super::world_sources::read_ahead_banks(&mut native, &library, &path) } else { 0 };
+    info!("AUDIO_BANKS read ahead for the next map {}: {emitters} emitter banks near the spawn, {world} world banks", path.display());
 }
 
 #[cfg(test)]
@@ -351,7 +410,7 @@ pub(crate) mod tests {
         let dir = std::env::temp_dir().join(format!("skate-map-audio-sidecar-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let mut map = crate::map_transition::CurrentMap { path: Some(dir.join("MyMap.skate")), name: "My map".into(), spawn: [0.0; 3], heading: 0.0, generation: 1, audio_tag: None };
+        let mut map = crate::map_transition::CurrentMap { path: Some(dir.join("MyMap.skate")), name: "My map".into(), spawn: [0.0; 3], heading: 0.0, generation: 1, audio_tag: None, layout: None };
         assert!(own_definition(&map).is_none(), "no sidecar, no tag");
         std::fs::write(dir.join("MyMap.audio.json"), r#"{"district": "DownTown", "emitters": [{"position": [0, 0, 0], "extent": [3, 3, 3], "kind": 5, "reverb": "BEEFC8E3DE04FBAE"}]}"#).unwrap();
         let (def, source) = own_definition(&map).unwrap();

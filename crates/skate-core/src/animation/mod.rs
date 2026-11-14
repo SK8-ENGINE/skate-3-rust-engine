@@ -27,6 +27,7 @@ pub mod physical_feedback;
 pub mod ground_acceleration;
 pub mod foot_ik;
 pub mod vbr;
+pub mod raw;
 pub mod kickturn;
 pub mod manual;
 

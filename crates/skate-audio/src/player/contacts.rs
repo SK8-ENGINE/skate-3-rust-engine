@@ -36,7 +36,7 @@
 //! the local player, owner byte +72 — UNCERTAIN meaning). The roll and ollie voices' bus is not
 //! recovered (SFX Master here).
 //!
-//! Not modelled: the cartoon DLC sets (bank 8), the body poster's first-hit torso message
+//! Not modeled: the cartoon DLC sets (bank 8), the body poster's first-hit torso message
 //! (`sub_824BCEB0`) and Hall of Meat layer, the step-on force (`+500..+503`: `+720` / `+814` are not published) and which
 //! update rewrites the manual-landing holder `+36` (taken as a touchdown voice of kind 4).
 use super::collision::Message;
@@ -140,6 +140,29 @@ pub struct ContactsTuning {
     pub body_110: [[f32; 2]; 2],
     pub body_111: [f32; 2],
     pub body_112: [[f32; 2]; 2],
+    /// The collide line's floors (`sub_824BDA90`, class `aud_speech` `default`): a car contact
+    /// above `7503A1AD356BFCCD` (0.16), a skater or group 11 contact above `359EC8EF52598AA8` (0.2)
+    /// (contact speeds, [`super::AudioState::collide_vehicle`]).
+    pub collide_vehicle_min: f32,
+    pub collide_min: f32,
+    /// How long a skater's crash line (`sub_824DB688`, 8229 / 125) stays muted after a skater
+    /// contact asked for its collide line (s; `0x82063B08` = 3.0, counted down by `sub_824F9FC8`).
+    pub collide_crash_mute: f32,
+    /// The bumped skater's team line after the local player hit it (`210_CollTeam` 8290 with
+    /// main-cast 294, posted to its own speech) and its cooldown (s; `0x8231A844` = 1.0).
+    pub coll_team: (u16, u16),
+    pub coll_team_cooldown: f32,
+}
+
+/// One collide-line call of the body poster (`sub_824BDA90`) for a non-local skater.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CollideCall {
+    /// A skater contact asked for it (`+600` over its floor): the speech record's `+148` crash
+    /// mute ([`ContactsTuning::collide_crash_mute`], written at 0x824BDDD8).
+    pub skater: bool,
+    /// The other skater was the local player and the cooldown had run out: the team line
+    /// ([`ContactsTuning::coll_team`]) when the skater has an AI voice (retail `+28` record `+80`).
+    pub team: bool,
 }
 
 impl Default for ContactsTuning {
@@ -195,6 +218,11 @@ impl Default for ContactsTuning {
             body_110: [[0.75, 1.25], [0.7, 1.25]],
             body_111: [0.65, 1.25],
             body_112: [[0.05, 0.3], [0.3, 0.55]],
+            collide_vehicle_min: 0.16,
+            collide_min: 0.2,
+            collide_crash_mute: 3.0,
+            coll_team: (8290, 294),
+            coll_team_cooldown: 1.0,
         }
     }
 }
@@ -253,7 +281,7 @@ impl SpeedGraph8 {
 /// The body poster's material of a body region (`sub_824BCBA0`: head 97, torso 98, arms 100, legs
 /// 99), its cloth contact (`+112`: none / denim 109 / skin 107 / denim 108) and its pad contact
 /// (`+120`: 110, the face 112 with the face point in contact, 111 on the limbs). The Hall of Meat
-/// layer (`+128`, materials 102..106 while the global `+859` byte is set) is not modelled.
+/// layer (`+128`, materials 102..106 while the global `+859` byte is set) is not modeled.
 pub fn body_materials(region: usize, face: bool) -> (i32, i32, i32) {
     match region {
         0 => (97, NO_MATERIAL as i32, if face { 112 } else { 110 }),
@@ -356,6 +384,8 @@ pub struct Contacts {
     /// Diagnostics (the e2e harness): when `Some`, every body-poster message with its region and
     /// the impact the poster read.
     pub body_log: Option<Vec<(usize, f32, Message)>>,
+    /// This process's body hits, one per posting region, cleared each process, bounded; read by host and mods.
+    pub body_hits: Vec<BodyHit>,
     /// `+422`: armed while the skater is not bailing; the body poster's first message of a bail
     /// calls the bail grunt helper `sub_824BF5F8` and disarms it. The helper speaks only for a
     /// non-local skater (its SkaterSpeech record gets message 8206 / 115: the NPC's bail grunt),
@@ -363,6 +393,17 @@ pub struct Contacts {
     grunt_armed: bool,
     /// The bail grunt is due (set by the body poster; the NPC host takes it).
     pub bail_grunt: bool,
+    /// Collide lines due (824BDA90): one record per poster call, in order; local main-cast branch not modeled.
+    pub collides: Vec<CollideCall>,
+    /// The team line's cooldown (`entry+492`, s): counted down by dt at the start of every call,
+    /// set to [`ContactsTuning::coll_team_cooldown`] when the team line is asked for.
+    pub coll_team_cooldown: f32,
+    /// This process's landing posts ([`LandingNote`]), `None` on a process without a landing,
+    /// manual landing or manual skip.
+    pub landing_note: Option<LandingNote>,
+    /// The note being built during a process.
+    note: LandingNote,
+    note_due: bool,
 }
 
 /// The route of a poster's sounds: eEQChain bus `bus` (re-rolled on first use by the local
@@ -374,6 +415,104 @@ fn route(bus: u8, s: &AudioState, env: Option<i32>) -> crate::bus::Route {
         owner_env: env.map_or(0.0, |l| l as f32 * crate::dsp::INV_32767),
         mono: false,
     }
+}
+
+/// One body region's hit posted by `sub_824BC188` ([`Contacts::body_hits`]): the region (0 head,
+/// 1 torso, 2 / 3 arms, 4 / 5 legs), the impact the poster read (after the speed graph) and the
+/// region's pair message (materials, tiers, levels, position).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BodyHit {
+    pub region: usize,
+    pub impact: f32,
+    pub message: Message,
+}
+
+/// At most this many body hits per process (six regions, a few console frames per pass).
+pub const MAX_BODY_HITS: usize = 32;
+
+/// What became of one Splice post of a landing ([`LandingNote`], diagnostics only).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PostOutcome {
+    /// The voice started.
+    Started,
+    /// The host refused the start (no voice, no sample, muted by a mod rule).
+    NoVoice,
+    /// All four touchdown slots (`+140`) still held a sound (`sub_824B8D48` returns).
+    NoSlot,
+    /// The last-pair touchdown (kind 2) skipped because a manual is on (`sub_824B86E0`: the
+    /// manual landing's result or `+121`).
+    SkippedManual,
+    /// The landing impact plays for the local player only (`sub_824BA630`: owner `+72`).
+    NotLocal,
+}
+
+/// What became of the landing's collision pair contact (`sub_824BA630`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PairOutcome {
+    /// Posted to the collision manager at this tier.
+    Posted { tier: i32 },
+    /// No landed wheel with a material (all 143).
+    NoMaterial,
+    /// The wheel's material has no landing flag.
+    NotLandingMaterial,
+    /// A contact level came out 0.
+    Silent,
+}
+
+/// One process's landing posts (diagnostics: the host's `AUDIO_LANDING` line), set only on a
+/// process where the landing (`sub_824BA630`) ran, the manual landing (`sub_824BB330`) played or
+/// the last pair was skipped in a manual; cleared at the start of every [`Contacts::process`].
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LandingNote {
+    /// The air -> ground landing ran this process.
+    pub landing: bool,
+    /// The landing impact (`landing_id`) and the pair contact (when `landing`).
+    pub impact: Option<PostOutcome>,
+    pub pair: Option<PairOutcome>,
+    /// The touchdown chosen this process: kind, variant, outcome.
+    pub touch: Option<(u8, u8, PostOutcome)>,
+    /// The manual landing (kind 4) this process.
+    pub manual: Option<PostOutcome>,
+    /// The inputs: `+340` balance, `+121` in a manual (after this process's manual landing),
+    /// `+200` wheels, contact and landed latches (bit per wheel), the latched air time.
+    pub balance: bool,
+    pub in_manual: bool,
+    pub wheels: u32,
+    pub contact: u8,
+    pub landed: u8,
+    pub air_time: f32,
+}
+
+impl LandingNote {
+    /// The diagnostic line's fields (no prefix): `landing=1 impact=started pair=posted:1 touch=k1v0:started manual=- ...`.
+    pub fn fields(&self) -> String {
+        let post = |p: Option<PostOutcome>| match p {
+            None => "-".to_string(),
+            Some(p) => format!("{p:?}").to_lowercase(),
+        };
+        let pair = match self.pair {
+            None => "-".to_string(),
+            Some(PairOutcome::Posted { tier }) => format!("posted:{tier}"),
+            Some(p) => format!("{p:?}").to_lowercase(),
+        };
+        let touch = self.touch.map_or("-".to_string(), |(k, v, p)| format!("k{k}v{v}:{}", post(Some(p))));
+        format!(
+            "landing={} impact={} pair={pair} touch={touch} manual={} balance={} in_manual={} wheels={} contact={:04b} landed={:04b} air={:.2}",
+            u8::from(self.landing),
+            post(self.impact),
+            post(self.manual),
+            u8::from(self.balance),
+            u8::from(self.in_manual),
+            self.wheels,
+            self.contact,
+            self.landed,
+            self.air_time,
+        )
+    }
+}
+
+fn mask(bits: [bool; 4]) -> u8 {
+    bits.iter().enumerate().fold(0, |m, (i, b)| m | (u8::from(*b) << i))
 }
 
 /// FNV-1a over a collision message's fields (diagnostics: [`Contacts::body_digest`]).
@@ -409,6 +548,23 @@ fn start_block(dt: f32) -> [f32; 6] {
 }
 
 impl Contacts {
+    /// The owner's release: stop every held Splice sound, as retail's release stops every layer.
+    pub fn release_all(&mut self, host: &mut dyn SpliceHost) {
+        let mut held: Vec<SoundId> = Vec::new();
+        held.extend(self.pop.take().map(|p| p.0));
+        held.extend([self.roll.take(), self.ollie.take(), self.landing.take(), self.plant.take(), self.lift.take()].into_iter().flatten());
+        for t in self.touch.iter_mut().chain(std::iter::once(&mut self.second)).chain(std::iter::once(&mut self.manual)) {
+            held.extend(t.take().map(|t| t.sound));
+        }
+        for slot in self.taps.sounds.iter_mut().chain(self.scuffs.iter_mut()) {
+            held.extend(slot.take());
+        }
+        for sound in held {
+            host.release(sound);
+        }
+        self.step_on.release_all(host);
+    }
+
     /// `sub_824BA310`: 2 × hollow (AudioSurfaceMap word 2 of wheel 0's material) + soft wheels.
     pub fn tier(s: &AudioState, t: &PlayerTuning) -> usize {
         let material = s.wheel_material[0];
@@ -445,10 +601,15 @@ impl Contacts {
     /// messages land in [`Contacts::outbox`].
     pub fn process(&mut self, s: &AudioState, buckets: [u32; 4], t: &PlayerTuning, c: &ContactsTuning, host: &mut dyn SpliceHost) {
         self.local = s.local;
+        self.body_hits.clear();
+        self.landing_note = None;
+        self.note = LandingNote::default();
+        self.note_due = false;
         self.condition(s);
         self.foot_taps(s, c, host);
         self.scuffs(s, c, host);
         let manual_landed = self.manual_landing(s, t, c, host);
+        self.note.landed = mask(self.landed);
         self.touchdowns(s, buckets, manual_landed, t, c, host);
         // sub_824B90D8
         self.frames = self.frames.saturating_add(1);
@@ -468,6 +629,14 @@ impl Contacts {
         }
         self.was_air = air;
         self.was_grinding = s.grinding;
+        if self.note_due {
+            self.note.balance = s.balance;
+            self.note.in_manual = self.in_manual;
+            self.note.wheels = s.wheel_count;
+            self.note.contact = mask(s.wheel_contact);
+            self.note.air_time = self.air_latched;
+            self.landing_note = Some(self.note);
+        }
         // sub_824B8218's order after the process: the plant / lift `sub_824BBB28`, the body
         // `sub_824BC188`, the deck `sub_824BD000`.
         if self.plant_lift_on {
@@ -522,7 +691,7 @@ impl Contacts {
     /// hit adds the second message at tier 1 × the window scale, as the deck), the cloth contact
     /// against nothing at tier 0 with the region's level, and the pad contact by
     /// `sub_824BCCF8`'s thresholds. Cooldowns count down by min(time scale, 1) per frame.
-    /// Not modelled: the first-hit torso message (`sub_824BCEB0`, gated by an unidentified game
+    /// Not modeled: the first-hit torso message (`sub_824BCEB0`, gated by an unidentified game
     /// global at `*(0x82083C38) + 0x2FCB4`), the Hall of Meat layer and the bail flags `+406..+416`
     /// (they feed game events, not sounds).
     fn body(&mut self, s: &AudioState, t: &PlayerTuning, c: &ContactsTuning) {
@@ -540,6 +709,20 @@ impl Contacts {
         for i in 0..6 {
             let impact = if self.body_speed_on { s.body_impact[i] * scale } else { s.body_impact[i] };
             if impact > 0.0 && !(self.body_cooldown[i] > 0.0) {
+                // `sub_824BDA90` first counts its team-line cooldown down (only on calls).
+                if self.coll_team_cooldown > 0.0 {
+                    self.coll_team_cooldown -= s.dt;
+                }
+                // `sub_824BDA90` (call at 0x824BC354, before the bands): `+596` against the car
+                // floor, `+608` and `+600` against the other.
+                if !s.local && (s.collide_vehicle > c.collide_vehicle_min || s.collide_other > c.collide_min || s.collide_skater > c.collide_min) {
+                    let skater = s.collide_skater > c.collide_min;
+                    let team = skater && s.collide_skater_local && !(self.coll_team_cooldown > 0.0);
+                    if team {
+                        self.coll_team_cooldown = c.coll_team_cooldown;
+                    }
+                    self.collides.push(CollideCall { skater, team });
+                }
                 let (a, cloth, pad) = body_materials(i, s.body_slide_flag);
                 let tag = s.body_tag[i];
                 let b = if tag == 0 { none } else { (tag as i32 - 1).clamp(0, none) };
@@ -549,8 +732,12 @@ impl Contacts {
                     self.body_cooldown[i] = c.body_cooldown;
                     let la = if a < none { ct.contact_level(a, b, ta, la_lo, la_hi, impact) } else { 0 };
                     let lb = if b < none { ct.contact_level(b, a, tb, lb_lo, lb_hi, impact) } else { 0 };
-                    let msg = Message { material: [a, b], tier: [ta, tb], position: s.board_position, level: [la, lb], local: s.local };
+                    // Retail posts body hits at audio state +48 (824BC188), the skater point (`com_position`), not the board.
+                    let msg = Message { material: [a, b], tier: [ta, tb], position: s.com_position, level: [la, lb], local: s.local };
                     self.outbox.push(msg);
+                    if self.body_hits.len() < MAX_BODY_HITS {
+                        self.body_hits.push(BodyHit { region: i, impact, message: msg });
+                    }
                     if s.bail && self.grunt_armed {
                         self.grunt_armed = false;
                         self.bail_grunt = true;
@@ -643,7 +830,7 @@ impl Contacts {
 
     /// `sub_824BA630`'s pair contact: on a landing-flag material, the board (95) against the
     /// first landed wheel's material, tier by the latched air time over the Contacts split.
-    fn land_pair(&mut self, s: &AudioState, t: &PlayerTuning, c: &ContactsTuning) {
+    fn land_pair(&mut self, s: &AudioState, t: &PlayerTuning, c: &ContactsTuning) -> PairOutcome {
         let mut b = NO_MATERIAL as i32;
         for w in 0..4 {
             if self.landed[w] {
@@ -654,8 +841,11 @@ impl Contacts {
             }
         }
         let air = super::clamp01(self.air_latched / c.landing_air);
-        if !(0..143).contains(&b) || !t.collision.material(b).is_some_and(|m| m.landing) {
-            return;
+        if !(0..143).contains(&b) {
+            return PairOutcome::NoMaterial;
+        }
+        if !t.collision.material(b).is_some_and(|m| m.landing) {
+            return PairOutcome::NotLandingMaterial;
         }
         let a = c.landing_board;
         let (tier, low, high) = if air >= c.landing_split { (1, c.landing_split, c.landing_high) } else { (0, 0.0, c.landing_split) };
@@ -663,11 +853,12 @@ impl Contacts {
         let la = ct.contact_level(b, a, tier, low, high, air);
         let lb = if a < 143 { ct.contact_level(a, b, tier, low, high, air) } else { 0 };
         if la == 0 || lb == 0 {
-            return;
+            return PairOutcome::Silent;
         }
         let la = (la as f32 * c.landing_scale[0]) as i32;
         let lb = (lb as f32 * c.landing_scale[1]) as i32;
         self.outbox.push(Message { material: [a, b], tier: [tier, tier], position: s.board_position, level: [la, lb], local: s.local });
+        PairOutcome::Posted { tier }
     }
 
     /// `sub_824BD000`: a deck impact (`+668`) — the board (95; 113 on foot or bailing) against the
@@ -863,6 +1054,9 @@ impl Contacts {
     /// `sub_824BA630`: the local landing impact, then the collision pair contact.
     fn land(&mut self, s: &AudioState, t: &PlayerTuning, c: &ContactsTuning, host: &mut dyn SpliceHost) {
         self.frames = 0;
+        self.note.landing = true;
+        self.note_due = true;
+        self.note.impact = Some(PostOutcome::NotLocal);
         if s.local {
             if let Some(l) = self.landing.take() {
                 host.release(l);
@@ -870,8 +1064,9 @@ impl Contacts {
             host.set_route(route(1, s, None));
             self.landing = host.start(BANK, c.landing_id, start_block(s.dt));
             self.starts += u64::from(self.landing.is_some());
+            self.note.impact = Some(if self.landing.is_some() { PostOutcome::Started } else { PostOutcome::NoVoice });
         }
-        self.land_pair(s, t, c);
+        self.note.pair = Some(self.land_pair(s, t, c));
     }
 
     /// `sub_824BB330`: true when the manual landing played (all wheels then count as down).
@@ -890,10 +1085,13 @@ impl Contacts {
                 }
                 let (id, tier) = self.set(s, t, c, 4, 0);
                 host.set_route(route(0, s, Some(self.owner_levels[1])));
-                if let Some(sound) = host.start(BANK, id, start_block(s.dt)) {
+                let started = host.start(BANK, id, start_block(s.dt));
+                if let Some(sound) = started {
                     self.manual = Some(Touch { sound, kind: 4, variant: 0, tier });
                     self.starts += 1;
                 }
+                self.note.manual = Some(if started.is_some() { PostOutcome::Started } else { PostOutcome::NoVoice });
+                self.note_due = true;
                 self.counted = [true; 4];
                 self.in_manual = false;
                 true
@@ -908,15 +1106,20 @@ impl Contacts {
 
     /// `sub_824B8D48`: a touchdown voice (and the variant-2 second voice).
     fn touch(&mut self, s: &AudioState, t: &PlayerTuning, c: &ContactsTuning, kind: usize, variant: usize, second_ok: bool, host: &mut dyn SpliceHost) {
-        let Some(free) = self.touch.iter().position(Option::is_none) else { return };
+        let Some(free) = self.touch.iter().position(Option::is_none) else {
+            self.note.touch = Some((kind as u8, variant as u8, PostOutcome::NoSlot));
+            return;
+        };
         let (variant, second) = if variant > 1 { (1, !second_ok || !self.memory_136) } else { (variant, false) };
         let second_set = second.then(|| self.set(s, t, c, kind, 2));
         let (id, tier) = self.set(s, t, c, kind, variant);
         host.set_route(route(0, s, Some(self.owner_levels[1])));
-        if let Some(sound) = host.start(BANK, id, start_block(s.dt)) {
+        let started = host.start(BANK, id, start_block(s.dt));
+        if let Some(sound) = started {
             self.touch[free] = Some(Touch { sound, kind, variant, tier });
             self.starts += 1;
         }
+        self.note.touch = Some((kind as u8, variant as u8, if started.is_some() { PostOutcome::Started } else { PostOutcome::NoVoice }));
         if let (Some((id2, tier2)), None) = (second_set, self.second) {
             host.set_route(route(0, s, Some(self.owner_levels[1])));
             if let Some(sound) = host.start(BANK, id2, start_block(s.dt)) {
@@ -924,6 +1127,12 @@ impl Contacts {
                 self.starts += 1;
             }
         }
+    }
+
+    /// The last pair's touchdown (kind 2) is not played while a manual is on (diagnostics note).
+    fn skipped_in_manual(&mut self, class: usize) {
+        self.note.touch = Some((2, class.min(1) as u8, PostOutcome::SkippedManual));
+        self.note_due = true;
     }
 
     /// `sub_824B86E0`.
@@ -970,6 +1179,8 @@ impl Contacts {
             2 if down == 2 => {
                 if !manual && !self.in_manual {
                     self.touch(s, t, c, 2, class, true, host);
+                } else {
+                    self.skipped_in_manual(class);
                 }
                 latch_new(self);
                 self.memory_136 = false;
@@ -989,6 +1200,8 @@ impl Contacts {
                 2 => {
                     if !manual && !self.in_manual {
                         self.touch(s, t, c, 2, class, true, host);
+                    } else {
+                        self.skipped_in_manual(class);
                     }
                     self.counted = [true; 4];
                     self.memory_136 = false;
@@ -1423,6 +1636,75 @@ mod tests {
         assert_eq!(at, [2, 32, 62, 92]);
     }
 
+    /// `sub_824BDA90` (2026-10-16): a non-local skater whose region posts while a skater, car or
+    /// group 11 contact is over its floor asks for the collide line, once per region the poster
+    /// reaches (the cooldown holds the next); the local player and a soft contact ask nothing.
+    #[test]
+    fn a_bumped_npc_skater_asks_for_the_collide_line() {
+        let (t, c) = (body_tuning(), ContactsTuning::default());
+        let run = |s: &AudioState, steps: usize| {
+            let mut k = Contacts { body_on: true, ..Default::default() };
+            let mut h = Log::default();
+            for _ in 0..steps {
+                k.body_calls = Some(1);
+                k.process(s, [0; 4], &t, &c, &mut h);
+            }
+            k.collides.len()
+        };
+        let mut s = AudioState { local: false, collide_skater: 0.5, ..AudioState::default() };
+        s.body_impact[2] = 0.7;
+        s.body_tag[2] = 3;
+        assert_eq!(run(&s, 1), 1);
+        assert_eq!(run(&s, 5), 1, "the region cooldown holds");
+        s.body_impact[4] = 0.7;
+        assert_eq!(run(&s, 1), 2, "one per region");
+        assert_eq!(run(&AudioState { collide_skater: 0.2, ..s }, 1), 0, "not over the floor");
+        assert_eq!(run(&AudioState { collide_skater: 0.0, collide_vehicle: 0.17, ..s }, 1), 2, "a car");
+        assert_eq!(run(&AudioState { local: true, ..s }, 1), 0, "the local player");
+    }
+
+    /// Of the collide lines, the skater contact's (`+600`) ones mute the crash line (0x824BDDD8); a
+    /// car contact alone does not.
+    #[test]
+    fn only_a_skater_contact_counts_as_a_skater_collide() {
+        let (t, c) = (body_tuning(), ContactsTuning::default());
+        let run = |s: &AudioState| {
+            let mut k = Contacts { body_on: true, ..Default::default() };
+            k.body_calls = Some(1);
+            k.process(s, [0; 4], &t, &c, &mut Log::default());
+            k.collides
+        };
+        let mut s = AudioState { local: false, collide_skater: 0.5, ..AudioState::default() };
+        s.body_impact[2] = 0.7;
+        s.body_tag[2] = 3;
+        assert_eq!(run(&s), [CollideCall { skater: true, team: false }]);
+        assert_eq!(run(&AudioState { collide_skater: 0.0, collide_vehicle: 0.17, ..s }), [CollideCall { skater: false, team: false }], "a car");
+        assert_eq!(c.collide_crash_mute, 3.0, "0x82063B08");
+    }
+
+    /// `sub_824BDA90`: hit by the local player, the bumped skater asks for its team line, then not
+    /// again until the 1.0 s cooldown (`0x8231A844`), which only runs down on calls.
+    #[test]
+    fn the_team_line_needs_the_local_player_and_a_cooldown_counted_on_calls() {
+        let (t, c) = (body_tuning(), ContactsTuning::default());
+        let mut k = Contacts { body_on: true, ..Default::default() };
+        let mut s = AudioState { local: false, collide_skater: 0.5, collide_skater_local: true, dt: 0.4, ..AudioState::default() };
+        s.body_tag = [3; 6];
+        let mut call = |k: &mut Contacts, s: &AudioState| {
+            k.body_cooldown = [0.0; 6];
+            k.body_calls = Some(1);
+            k.collides.clear();
+            k.process(s, [0; 4], &t, &c, &mut Log::default());
+            k.collides.iter().filter(|x| x.team).count()
+        };
+        s.body_impact[2] = 0.7;
+        assert_eq!(call(&mut k, &s), 1);
+        assert_eq!(call(&mut k, &s), 0, "0.6 s left");
+        assert_eq!(call(&mut k, &s), 0, "0.2 s left");
+        assert_eq!(call(&mut k, &s), 1, "ran out on the third call");
+        assert_eq!(call(&mut k, &AudioState { collide_skater_local: false, ..s }), 0, "another skater");
+    }
+
     /// The deck poster (`sub_824BD000`) on the console cadence (2026-10-03): the same messages on the
     /// same steps at 30 / 60 / 144 / 240 / 365 fps, and the 6-frame cooldown lasts 12 steps (0.2 s).
     #[test]
@@ -1580,5 +1862,205 @@ mod tests {
         assert_eq!(h.started, [95], "foot 1 above 0.35 m/s → sk8_foley 95; foot 0 below");
         k.process(&s, [0; 4], &t, &c, &mut h);
         assert_eq!(h.started.len(), 1, "one scuff per foot at a time");
+    }
+
+    /// The skater and board points of the user's cliff fall (session 2026-10-07 15:12, the
+    /// landing at 21:30:01.415): the board stayed up the slope, 44 m from the body.
+    const FALL_COM: [f32; 3] = [323.5, 88.3, -644.6];
+    const FALL_BOARD: [f32; 3] = [342.5, 107.0, -679.5];
+
+    fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+        ((a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) + (a[2] - b[2]).powi(2)).sqrt()
+    }
+
+    /// Retail posting points per poster (824B0DA8 bridge): body / grind start at the skater, deck / landing at the board: docs/hails-additions/11-audio.md#audio-posting-points
+    #[test]
+    fn the_body_poster_posts_at_the_skater_not_the_board() {
+        assert!(distance(FALL_COM, FALL_BOARD) > 40.0);
+        let at = |s: AudioState| AudioState { com_position: FALL_COM, board_position: FALL_BOARD, ..s };
+        let c = ContactsTuning::default();
+        // Body (+48): every message of the hit (pair, second, cloth, pad).
+        let t = body_tuning();
+        let mut k = Contacts { body_on: true, ..Default::default() };
+        let mut s = at(AudioState { bail: true, ..AudioState::default() });
+        s.body_impact[2] = 0.7;
+        s.body_tag[2] = 3;
+        k.process(&s, [0; 4], &t, &c, &mut Log::default());
+        assert_eq!(k.outbox.len(), 4);
+        assert!(k.outbox.iter().all(|m| m.position == FALL_COM), "body at +48 (the skater)");
+        assert_eq!(k.body_hits.len(), 1);
+        assert_eq!((k.body_hits[0].region, k.body_hits[0].message), (2, k.outbox[0]));
+        // Grind start (+48).
+        let t = collision_tuning();
+        let mut k = Contacts::default();
+        k.process(&at(rolling()), [0; 4], &t, &c, &mut Log::default());
+        k.process(&at(AudioState { grinding: true, grind_family: 0, grind_material: 9, grind_impact: 0.6, ..rolling() }), [0; 4], &t, &c, &mut Log::default());
+        assert_eq!(k.outbox.len(), 1);
+        assert_eq!(k.outbox[0].position, FALL_COM, "grind start at +48 (the skater)");
+        // Landing pair (+144).
+        let mut k = Contacts::default();
+        let metal = at(AudioState { wheel_material: [9; 4], ..rolling() });
+        let air = AudioState { airborne: true, wheel_count: 0, wheel_contact: [false; 4], ..metal };
+        for i in 0..30 {
+            k.process(&AudioState { air_time: i as f32 / 60.0, ..air }, [0; 4], &t, &c, &mut Log::default());
+        }
+        k.process(&metal, [1; 4], &t, &c, &mut Log::default());
+        assert_eq!(k.outbox.len(), 1);
+        assert_eq!(k.outbox[0].position, FALL_BOARD, "landing pair at +144 (the board)");
+        // Deck impact (+144).
+        let mut k = Contacts::default();
+        k.process(&at(AudioState { deck_impact: 0.7, deck_material: 9, ..AudioState::default() }), [0; 4], &t, &c, &mut Log::default());
+        assert!(!k.outbox.is_empty());
+        assert!(k.outbox.iter().all(|m| m.position == FALL_BOARD), "deck at +144 (the board)");
+        assert!(k.body_hits.is_empty(), "the deck poster is no body hit");
+    }
+
+    /// A long ragdoll cliff fall replayed: the ground hits post at the body, where the camera is, not at the far board.
+    #[test]
+    fn a_cliff_fall_lands_its_body_hits_at_the_body() {
+        use crate::player::collision::Material;
+        let mut t = body_tuning();
+        let windows = t.collision.materials[2].windows;
+        t.collision.materials[97] = Material { kind: 0, gain: 32767, windows, bands: [0.65, 1.25, 0.2, 0.005], scale: 1.0, ..Material::default() };
+        t.collision.materials[99] = Material { kind: 0, gain: 32767, windows, bands: [0.65, 1.25, 0.2, 0.005], scale: 1.0, ..Material::default() };
+        t.collision.materials[108] = Material { kind: 0, gain: 18000, windows, bands: [1.0, 2.0, 0.5, 0.005], ..Material::default() };
+        let c = ContactsTuning::default();
+        let mut k = Contacts { body_on: true, body_speed_on: true, ..Default::default() };
+        let mut h = Log::default();
+        let frames = 300;
+        for f in 0..frames {
+            let x = f as f32 / frames as f32;
+            let com = [FALL_COM[0], 133.8 - (133.8 - FALL_COM[1]) * x, FALL_COM[2]];
+            let s = AudioState { bail: true, airborne: true, com_position: com, board_position: FALL_BOARD, com_speed_216: 5.0 + 17.8 * x, ..AudioState::default() };
+            k.process(&s, [0; 4], &t, &c, &mut h);
+            assert!(k.outbox.is_empty() && k.body_hits.is_empty(), "nothing in the air (frame {f})");
+        }
+        let mut s = AudioState { bail: true, com_position: FALL_COM, board_position: FALL_BOARD, com_speed_216: 22.8, ..AudioState::default() };
+        for (r, v) in [(0, 0.321), (4, 0.606), (5, 0.501)] {
+            s.body_impact[r] = v;
+            s.body_tag[r] = 3;
+        }
+        k.process(&s, [0; 4], &t, &c, &mut h);
+        let regions: Vec<usize> = k.body_hits.iter().map(|b| b.region).collect();
+        assert_eq!(regions, [0, 4, 5]);
+        assert_eq!(k.body_hits[1].message.material, [99, 2], "a leg against concrete");
+        assert_eq!(k.body_hits[1].message.tier[1], 2, "0.606 x 5 = 3.03: concrete's tier 2");
+        assert!(!k.outbox.is_empty());
+        let camera = [FALL_COM[0] + 3.0, FALL_COM[1] + 1.5, FALL_COM[2] + 2.0];
+        for m in &k.outbox {
+            assert_eq!(m.position, FALL_COM);
+            assert!(distance(m.position, camera) < 5.0, "audible at the camera");
+            assert!(distance(m.position, FALL_BOARD) > 40.0, "not at the board");
+        }
+    }
+
+    /// The manual-landing scenarios: a front-pair landing with the manual (`+340`) on.
+    fn manual_air() -> AudioState {
+        AudioState { airborne: true, wheel_count: 0, wheel_contact: [false; 4], balance: true, ..rolling() }
+    }
+
+    fn manual_front(balance: bool) -> AudioState {
+        AudioState { wheel_count: 2, wheel_contact: [true, true, false, false], balance, ..rolling() }
+    }
+
+    fn landed_in_manual(k: &mut Contacts, h: &mut Log, t: &PlayerTuning, c: &ContactsTuning) {
+        for _ in 0..10 {
+            k.process(&manual_air(), [0; 4], t, c, h);
+        }
+        k.process(&manual_front(true), [0; 4], t, c, h);
+    }
+
+    /// Retail `sub_824B90D8` calls the landing `sub_824BA630` on every air -> ground frame that is
+    /// not a grind, with no balance gate, and `sub_824B86E0` plays the pair-from-nothing touchdown
+    /// (kind 1) with no manual gate: landing into a manual sounds the impact and the touchdown.
+    #[test]
+    fn a_landing_into_a_manual_plays_the_impact_and_the_pair_touchdown() {
+        let (t, c) = (PlayerTuning::default(), ContactsTuning::default());
+        let (mut k, mut h) = (Contacts::default(), Log::default());
+        landed_in_manual(&mut k, &mut h, &t, &c);
+        assert_eq!(h.started, [1054, 1095], "kind 1 variant 0, then the landing impact");
+        let note = k.landing_note.expect("one note on the landing frame");
+        assert!(note.landing && note.balance && note.in_manual);
+        assert_eq!(note.impact, Some(PostOutcome::Started));
+        assert_eq!(note.touch, Some((1, 0, PostOutcome::Started)));
+        assert_eq!(note.manual, None);
+        assert_eq!((note.wheels, note.contact, note.landed), (2, 0b0011, 0b0011));
+        assert_eq!(note.pair, Some(PairOutcome::NotLandingMaterial), "the default table has no landing materials");
+        k.process(&manual_front(true), [0; 4], &t, &c, &mut h);
+        assert_eq!(k.landing_note, None, "no line while the manual rolls on");
+    }
+
+    /// `sub_824B86E0`: the last pair (kind 2) is skipped while the manual landing returned true or
+    /// `+121` is set; `sub_824BB330` plays kind 4 when `+340` clears with 3 or 4 wheels down and
+    /// marks all wheels counted, so no kind 0 / 2 touchdown follows.
+    #[test]
+    fn the_back_pair_in_a_manual_is_silent_until_the_manual_landing() {
+        let (t, c) = (PlayerTuning::default(), ContactsTuning::default());
+        let (mut k, mut h) = (Contacts::default(), Log::default());
+        landed_in_manual(&mut k, &mut h, &t, &c);
+        for _ in 0..10 {
+            k.process(&manual_front(true), [0; 4], &t, &c, &mut h);
+        }
+        h.started.clear();
+        let four = AudioState { balance: true, ..rolling() };
+        k.process(&four, [0; 4], &t, &c, &mut h);
+        assert!(h.started.is_empty(), "the back pair lands inside the manual: no kind 2");
+        assert_eq!(k.landing_note.and_then(|n| n.touch), Some((2, 0, PostOutcome::SkippedManual)));
+        k.process(&rolling(), [0; 4], &t, &c, &mut h);
+        assert_eq!(h.started, [1050], "balance off with 4 wheels: the manual landing, kind 4 variant 0");
+        let note = k.landing_note.unwrap();
+        assert_eq!(note.manual, Some(PostOutcome::Started));
+        assert!(!note.landing && !note.in_manual);
+        for _ in 0..5 {
+            k.process(&rolling(), [0; 4], &t, &c, &mut h);
+        }
+        assert_eq!(h.started, [1050], "once");
+    }
+
+    /// `sub_824BB330`: with `+340` clear and `+121` set, 1 or 2 wheels keep the latch (returns 0);
+    /// the back pair coming down later plays the manual landing, not the kind 2 touchdown.
+    #[test]
+    fn a_manual_let_go_on_two_wheels_lands_with_the_manual_sound() {
+        let (t, c) = (PlayerTuning::default(), ContactsTuning::default());
+        let (mut k, mut h) = (Contacts::default(), Log::default());
+        landed_in_manual(&mut k, &mut h, &t, &c);
+        for _ in 0..8 {
+            k.process(&manual_front(false), [0; 4], &t, &c, &mut h);
+        }
+        h.started.clear();
+        k.process(&rolling(), [0; 4], &t, &c, &mut h);
+        assert_eq!(h.started, [1050]);
+    }
+
+    /// `sub_824BB330`: wheel count 0 clears `+121`, so a manual that rolls off into the air lands
+    /// like any other landing (kind 0 on four wheels plus the impact, no manual landing).
+    #[test]
+    fn leaving_the_ground_ends_the_manual_latch() {
+        let (t, c) = (PlayerTuning::default(), ContactsTuning::default());
+        let (mut k, mut h) = (Contacts::default(), Log::default());
+        landed_in_manual(&mut k, &mut h, &t, &c);
+        let air = AudioState { airborne: true, wheel_count: 0, wheel_contact: [false; 4], ..rolling() };
+        for _ in 0..10 {
+            k.process(&air, [0; 4], &t, &c, &mut h);
+        }
+        h.started.clear();
+        k.process(&rolling(), [0; 4], &t, &c, &mut h);
+        assert_eq!(h.started, [1051, 1095]);
+        assert_eq!(k.landing_note.unwrap().manual, None);
+    }
+
+    /// The impact is the local player's only (`sub_824BA630`, owner `+72`); the note says so.
+    #[test]
+    fn a_remote_landing_notes_the_impact_as_not_local() {
+        let (t, c) = (PlayerTuning::default(), ContactsTuning::default());
+        let (mut k, mut h) = (Contacts::default(), Log::default());
+        let air = AudioState { airborne: true, wheel_count: 0, wheel_contact: [false; 4], local: false, ..rolling() };
+        for _ in 0..10 {
+            k.process(&air, [0; 4], &t, &c, &mut h);
+        }
+        k.process(&AudioState { local: false, ..rolling() }, [0; 4], &t, &c, &mut h);
+        let note = k.landing_note.unwrap();
+        assert_eq!(note.impact, Some(PostOutcome::NotLocal));
+        assert!(note.fields().starts_with("landing=1 impact=notlocal pair=notlandingmaterial touch=k0v0:started manual=-"), "{}", note.fields());
     }
 }

@@ -34,6 +34,10 @@ function sdk.ui.canvas(key, options)
     submit{kind="ui_canvas",key=key,options=copy}
 end
 function sdk.ui.remove(key) submit{kind="ui_remove",key=key} end
+-- One line in the HUD's central message (where the chase shows "ZAP!"): a HUD language id or plain text.
+function sdk.ui.central_message(text, seconds) submit{kind="ui_central_message",text=text,seconds=seconds} end
+-- Show (true) or hide (false) the alerts over peds that warn or chase the player; released when the mod stops.
+function sdk.ui.chase_alerts(enabled) submit{kind="ui_chase_alerts",enabled=enabled} end
 
 sdk.physics = {}
 function sdk.physics.spawn(key, body) submit{kind="physics_spawn",key=key,body=body} end
@@ -180,6 +184,10 @@ function sdk.graphics.mesh(key, opts)
 end
 function sdk.graphics.remove(key) submit{kind="graphics_remove",key=key} end
 function sdk.graphics.set_visible(key, visible) submit{kind="graphics_visibility",key=key,visible=visible and true or false} end
+-- Water look layer (ripple_scale, reflection_blur, reflection_tint, third_wave, body_calming, wave_rate,
+-- scroll_rate, seamless_clock, flowing_water, flowing_ripple_scale, shallow_splash, ocean_swell, ocean_swell_length,
+-- ocean_swell_speed, fountain_water, fountain_tile, fountain_waves, cascade_rate, cascade_foam, enabled); nil restores the player's look. One mod at a time; released on disable.
+function sdk.graphics.water_look(patch) submit{kind="water_look",patch=patch} end
 -- Extension 3: procedural mesh buffers and scene lights. No gameplay semantics.
 function sdk.graphics.mesh_buffer(key, opts)
     opts = opts or {}
@@ -324,7 +332,8 @@ function sdk.audio.mixmap(slot, object, instance, output)
 end
 -- Audio events (capability audio_events): subscribe{tags={'pop','land',...}} (empty = every row),
 -- subscribe(nil) stops. Tags: pop, land, grind_start, grind_end, footstep, horn, alarm, tazer,
--- body_fall, emitter, zone_change, speech. Observe only, one frame late; at most 256 rows a frame.
+-- body_fall, emitter, zone_change, speech, body_impact (a skater's body region hit: region, impact, tier,
+-- material, position). Observe only, one frame late; at most 256 rows a frame.
 function sdk.audio.subscribe(opts)
     if opts == nil then submit{kind="audio_subscribe"} else submit{kind="audio_subscribe",tags=opts.tags or {}} end
 end
@@ -369,6 +378,84 @@ function sdk.audio.tuned() return (audio_mine().tuning) or {} end
 function sdk.audio.frontend(name) submit{kind="audio_frontend",name=name} end
 -- The teleport effect (screen static + the skater's teleport crackle) at amount 0..1; send it every frame to hold it.
 function sdk.audio.teleport_effect(amount) submit{kind="audio_teleport_effect",amount=amount} end
+
+-- World tuning (capability world_tuning): patch the living world ("living_world": npc_draw_distance, npc_grind_disttocog,
+-- skater_fade, skater_line_chain, skater_path, ped_fade, skater_clips, skater_blend_seconds, skater_stance, skater_stance_events, ped_obstacles, npc_skater_props, ped_vehicle_contact, npc_tricks, skater_trick_profiles, npc_simulated, skaters, pedestrians, vehicles, ambient_skaters, free_play), dynamic props ("props": default / by_template prop tuning, collision_box)
+-- or prop carrying ("carry": grab_bit, placement_bit, grab_range, push_speed, pull_speed, side_speed,
+-- turn_rate, grip_reach, linear_clamp, yaw_clamp, relatch, slew_per_tick, yaw_rate_feedback, linear_controller, yaw_controller,
+-- lever_rotation, lever_yaw, mass_speed, inertia_yaw_gain, let_go_distance, drop_board, follow_step, hold_angle_limit, hold_max_angle_to_horizontal, hold_box_extents,
+-- record_272_speed_scale, grab_end_exclusion, hand_ik_enter, hand_ik_curve, hand_ik_rate, hand_ik_reach, root_yaw_gain, commanded_material, upright_cos, apply_at_com,
+-- yaw_replaces_torque, ignore_vertical, wake_on_command, by_template[<MOBJ template>] = {material_held, material_free,
+-- material_free_upright, upright_pair, restitution, record_272, linear_drag, angular_drag, mass,
+-- maximum_linear_velocity, maximum_angular_velocity, inertia_scale, inertia_offset})
+-- or the traffic cars ("vehicles": entities = {new = existing} adds a car type copied from an existing one,
+-- spawn_tables = {category = {entity, ...}} replaces what a census category spawns ({} = none), models = {entity =
+-- livingworld_models record}, glbs = {model record = GLB path}, paint_gain, retail 1; names as in vehicles.json,
+-- sdk.engine.inspect(key, "world_tuning:vehicles") lists the live tables; cars already on the road keep theirs)
+-- or the dynamic shadow floor on the baked world ("shadows": world_floor =
+-- {r, g, b}, each 0..1, retail {0.05, 0.09, 0.13}) or the district backdrop ("backdrop": visible,
+-- retail true: Industrial's sea, far sea planes, tree walls; proxy_terrain, retail true: the far-proxy hills
+-- under Industrial's south tree wall) or the checkpoint respawn ("respawn": air_timeout_ticks, retail 300 =
+-- 5 s of 1/60 s ticks in the air before the skater is sent to the last checkpoint, 1..216000) or the
+-- auto-exposure meter ("exposure": meter_weights, retail {0.3, 0.4, 0.3}; meter_scale, retail 2.515) or the skater
+-- fade-in after every placement ("ghost": enabled, default false; fade_in_seconds, retail 1.0, 0..60; hold_alpha,
+-- retail 0.68, 0..1) or the world decals ("decals": opacity, retail 1.0, 0..1: strength of every decal over
+-- its surface, applied at once) or the park videoscreens' live feed ("video_screens": enabled, default true;
+-- width / height in pixels, 16..2048; rate_hz, 1..240; max_distance in m, 1..10000) or the props' impact sounds
+-- ("prop_sounds": enabled, retail true; types = { [prop type key, e.g. "dumpster"] = { material / secondary 0..143,
+-- use_contact_material, impact_min / impact_max m/s, cooldown 0..600 evaluations, speed_attenuation /
+-- spin_attenuation above 0, patch 0..1000 (the loop banks' sound set), loop_max_kmh above 0 } } over the type's
+-- retail record) while this mod
+-- runs; nil restores
+-- this mod's patch of the domain, everything is restored when the mod stops. First writer wins.
+sdk.world = { version = 1 }
+function sdk.world.set_tuning(domain, patch) submit{kind="world_set_tuning",domain=domain,patch=patch} end
+-- Read a domain as the game uses it now: the value arrives as sdk.commands.result(key).value.
+function sdk.world.tuning(key, domain) sdk.engine.inspect(key, "world_tuning:" .. domain) end
+-- Reset one dynamic prop (stable map id) to its authored pose, at rest; its saved layout entry is
+-- dropped (retail cMsgResetDMO; refused for the held prop). doc 27, Object Dropper and reset.
+function sdk.world.reset_prop(id) submit{kind="world_reset_prop",id=id} end
+-- Upright one prop (retail phone Upright, cMsgUprightDMO): 2 s self-righting window.
+function sdk.world.upright_prop(id) submit{kind="world_upright_prop",id=id} end
+-- Convenience (not a retail action): reset_prop for every moved or placed prop.
+function sdk.world.reset_moved_props() submit{kind="world_reset_moved_props"} end
+-- Create a dynamic prop mid-game: a copy of map prop `from` (stable map id: model, collision,
+-- physics) at opts.position {x, y, z}, turned opts.yaw radians, thrown at opts.velocity {x, y, z}
+-- m/s with opts.spin {x, y, z} rad/s (arrays). The same key again replaces it; the mod's props go on disable.
+-- doc 27, Props created mid-game.
+function sdk.world.spawn_prop(key, from, opts)
+  opts = opts or {}
+  submit{kind="world_spawn_prop",key=key,from=from,position=opts.position,yaw=opts.yaw,velocity=opts.velocity,spin=opts.spin}
+end
+function sdk.world.remove_prop(key) submit{kind="world_remove_prop",key=key} end
+
+-- Instant replay (doc 37). Every drawn actor is recorded, mod props and anything a mod tags included.
+-- Read the state from snapshot.replay_state {active, cursor, start, end, frames, bytes, max_frames,
+-- byte_budget, markers = {{time, label, owner}}}.
+sdk.replay = { version = 1 }
+-- Open the replay at the newest frame (refused in multiplayer and when nothing is recorded yet).
+function sdk.replay.open() submit{kind="replay_open"} end
+-- A marker at the newest recorded frame (retail keeps up to 50, provider id 10); the mod's markers go on disable.
+function sdk.replay.marker(label) submit{kind="replay_marker",label=label} end
+-- Override the recording limits (retail 5400 frames; byte budget ours): opts.max_frames, opts.byte_budget, and
+-- opts.share_max_seconds (the longest edit that can be shared or saved, retail 60 s).
+-- nil restores the defaults; the mod's override goes on disable. Last writer wins.
+function sdk.replay.set_limits(opts)
+  opts = opts or {}
+  submit{kind="replay_set_limits",max_frames=opts.max_frames,byte_budget=opts.byte_budget,share_max_seconds=opts.share_max_seconds}
+end
+-- The replay cameras' world collision and leash (retail: collide on, radius 0.1 m, leash 40 m): opts.collide
+-- (false = cameras pass through walls), opts.radius, opts.leash; opts.follow_eye = 'camera' (retail: a Follow key's
+-- eye rides the recorded gameplay camera, upright), 'camera_full' (with its pitch and roll) or 'skater';
+-- opts.fill_section = false keeps the recorded camera before the first key and makes every camera pick a plain insert
+-- (retail true: a camera picked on a clip with no keys covers the whole clip, and another camera picked inside a keyed
+-- section asks "Change Camera" and replaces that section); opts.playback_collide = true also keeps keyed cameras out of
+-- the world during editor playback (retail false: only the instant view does). nil restores retail's; the
+-- override goes on disable.
+function sdk.replay.set_camera(opts)
+  opts = opts or {}
+  submit{kind="replay_set_camera",collide=opts.collide,radius=opts.radius,leash=opts.leash,follow_eye=opts.follow_eye,fill_section=opts.fill_section,playback_collide=opts.playback_collide}
+end
 
 -- World audio extension 1 (backward-compatible with API 2): publish traffic vehicles, peds and
 -- skaters to the game's retail world audio (the same path engine systems use). Keys are scoped
@@ -481,6 +568,12 @@ function sdk.volumes.read(key)
     return (owners[sdk.mod_id] or {})[key]
 end
 
+-- HUD minimap icons (fe_map_icons record names, default "race_gate" as retail's script icons; doc 31 "HUD minimap").
+sdk.minimap = { version = 1 }
+function sdk.minimap.icon(key, options) submit{kind="minimap_icon",key=key,options=options} end
+function sdk.minimap.remove(key) submit{kind="minimap_remove",key=key} end
+function sdk.minimap.show(shown) submit{kind="minimap_show",shown=shown and true or false} end
+
 -- Named trigger volumes (retail map volumes, custom-map volumes, mod volumes).
 -- Events arrive in on_event: {name="trigger_entered"|"trigger_exited", body=..., volume=...}.
 sdk.triggers = { version = 1 }
@@ -496,11 +589,80 @@ function sdk.triggers.inside(body)
 end
 function sdk.triggers.box(key, options) submit{kind="trigger_box",key=key,options=options} end
 function sdk.triggers.remove(key) submit{kind="trigger_remove",key=key} end
+-- A teleporter (doc 38 "Teleporters"): {volume=<volume id or own box key>, exits={{position={x,y,z}, heading=<rad>,
+-- map=<map name>?, world=<world row>?}, ...}, title=<prompt text>?, indicator=<ribbon_indicator key>?,
+-- indicator_position={x,y,z}?, indicator_style=<visualindicators row>?, indicator_colour=<ribbon_spline_colour row>?}; nil options remove it. Events: {name="teleporter_used",
+-- teleporter=<id>, exit=<1-based index>, body="player"}.
 function sdk.triggers.set_enabled(id, enabled) submit{kind="trigger_enable",id=id,enabled=enabled ~= false} end
 local function non_empty(t) if type(t) == "table" and next(t) ~= nil then return t end return nil end
+function sdk.triggers.teleporter(key, options) submit{kind="trigger_teleporter",key=key,options=non_empty(options)} end
 function sdk.triggers.track(key, options) submit{kind="trigger_track",key=key,options=non_empty(options)} end
 function sdk.triggers.untrack(key) submit{kind="trigger_untrack",key=key} end
 function sdk.triggers.configure(options) submit{kind="trigger_configure",options=non_empty(options)} end
+
+-- Music (docs/hails-additions/11-audio.md "Music banks"): the music queue, the player's own banks through playlists
+-- (made with `skate3rust --pack-music-folder` and `--music-playlist`), the disc soundtrack, volume, the playing
+-- PathFinder graph's variables and events, the custom-track caption. on_event gets
+-- {name="music_track_started", title, artist, custom}. A mod's queue, volume and caption end with the mod.
+-- Do not share banks that hold copyrighted music: share playlists for people's own banks.
+sdk.music = { version = 1 }
+local function music_snapshot() return as_table(sdk.snapshot.music) or {} end
+function sdk.music.state() return music_snapshot() end
+function sdk.music.playing() return as_table(music_snapshot().playing) end
+-- opts: {soundtrack=true} adds every disc soundtrack track, {shuffle=true|false} overrides the playlist's shuffle.
+function sdk.music.play_playlist(path, opts) opts = opts or {}; submit{kind="music_playlist",path=path,queue=false,soundtrack=opts.soundtrack == true,shuffle=opts.shuffle} end
+function sdk.music.queue_playlist(path, opts) opts = opts or {}; submit{kind="music_playlist",path=path,queue=true,soundtrack=opts.soundtrack == true,shuffle=opts.shuffle} end
+function sdk.music.play_soundtrack(track) submit{kind="music_soundtrack",track=track} end
+function sdk.music.stop() submit{kind="music_stop"} end
+function sdk.music.skip() submit{kind="music_skip"} end
+function sdk.music.set_volume(level) submit{kind="music_volume",level=level} end
+function sdk.music.set_var(name, value) submit{kind="music_var",name=name,value=value} end
+function sdk.music.post(event) submit{kind="music_post",event=event} end
+function sdk.music.caption(options) submit{kind="music_caption",options=non_empty(options)} end
+
+-- Challenges (own the spot): the current map's challenges with their saved records, the run going, start / abort,
+-- hiding a challenge's sign-up, and per-mod value overrides (undone when the mod stops). Events arrive in on_event:
+-- {name="challenge_discovered"|"challenge_started"|"challenge_ended"|"challenge_personal_best", challenge=id, ...}.
+-- docs/hails-additions/42-challenges.md "Mod entry".
+sdk.challenges = { version = 1 }
+local function challenge_snapshot() return as_table(sdk.snapshot.challenges) or {} end
+-- false while the player has the Challenges opt-in off (nothing runs then; start fails).
+function sdk.challenges.on() return challenge_snapshot().on == true end
+function sdk.challenges.list() return as_table(challenge_snapshot().list) or {} end
+function sdk.challenges.get(id)
+    for _, c in ipairs(sdk.challenges.list()) do
+        if c.id == id then return c end
+    end
+end
+function sdk.challenges.run() return as_table(challenge_snapshot().run) end
+function sdk.challenges.start(id) submit{kind="challenge_start",id=id} end
+function sdk.challenges.abort() submit{kind="challenge_abort"} end
+function sdk.challenges.set_enabled(id, enabled) submit{kind="challenge_enable",id=id,enabled=enabled ~= false} end
+function sdk.challenges.configure(id, options) submit{kind="challenge_configure",id=id,options=non_empty(options)} end
+
+-- Career (with the Challenges opt-in): board sales, money, milestones, armed actions, flags, team and achievements.
+-- Changes stay with the career when the mod stops; flags a mod sets go under "<mod id>:<name>" unless the career
+-- already has that flag. Events in on_event: {name="career_paid"|"career_action_fired"|"career_milestone"|
+-- "career_teammate"|"career_tier"|"career_achievement"|"career_team_name"|"career_teammate_name"|"career_teammate_look", ...}.
+-- docs/hails-additions/43-career.md.
+sdk.career = { version = 1 }
+local function career_snapshot() return as_table(sdk.snapshot.career) or {} end
+function sdk.career.on() return career_snapshot().on == true end
+function sdk.career.get() return career_snapshot() end
+function sdk.career.add_sales(amount, reason) submit{kind="career_add_sales",amount=amount,reason=reason} end
+function sdk.career.add_money(amount) submit{kind="career_add_money",amount=amount} end
+function sdk.career.arm_action(id) submit{kind="career_arm_action",id=id} end
+function sdk.career.set_flag(name, value) submit{kind="career_set_flag",name=name,value=value ~= false} end
+function sdk.career.grant_achievement(name) submit{kind="career_grant_achievement",name=name} end
+function sdk.career.grant_unlock(category, name) submit{kind="career_grant_unlock",category=category,name=name} end
+function sdk.career.grant_reward(id, big) submit{kind="career_grant_reward",id=id,big=big == true} end
+function sdk.career.skip_start() submit{kind="career_skip_start"} end
+function sdk.career.activate_challenge(id) submit{kind="career_activate_challenge",id=id} end
+function sdk.career.activate_group(id) submit{kind="career_activate_group",id=id} end
+function sdk.career.set_team_name(name) submit{kind="career_team_name",name=name} end
+function sdk.career.set_teammate_name(n, name) submit{kind="career_teammate_name",n=n,name=name} end
+function sdk.career.set_teammate_preset(n, id) submit{kind="career_teammate_preset",n=n,id=id} end
+function sdk.career.set_teammate_look(n, profile) submit{kind="career_teammate_look",n=n,profile=profile} end
 
 sdk.input = {}
 -- Mapped gameplay action IDs by stable key (retail input.cfg GP_* order, see
@@ -643,6 +805,14 @@ function sdk.bodies.angular_impulse(ref,value)
     if ref.kind=="mod" then sdk.physics.torque_impulse(ref.key,value)
     else submit{kind="native_impulse",body={kind=ref.kind,index=ref.index},impulse=value,angular=true} end
 end
+-- Controller rumble (capability input_rumble): retail's rumble channels. low / high = motor levels 0..1, rate =
+-- decay per second (0 = holds until stopped), channel = 0..1023 (this mod's own), pad = slot 0..3 (default: the
+-- active pad). Nothing while Game Settings > Vibration is off. Stops when the mod stops.
+function sdk.input.rumble(o)
+    o=o or {}
+    submit{kind="input_rumble",pad=o.pad,channel=o.channel or 0,low=o.low or 0,high=o.high or 0,rate=o.rate or 0}
+end
+function sdk.input.stop_rumble(pad) submit{kind="input_stop_rumble",pad=pad} end
 function sdk.input.override_action(id,value)
     if type(id)=='string' then id=action_id(id) end
     submit{kind="input_override",action=id,value=value}
@@ -657,7 +827,10 @@ function sdk.rig.reset_part(index) sdk.rig.configure_part(index,nil) end
 
 -- Retail menus (capability retail_menus = 1): the pause menu and Game Settings structure.
 -- Entries: kind 'category' | 'item' | 'setting', keyed by retail internal names; new ones
--- are named '<mod id>.<name>'. Events arrive in on_event (name menu_select / menu_highlight /
+-- are named '<mod id>.<name>'. Challenge Map nodes use their vault class as the kind and their vault key as
+-- the id: 'map_listing' (tabs, folders), 'map_filter', 'map_category', 'fe_locations' (teleport locations,
+-- e.g. sdk.menus.handle('fe_locations', 'dist_downtown_aletown', {...})), 'world', 'challenges',
+-- 'map_commands', 'code_unlocks'; a node without a handler is greyed. Events arrive in on_event (name menu_select / menu_highlight /
 -- menu_value). Everything is removed when the mod stops.
 sdk.menus = { version = 1 }
 local function menu_info() return as_table(sdk.snapshot.menus) or {} end
@@ -676,6 +849,39 @@ function sdk.menus.info() return menu_info() end
 -- with a JSON file in the mod's folder (the format setup exports to assets/private/menu-movies).
 -- Every menu importing it is relinked; the newest mod wins; removed when the mod stops.
 function sdk.menus.movie(name, path) submit{kind="menu_movie",name=name,path=path} end
+-- The world behind an FE screen, by its retail screen id (sdk.menus.info().screens lists them;
+-- the pause menu is 'b4b7976b40b3e837'): options
+-- {blur=true|false, strength=8.0, step=0.8, tint={90,85,81}, tint_step=15}; unset fields keep
+-- retail's values; nil options drop this mod's override. The newest mod wins; removed on stop.
+function sdk.menus.backdrop(screen, options) submit{kind="menu_backdrop",screen=screen,options=options} end
+-- Add or change a Trick Guide entry: entry 'category' | 'subcategory' | 'trick', key = a retail record's 16 hex
+-- digits or the mod's own id; options {label, description, slots={{gesture, button, connector}, ...} (up to 4),
+-- animation, parent, order, has_tricks, position, hidden}; unset fields keep the entry's value; nil options drop
+-- this mod's change. Mods apply in load order; removed when the mod stops.
+function sdk.menus.trick_guide(entry, key, options) submit{kind="menu_trick_guide",entry=entry,key=key,options=options} end
+-- Raise a retail popup over the menus (the Sk8Popup movie, or 'small'): key = the mod's id for it; options
+-- {description, title (small only), options={'ID_COMMON_YES','ID_COMMON_NO'} (up to 8), kind='standard'|'small',
+-- priority (-1000..1000, highest shows), cancelable (B answers 255)}. The choice arrives as on_event
+-- {name='menu_popup', key=key, choice=index}; nil options take it down; removed when the mod stops (no event).
+function sdk.menus.popup(key, options) submit{kind="menu_popup",key=key,options=options} end
+-- Fill the Free Play Skate Profile screen (retail FE 61): page 'career' | 'challenges' (an overall bar; options
+-- {title, icon, current, total}, key = the mod's id for the change) or 'stats' | 'personal_bests' (a table row by
+-- key; options {label, value (number or text), order, hidden}). Unset fields keep the current value; nil options
+-- drop this mod's change. Mods apply in load order; removed when the mod stops.
+function sdk.menus.profile(page, key, options) submit{kind="menu_profile",page=page,key=key,options=options} end
+function sdk.menus.credits(key, lines) submit{kind="menu_credits",key=key,lines=lines} end
+-- The loading screen (FE 52) between maps: this mod's lines and holds (doc 31 "Loading screen (FE 52)").
+sdk.loading = { version = 2 }
+function sdk.loading.hint(key, line)
+  submit{kind="loading_line",key=key,line=line and {panel="hint",title=line.title,text=line.text} or nil}
+end
+function sdk.loading.coach_frank(key, text) submit{kind="loading_line",key=key,line=text and {panel="coach_frank",text=text} or nil} end
+function sdk.loading.stat(key, row) submit{kind="loading_line",key=key,line=row and {panel="stat",label=row.label,value=row.value} or nil} end
+function sdk.loading.remove(key) submit{kind="loading_line",key=key} end
+function sdk.loading.retail(shown) submit{kind="loading_retail",shown=shown and true or false} end
+function sdk.loading.hold(key) submit{kind="loading_hold",key=key,held=true} end
+function sdk.loading.release(key) submit{kind="loading_hold",key=key,held=false} end
+function sdk.loading.timing(t) submit{kind="loading_timing",show=t and t.show,outro=t and t.outro} end
 -- Replace one bitmap of a menu movie by its stable id: the movie's import name plus the bitmap
 -- character id (sdk.menus.info().movies.bitmaps lists them), with a PNG in the mod's folder. The
 -- image covers the same fill area as the retail bitmap; newest mod wins; removed when the mod stops.

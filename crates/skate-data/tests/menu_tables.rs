@@ -43,6 +43,20 @@ fn check_structure(t: &MenuTables) {
     assert_eq!(t.settings_rows[11].widget, "selector");
     assert_eq!(t.settings_rows.last().unwrap().id, "ID_GAMESETTINGS_SKATEFEED_SETTINGS");
     assert_eq!(t.settings_screens.len(), 13);
+    // The Speech handler's speaker names (b874): 104, in eSk8Characters order.
+    assert_eq!(t.speakers.len(), 104);
+    // The soundtrack's 46 tracks in IPOD enum order (research b1016: 1 = 3 Inches Of Blood, 2 = Agent Orange).
+    assert_eq!(t.ipod_tracks.len(), 46, "{:?}", t.ipod_tracks.first());
+    assert!(t.ipod_tracks[0].to_uppercase().contains("3INCHESOFBLOOD_BATTLEOFBROTHERHOOD"), "{}", t.ipod_tracks[0]);
+    assert!(t.ipod_tracks[1].to_uppercase().contains("AGENTORANGE_BLOODSTAINS"), "{}", t.ipod_tracks[1]);
+    // Their playlist ids (0x8302E108, the ipod_playlist order) and the 25 DJ world music pieces with theirs.
+    assert_eq!(t.ipod_ids.len(), 46);
+    assert_eq!(&t.ipod_ids[..3], &[0x4CAB08CC, 0x440DA036, 0xD239525F]);
+    assert_eq!((t.dj_pieces.len(), t.dj_ids.len()), (25, 25), "{:?} {:?}", t.dj_pieces, t.dj_ids);
+    assert_eq!(&t.dj_ids[..2], &[0xC147C887, 0xDBCD2847]);
+    assert_eq!((t.speakers[0].as_str(), t.speakers[30].as_str(), t.speakers[31].as_str(), t.speakers[40].as_str()),
+        ("Player", "Reda", "SkateCoach", "CameraMan"));
+    assert_eq!(t.speakers[103], "Teammate4");
     let screen = |i: usize| -> Vec<String> { t.to_menu_data().screens[i].iter().map(|s| s.trim_start_matches("ID_GAMESETTINGS_").to_owned()).collect() };
     assert_eq!(screen(1), ["DIFFICULTY_SETTINGS", "AUDIO_SETTINGS", "VIDEO_SETTINGS", "CONTROL_SETTINGS", "ONLINE_SETTINGS", "SKATEFEED_SETTINGS"]);
     assert_eq!(screen(3), ["SFXVOLUME", "DIALOGVOLUME", "MUSICVOLUME", "SFXPACK"]);
@@ -121,6 +135,60 @@ fn tu3_image_matches_the_documented_tables() {
     assert_eq!(t.mode("Career").unwrap().vtable, "0x82303D54");
     assert_eq!(t.mode("CareerPark").unwrap().vtable, "0x82303D04");
     assert_eq!((t.settings_rows.len(), t.items.len(), t.modes.len()), (36, 49, 9));
+    // Screen templates (doc 31 Milestone 6): 133 records from 0x8302F1A8; 12 Background = FE_root, 69 CrossBar,
+    // 90 Options, 131 TipsLoader.
+    assert_eq!(t.addresses["screen_templates"], "0x8302F1A8");
+    assert_eq!(t.templates.len(), 133);
+    assert_eq!((t.templates[0].name.as_str(), t.templates[0].path.as_str()), ("Ignore", ""));
+    assert_eq!((t.templates[12].name.as_str(), t.templates[12].path.as_str()), ("Background", "main/FE_root.swf"));
+    assert_eq!((t.templates[69].name.as_str(), t.templates[69].path.as_str()), ("CrossBar", "main/core_menu.swf"));
+    assert_eq!((t.templates[90].name.as_str(), t.templates[90].path.as_str()), ("Options", "options/options.swf"));
+    assert_eq!(t.templates[131].name, "TipsLoader");
+    // FE screen info table (doc 31 "Pause blur"): 72 records from 0x83026088; byte +4 = blur, set for these ids
+    // (56 = the pause crossbar).
+    assert_eq!(t.addresses["screen_info"], "0x83026088");
+    // Settings screen titles (doc 31 "Game Settings screen"): 13 at 0x83026E90.
+    assert_eq!(t.addresses["settings_titles"], "0x83026E90");
+    assert_eq!(t.settings_titles.len(), 13);
+    // Crossbar sub-options (doc 31 "Sub-options"): labels at 0x83027958, helpers right after.
+    assert_eq!(t.addresses["sub_options"], "0x83027958");
+    assert_eq!(t.sub_options.len(), 7);
+    assert_eq!(t.sub_options[3].labels[..4], ["ID_CROSSBAR_SKATEREEL_MY_REPLAYS", "ID_CROSSBAR_SKATEREEL_MY_PHOTOS",
+        "ID_CROSSBAR_SKATEREEL_COMMUNITY_VIDEOS", "ID_CROSSBAR_SKATEREEL_COMMUNITY_PHOTOS"]);
+    assert_eq!(t.sub_options[3].labels[4], "");
+    // Retail pairs the park labels with these helpers as is (label 0 NEW_PARK, helper MY_PARKS).
+    assert_eq!(t.sub_options[0].helpers[0], "ID_CROSSBAR_MY_PARKS_HELPER_TEXT");
+    assert_eq!(t.sub_options[4].labels[..2], ["ID_CROSSBAR_TRICK_ANALYZER_ON", "ID_CROSSBAR_MANUAL_METER_ON"]);
+    // Career stats (doc 31 "Loading screen (FE 52)", research b589): 65 rows at 0x83043AE8, 0..46 enabled.
+    assert_eq!(t.addresses["career_stats"], "0x83043AE8");
+    assert_eq!(t.career_stats.len(), 65);
+    assert_eq!((t.career_stats[7].label.as_str(), t.career_stats[13].label.as_str()), ("ID_RECORD_STATS_21", "ID_RECORD_STATS_03"));
+    assert!(t.career_stats[..47].iter().all(|r| r.enabled) && t.career_stats[47..].iter().all(|r| !r.enabled));
+    assert_eq!((t.settings_titles[0].as_str(), t.settings_titles[2].as_str(), t.settings_titles[12].as_str()),
+        ("ID_GAMESETTINGS_TITLE", "ID_GAMESETTINGS_DIFFICULTY_SETTINGS", "ID_GAMESETTINGS_AUDIO_SETTINGS"));
+    // Trick Guide (doc 31 "Trick Guide"): 8 category keys, 58 gesture names, 28 button names.
+    assert_eq!(t.addresses["trick_guide_categories"], "0x830274B0");
+    assert_eq!(t.addresses["trick_guide_gestures"], "0x830273C8");
+    assert_eq!(t.addresses["trick_guide_buttons"], "0x83027350");
+    let g = &t.trick_guide;
+    assert_eq!((g.categories.len(), g.gestures.len(), g.buttons.len()), (8, 58, 28));
+    assert_eq!(g.categories[3], "046ed0ccbda1091f");
+    assert_eq!((g.gestures[0].as_str(), g.gestures[48].as_str(), g.gestures[57].as_str()), ("", "ollie_kickflip", "revert"));
+    assert_eq!((g.buttons[3].as_str(), g.buttons[8].as_str(), g.buttons[27].as_str()), ("A", "L_Trigger", "DPad"));
+    let blur: Vec<usize> = t.screens.iter().enumerate().filter(|(_, s)| s.blur).map(|(i, _)| i).collect();
+    assert_eq!(t.screens.len(), 72);
+    assert_eq!(t.screens[56].id, "b4b7976b40b3e837");
+    let p = &t.screens[56];
+    assert_eq!((p.suspends_gameplay, p.chyron, p.hud, p.input_to_movie), (true, false, 1, true));
+    let count = |f: fn(&skate_data::menu_tables::FeScreen) -> bool| t.screens.iter().filter(|s| f(s)).count();
+    assert_eq!((count(|s| s.suspends_gameplay), count(|s| s.chyron), count(|s| s.input_to_movie)), (52, 19, 62));
+    assert_eq!(count(|s| s.hud == 1), 64);
+    // Shared keys get a position: ids 0 / 32 / 49 share one.
+    assert_eq!((t.screens[0].id.as_str(), t.screens[49].id.as_str()), ("a774f79d33b6be83:0", "a774f79d33b6be83:2"));
+    assert_eq!(
+        blur,
+        [3, 9, 10, 11, 17, 18, 19, 20, 21, 26, 31, 32, 36, 37, 38, 39, 40, 43, 44, 45, 46, 47, 56, 57, 58, 59, 61, 63, 68, 69, 70, 71]
+    );
 }
 
 #[test]
@@ -149,6 +217,16 @@ fn disc_executable_gives_the_same_tables() {
             assert_eq!(a.iter().collect::<Vec<_>>(), b);
         }
         assert_eq!(t.categories, tu3.categories);
+        // 70 screens: TU3's minus its two inserted at ids 31 / 32, same keys and flags.
+        // (ids aside: TU3's 32 shares a key with 0 and 49, so the disc's 47 is position 1, not 2).
+        let mut tu3_screens = tu3.screens.clone();
+        tu3_screens.drain(31..33);
+        let strip = |s: &[skate_data::menu_tables::FeScreen]| {
+            s.iter().map(|s| (s.key.clone(), s.blur, s.suspends_gameplay, s.chyron, s.hud, s.input_to_movie)).collect::<Vec<_>>()
+        };
+        assert_eq!(strip(&t.screens), strip(&tu3_screens));
+        assert_eq!(t.settings_titles, tu3.settings_titles);
+        assert_eq!(t.sub_options.len(), 7);
         assert_eq!(t.keys, tu3.keys);
         let known: Vec<&str> = t.items.iter().map(|i| i.name.as_str()).collect();
         for mode in &t.modes {

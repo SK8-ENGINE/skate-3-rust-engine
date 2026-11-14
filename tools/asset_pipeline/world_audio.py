@@ -11,7 +11,7 @@ pedestrian banks, their vault tuning, and the streamed speech index.
   clip ids, `skate_audio::world::speech_rules`); ~1 MB of JSON, no audio.
 - `speech_tuning(collections)`: the speech manager's per-event tuning (`Sk8::Audio::tSpeechTuning`
   and the not-follow lists) per speech bank; part of `world_tuning`.
-- `decode_speech(...)`: opt-in (`SKATE_SETUP_SPEECH=1`): each take of the chosen events decoded to a
+- `decode_speech(...)`: on by default (`SKATE_SETUP_SPEECH=0` skips it): each take of the chosen events decoded to a
   mono PCM16 WAV at its own 36 kHz (`speech/livingworld/<clip>/<take>.wav`). All free-roam events are
   ~9 h of audio (~2.4 GB), so the default setup leaves it out. The main cast's (`maincastspeech.big`)
   and the announcer's (`announcerspeech.big`, `ANNOUNCER_EVENTS`) indexes and decodes work the same.
@@ -31,10 +31,31 @@ WORLD_BANKS = (
     'C00_heavy01.abk', 'C01_family01.abk', 'C03_sports01.abk', 'C04_taxi01.abk', 'C05_truck01.abk',
     'C06_sports02.abk', 'C07_family02.abk', 'C08_family03.abk', 'Traffic_Horn.abk', 'Traffic_Skid.abk',
     'car_alarms.abk', 'fstep_livingworld.abk', 'Tazer.abk', 'CellPhone_Rings.bnk',
+    # The dynamic props' rolling / sliding loops (skate_audio::world::props::LOOP_BANKS, doc 27 "Prop sounds").
+    'Dynamics_Objects_Roll.abk', 'Dynamics_Objects_Slide_A.abk', 'Dynamics_Objects_Slide_B.abk',
 )
 # The Splice (SPLC) banks among them: their patch trees go to the native Splice player
 # (`skate_audio::world::peds::PedSpeech`'s phone ring, retail's Splice table index 6).
 WORLD_SPLICE_BANKS = ('CellPhone_Rings.bnk',)
+
+# The pushed props' sound banks (doc 27 "Prop sounds", research b630 / b632): each prop SFX record (class B05F...)
+# names its main bank (Text at layout 0x48) and, through its RefSpec at 0x18, a one-shot record (class 74F2...)
+# whose Text at offset 0 names a Splice bank; the start loops live in DMO_Starts.
+PROP_RECORD_CLASS, PROP_MAIN_BANK = 'Hash_B05F7C74C63ACFB8', 'Hash_BE88128A30BE926E'
+PROP_ONESHOT_CLASS, PROP_ONESHOT_BANK = 'Hash_74F2B4132A1D39EA', 'Hash_A09DA314AE53C56D'
+PROP_START_BANK = 'DMO_Starts.abk'
+
+
+def prop_banks(collections: list[dict]) -> tuple[set[str], set[str]]:
+    """(AEMS banks, Splice banks) the prop records name, read from every converted collection (DLC ones too)."""
+    abks, bnks = {PROP_START_BANK}, set()
+    for c in collections:
+        field = {PROP_RECORD_CLASS: PROP_MAIN_BANK, PROP_ONESHOT_CLASS: PROP_ONESHOT_BANK}.get(c['class'])
+        name = (c['fields'].get(field) or {}).get('data', '').strip() if field else ''
+        if name:
+            (bnks if name.lower().endswith('.bnk') else abks).add(Path(name).name)
+    return abks, bnks
+
 
 ENGINE_CLASS = 'Hash_259095163B974174'  # aud_traffic_engine
 ENGINE_FIELDS = {
@@ -113,11 +134,11 @@ FREE_ROAM_EVENTS = (101, 102, 104, 105, 108, 109, 110, 201, 202, 203, 204, 205, 
 # The main cast's (pros' and the special cast's) free-roam events (`maincastspeech.big`, the speech manager's bank 0):
 # the skater speech messages and reactions the port sends (grunt 201 / impact 202, crash 906, pos 101, slam 104, collide
 # 130, pro-on-pro 150 / 151, gestures 338, hit reactions 344 / 335 / 336, warn 500 / 501, greet 601, race 903 / 913,
-# bored 1014). ~3.0 h, ~0.95 GB as 44.1 kHz PCM16; decoded with the living world's (`SKATE_SETUP_SPEECH=1`).
+# bored 1014). ~3.0 h, ~0.95 GB as 44.1 kHz PCM16; decoded with the living world's (on unless `SKATE_SETUP_SPEECH=0`).
 MAIN_CAST_EVENTS = (101, 104, 130, 150, 151, 201, 202, 335, 336, 338, 344, 500, 501, 601, 903, 906, 913, 1014)
 # The announcer's events an engine sender can request (`announcerspeech.big`, speech bank 3): the NPC pro's crash
 # (480_slam_pro, 571 s, ~41 MB as 36 kHz PCM16). Free skate never plays it (no challenge announcer); the other 62
-# events belong to the challenge modes. Decoded with the living world's (`SKATE_SETUP_SPEECH=1`).
+# events belong to the challenge modes. Decoded with the living world's (on unless `SKATE_SETUP_SPEECH=0`).
 ANNOUNCER_EVENTS = (480,)
 
 
@@ -541,8 +562,71 @@ def speech_index(archive_path: Path, prefix: str = 'livingworld') -> dict:
     return out
 
 
+# Presentation speech lines (Speech / SpeechNoWait events; doc 42 "Presentation speech", research b874): nis.big holds
+# one bare .sns body per line named <character>_<speech id>_<category>-<tag>_<take>[_360] and nisresident.big one
+# 8-byte .snr header per line. The character is the eSk8Characters id (menu-tables.json "speakers").
+NIS_LINE = re.compile(r'(\d+)_(\d+)_([A-Za-z0-9]+)-([A-Za-z0-9-]+)_(\d+)(_360)?\.sns')
+
+
+def nis_index(archive_path: Path) -> dict:
+    """{'archive': name, 'lines': [{file, character, id, category, tag, take, x360, snr}]} in archive order."""
+    from tools.owned_game.big import BigArchive
+    archive = BigArchive(archive_path)
+    resident = _nested(archive, 'nisresident.big')
+    headers = {Path(e.path).stem: resident.read(e) for e in resident.entries}
+    sns = {Path(e.path).stem for e in archive.entries if e.path.endswith('.sns')}
+    lines = []
+    # Retail (824A5A08, research b1014) walks nisresident.big's file table in order and reads the character from
+    # name chars 0..1 and the speech id from chars 3..6; the order is the take order of a line.
+    for e in resident.entries:
+        stem = Path(e.path).stem
+        try:
+            character, speech_id = int(stem[0:2]), int(stem[3:7])
+        except ValueError:
+            continue
+        if stem not in sns:
+            continue
+        m = NIS_LINE.fullmatch(stem + '.sns')
+        lines.append({'file': stem, 'character': character, 'id': speech_id, 'category': m[3] if m else '',
+                      'tag': m[4] if m else '', 'take': int(m[5]) if m else 0, 'x360': bool(m and m[6]),
+                      'snr': headers[stem].hex()})
+    return {'archive': archive_path.name, 'lines': lines}
+
+
+def decode_nis(archive_path: Path, index: dict, output: Path, work: Path, vgmstream: Path, decode, log) -> int:
+    """Decode every line to output/<file>.wav (`decode` = audio_export._decode), one worker per character.
+    Returns the number of lines written."""
+    from tools.owned_game.big import BigArchive
+    from .audio_export import _in_order
+    archive = BigArchive(archive_path)
+    by_name = {Path(e.path).name: e for e in archive.entries}
+    groups: dict[int, list] = {}
+    for line in index['lines']:
+        groups.setdefault(line['character'], []).append(line)
+    output.mkdir(parents=True, exist_ok=True)
+
+    def decode_group(character):
+        from .audio_export import cached
+        folder = work / str(character)
+        folder.mkdir(parents=True, exist_ok=True)
+        names = []
+        for line in groups[character]:
+            header, body = bytes.fromhex(line['snr']), archive.read(by_name[line['file'] + '.sns'])
+            if cached(header, body, output / f"{line['file']}.wav"):
+                continue
+            (folder / f"{line['file']}.snr").write_bytes(header)
+            (folder / f"{line['file']}.sns").write_bytes(body)
+            names.append(f"{line['file']}.snr")
+        decode(vgmstream, folder, names, log)
+        for name in names:
+            (folder / f"{name}.wav").replace(output / f"{name[:-len('.snr')]}.wav")
+        return len(groups[character])
+    return sum(_in_order(decode_group, groups))
+
+
 def speech_requested() -> bool:
-    return os.environ.get('SKATE_SETUP_SPEECH', '') == '1'
+    # On by default (USER-ASKS 338); the game passes SKATE_SETUP_SPEECH=0 when the player switched Ped Speech off.
+    return os.environ.get('SKATE_SETUP_SPEECH', '') != '0'
 
 
 def decode_speech(archive_path: Path, index: dict, output: Path, work: Path, vgmstream: Path, decode, log,
@@ -550,24 +634,36 @@ def decode_speech(archive_path: Path, index: dict, output: Path, work: Path, vgm
     """Decode the takes of `events` to output/<clip stem>/<take>.wav (`decode` = audio_export._decode).
     Returns the number of takes written."""
     from tools.owned_game.big import BigArchive
+    from .audio_export import _in_order
     archive = BigArchive(archive_path)
     by_name = {Path(e.path).name: e for e in archive.entries}
-    written = 0
+    # Clips decode on the audio decode workers (each a vgmstream process; doc 08 "Speech decode in parallel"). Clips
+    # sharing a folder stay together in their index order, so the result is the same as one after another.
+    groups: dict[str, list] = {}
     for clip in index['clips']:
-        if clip['event'] not in events:
-            continue
-        data = archive.read(by_name[clip['name']])
-        folder = work / Path(clip['name']).stem
-        folder.mkdir(parents=True, exist_ok=True)
-        names = []
-        for i, t in enumerate(clip['takes']):
-            (folder / f'{i:02d}.snr').write_bytes(bytes.fromhex(t['snr']))
-            (folder / f'{i:02d}.sns').write_bytes(data[t['offset']:t['offset'] + t['size']])
-            names.append(f'{i:02d}.snr')
-        decode(vgmstream, folder, names, log)
-        target = output / Path(clip['name']).stem
-        target.mkdir(parents=True, exist_ok=True)
-        for i in range(len(clip['takes'])):
-            (folder / f'{i:02d}.snr.wav').replace(target / f'{i:02d}.wav')
-            written += 1
-    return written
+        if clip['event'] in events:
+            groups.setdefault(Path(clip['name']).stem, []).append(clip)
+
+    def decode_group(stem):
+        written = 0
+        for clip in groups[stem]:
+            from .audio_export import cached
+            data = archive.read(by_name[clip['name']])
+            folder = work / stem
+            folder.mkdir(parents=True, exist_ok=True)
+            target = output / stem
+            target.mkdir(parents=True, exist_ok=True)
+            names = []
+            for i, t in enumerate(clip['takes']):
+                header, body = bytes.fromhex(t['snr']), data[t['offset']:t['offset'] + t['size']]
+                if cached(header, body, target / f'{i:02d}.wav'):
+                    continue
+                (folder / f'{i:02d}.snr').write_bytes(header)
+                (folder / f'{i:02d}.sns').write_bytes(body)
+                names.append(f'{i:02d}.snr')
+            decode(vgmstream, folder, names, log)
+            for name in names:
+                (folder / f'{name}.wav').replace(target / f"{name[:-len('.snr')]}.wav")
+            written += len(clip['takes'])
+        return written
+    return sum(_in_order(decode_group, groups))

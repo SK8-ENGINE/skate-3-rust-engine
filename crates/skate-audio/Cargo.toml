@@ -9,3 +9,7 @@ description = "Native port of Skate 3's AEMS patch-program evaluator and RenderW
 # The per-sample fused-multiply-add loops, compiled plain and with hardware FMA, picked at run
 # time (doc 11 "Hardware FMA dispatch"). The only `unsafe` lives there; this crate forbids it.
 skate-audio-fma = { path = "../skate-audio-fma" }
+# Music banks (doc 11 "Music"): FLAC segments, encoded at setup through the game executable, decoded when played.
+# Pure Rust; no defaults (no threads, serde or logging).
+flacenc = { version = "=0.5.1", default-features = false }
+claxon = "=0.4.3"

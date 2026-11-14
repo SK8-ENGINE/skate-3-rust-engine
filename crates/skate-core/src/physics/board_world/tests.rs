@@ -388,6 +388,42 @@ fn water_collision_depends_on_native_group_not_floor_depth() {
     }
 }
 
+/// fix15: a hidden board has every volume disabled. An empty query must give
+/// the same empty result and buffer state as before, without walking the
+/// whole world (candidate_ranges(None) is "every triangle").
+#[test]
+fn empty_volume_query_is_empty_and_resets_the_previous_result() {
+    let query = WorldContactSettings {
+        volume_padding: 0.05,
+        maximum_separating_distance: 0.1,
+        edge_cos_bend_normal_threshold: -1.,
+        convexity_epsilon: 0.,
+        is_object: false,
+    };
+    let retention = ContactRetentionSettings {
+        capacity: 100,
+        duplicate_distance_squared: 0.000001,
+        deferred_reduction: false,
+    };
+    let sphere = BoardWorldVolume {
+        collision_group: 4,
+        body: CollisionBody::Board(BodyId::Deck),
+        primitive: ContactPrimitive::Sphere(Sphere {
+            center: Vector3::new(-1., 0.15, -1.),
+            radius: 0.2,
+        }),
+        motion: crate::physics::board_world::VolumeMotion { linear_velocity: Vector3::new(0., -1., 0.), ..Default::default() },
+        material: material(),
+    };
+    let mut world = BoardWorld::new(vec![face(0., 17, 0.)]);
+    assert!(!world.query_primitives(&[sphere], query, retention).is_empty());
+    assert!(world.query_primitives(&[], query, retention).is_empty());
+    assert!(world.contacts().is_empty());
+    assert_eq!(world.dropped_contacts(), 0);
+    // A later real query is unaffected.
+    assert!(!world.query_primitives(&[sphere], query, retention).is_empty());
+}
+
 #[test]
 fn volume_query_bounds_follow_82777e70() {
     let close = |a: f32, b: f32| assert!((a - b).abs() < 1e-5, "{a} != {b}");
@@ -398,7 +434,7 @@ fn volume_query_bounds_follow_82777e70() {
     let bounds = |primitive, motion| {
         volume_query_bounds(primitive, motion, VOLUME_QUERY_STEP, VOLUME_QUERY_SCALE).unwrap()
     };
-    // At rest: the shape bounds scaled by 1.05 about their centre, no padding.
+    // At rest: the shape bounds scaled by 1.05 about their center, no padding.
     let b = bounds(sphere, VolumeMotion::default());
     close(b.min.y, -0.105);
     close(b.max.x, 0.105);
@@ -472,7 +508,7 @@ fn volume_query_rotation_pad_uses_refined_reciprocal_square_root() {
 
 #[test]
 fn volume_query_shape_bounds_follow_the_retail_bounds_slots() {
-    // Capsule 82AD97A0: centre +- fma(|axis|, half length, radius).
+    // Capsule 82AD97A0: center +- fma(|axis|, half length, radius).
     let axis = Vector3::new(0.6, 0.8, 0.);
     let capsule = ContactPrimitive::Capsule {
         center: Vector3::new(1., 2., 3.),
@@ -502,4 +538,117 @@ fn volume_query_shape_bounds_follow_the_retail_bounds_slots() {
     assert_eq!(b.max.x.to_bits(), ex.to_bits());
     assert_eq!(b.min.y.to_bits(), (-ey).to_bits());
     assert_eq!(b.max.z.to_bits(), (0.2f32 + 0.03).to_bits());
+}
+
+/// A prop body created mid-game: appended triangles are found by queries, keep
+/// their tag and surface, and the existing triangles and meshes are unchanged.
+#[test]
+fn appended_triangles_are_queried_and_existing_ones_kept() {
+    let mut world = annotated(vec![face(0., 1, 0.), face(10., 2, 0.)]);
+    fn world_line(x: f32) -> (Vector3, Vector3) {
+        (Vector3::new(x - 1., 1., 0.), Vector3::new(x - 1., -1., 0.))
+    }
+    let (start, end) = world_line(50.);
+    assert!(world.query_thin_line(start, end).unwrap().is_none());
+    let meshes_before = world.query_metadata().unwrap().meshes.len();
+    let range = world.append_triangles(&[face(50., 9, 0.)], &[23]).unwrap();
+    assert_eq!(range, 2..3);
+    let hit = world.query_thin_line(start, end).unwrap().expect("appended face is queried");
+    assert_eq!(hit.tag, 9);
+    let metadata = world.query_metadata().unwrap();
+    assert_eq!(metadata.packed_surfaces, [17, 17, 23]);
+    assert_eq!(metadata.meshes.len(), meshes_before + 1);
+    assert_eq!(metadata.meshes[meshes_before].triangle_range, 2..3);
+    metadata.validate(world.triangles()).unwrap();
+    let (start, end) = world_line(0.);
+    assert_eq!(world.query_thin_line(start, end).unwrap().unwrap().tag, 1);
+    assert!(world.append_triangles(&[face(60., 9, 0.)], &[]).is_err(), "surface count must match");
+}
+
+/// Meshes of 4 triangles over "props" of 3, so meshes straddle props as in the prop collision layer.
+fn chunked(triangles: Vec<WorldTriangle>) -> BoardWorld {
+    let meshes = triangles
+        .chunks(4)
+        .enumerate()
+        .map(|(i, chunk)| QueryMesh {
+            triangle_range: i * 4..i * 4 + chunk.len(),
+            local_to_world: RetailAffineTransform::IDENTITY,
+            world_to_local: RetailAffineTransform::IDENTITY,
+            local_bounds: Bounds::from_points(chunk.iter().flat_map(|t| t.triangle.vertices)).unwrap(),
+            matching_group: -1,
+            rejection_flags: 0x2000,
+            geometry: 5000 + i as u32,
+            pool: QueryPool::Ground,
+        })
+        .collect();
+    let packed_surfaces = vec![17; triangles.len()];
+    BoardWorld::with_query_metadata(triangles, QueryMetadata { packed_surfaces, meshes, static_edges: vec![], island_flags: 0 }).unwrap()
+}
+
+fn fingerprint(world: &BoardWorld) -> String {
+    format!(
+        "{:?}\n{:?}\n{:?}\n{:?}",
+        world.triangles,
+        world.triangle_bounds,
+        world.query_metadata.as_ref().unwrap().meshes,
+        world.query_index
+    )
+}
+
+/// A "prop" moved to `at` (3 triangles), as a stream pass parks or restores it.
+fn prop_at(prop: usize, at: f32) -> Vec<WorldTriangle> {
+    (0..3).map(|k| face(at + k as f32 * 3., (prop * 3 + k) as u32, 0.)).collect()
+}
+
+#[test]
+fn batched_replacements_match_one_call_per_edit() {
+    let props = 40;
+    let start: Vec<WorldTriangle> = (0..props).flat_map(|p| prop_at(p, p as f32 * 20.)).collect();
+    // Unsorted props, one parked and restored in the same pass, one written twice, one unchanged, far parks.
+    let mut seed = 0x2545_F491u32;
+    let mut edits: Vec<(std::ops::Range<usize>, Vec<WorldTriangle>)> = (0..60)
+        .map(|_| {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            let p = (seed % props as u32) as usize;
+            let at = if seed & 0x100 != 0 { -9000. - p as f32 } else { (seed % 997) as f32 };
+            (p * 3..p * 3 + 3, prop_at(p, at))
+        })
+        .collect();
+    edits.push((7 * 3..7 * 3 + 3, prop_at(7, -9007.)));
+    edits.push((7 * 3..7 * 3 + 3, prop_at(7, 140.)));
+    edits.push((11 * 3..11 * 3 + 3, start[33..36].to_vec()));
+
+    let mut single = chunked(start.clone());
+    for (range, triangles) in &edits {
+        single.replace_triangles(range.clone(), triangles).unwrap();
+    }
+    let mut batched = chunked(start);
+    let refs: Vec<_> = edits.iter().map(|(r, t)| (r.clone(), t.as_slice())).collect();
+    batched.replace_triangles_batch(&refs).unwrap();
+    assert_eq!(fingerprint(&single), fingerprint(&batched));
+    // The same as a world built fresh from the final triangles.
+    let fresh = chunked(batched.triangles.clone());
+    assert_eq!(fingerprint(&fresh), fingerprint(&batched));
+    for x in [0., 140., 500., -9007.] {
+        let (a, b) = (Vector3::new(x, 1., 0.), Vector3::new(x, -1., 0.));
+        assert_eq!(
+            single.query_thin_line(a, b).unwrap().map(|h| h.tag),
+            batched.query_thin_line(a, b).unwrap().map(|h| h.tag)
+        );
+    }
+}
+
+#[test]
+fn a_failed_batch_changes_nothing_and_an_empty_batch_is_a_no_op() {
+    let start: Vec<WorldTriangle> = (0..8).flat_map(|p| prop_at(p, p as f32 * 20.)).collect();
+    let mut world = chunked(start);
+    let before = fingerprint(&world);
+    let good = prop_at(1, 500.);
+    let short = prop_at(2, 600.);
+    assert!(world.replace_triangles_batch(&[(3..6, good.as_slice()), (6..8, short.as_slice())]).is_err());
+    assert_eq!(fingerprint(&world), before);
+    world.replace_triangles_batch(&[]).unwrap();
+    assert_eq!(fingerprint(&world), before);
 }

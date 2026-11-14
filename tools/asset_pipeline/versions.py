@@ -6,13 +6,14 @@ import json
 from pathlib import Path
 import re
 
-GROUPS = ('core', 'hud', 'character', 'environment', 'maps', 'audio')
+GROUPS = ('core', 'hud', 'character', 'environment', 'maps', 'audio', 'livingworld')
 COMMON = ('owned_game/**/*.py', 'asset_pipeline/fast_refpack.py', 'asset_pipeline/refpack_native.rs',
           'requirements-setup.txt')
 PARSERS = ('vendor/utt/**/*.py', 'vendor/university/**/*.py', 'vendor/utt/**/*.json', 'vendor/university/**/*.json')
 SOURCES = {
     'core': ('asset_pipeline/vlt.py', 'asset_pipeline/names.txt', 'asset_pipeline/physics_skeleton.py'),
-    'hud': ('asset_pipeline/optional_content.py', 'prepare_hud.py', 'prepare_runtime_huds.py', 'prepare_menu_movies.py', 'install_prepared_hud.py',
+    'hud': PARSERS + ('asset_pipeline/optional_content.py', 'asset_pipeline/scene_clips.py', 'asset_pipeline/backdrop.py',
+            'asset_pipeline/map_writer.py', 'asset_pipeline/sky.py', 'prepare_trick_guide_scene.py', 'prepare_hud.py', 'prepare_chase_arrows.py', 'prepare_runtime_huds.py', 'prepare_menu_movies.py', 'asset_pipeline/dlc.py', 'asset_pipeline/stfs.py', 'install_prepared_hud.py',
             'extract_session_marker.py', 'vendor/skate3_ui/**/*.py', 'vendor/skate3_ui/**/*.json'),
     'character': PARSERS + ('extract_default_skater.py', 'default_skater_retail_manifest.json',
                   'asset_pipeline/character*.py', 'asset_pipeline/retail_character.py',
@@ -21,12 +22,27 @@ SOURCES = {
                   'asset_pipeline/render_parameters.py', 'asset_pipeline/teleports.py',
                   'asset_pipeline/environment.py', 'asset_pipeline/map_writer.py',
                   'asset_pipeline/retail_material.py', 'asset_pipeline/irradiance.py',
-                  'asset_pipeline/ocean_pca.py', 'asset_pipeline/menu_tables.py', 'asset_pipeline/particles.py'),
-    'maps': PARSERS + ('asset_pipeline/optional_content.py', 'asset_pipeline/map*.py', 'asset_pipeline/dynamic_props.py',
+                  'asset_pipeline/ocean_pca.py', 'asset_pipeline/menu_tables.py', 'asset_pipeline/particles.py',
+                    'asset_pipeline/sky_overrides.json'),
+    # post_maps also writes challenges.json and progression.json: their exporters belong here so a Refresh redoes them.
+    'maps': PARSERS + ('asset_pipeline/optional_content.py', 'asset_pipeline/map*.py', 'asset_pipeline/teleporters.py',
+             'asset_pipeline/challenges.py', 'asset_pipeline/objective_lua.py', 'asset_pipeline/progression.py',
+             'asset_pipeline/progression_lua.py', 'asset_pipeline/visual_indicators.py', 'asset_pipeline/park_layout.py', 'asset_pipeline/dynamic_props.py', 'asset_pipeline/hand_props.py',
              'asset_pipeline/environment.py', 'asset_pipeline/irradiance.py',
              'asset_pipeline/retail_material.py', 'asset_pipeline/backdrop.py', 'asset_pipeline/sky.py'),
-    'audio': ('asset_pipeline/optional_content.py', 'asset_pipeline/audio_export.py', 'asset_pipeline/audio_formats.py',
+    'audio': ('asset_pipeline/optional_content.py', 'asset_pipeline/audio_export.py', 'asset_pipeline/audio_formats.py', 'asset_pipeline/music_export.py',
               'asset_pipeline/world_audio.py'),
+    # Living world (peds + NPC skaters + vehicles): the exporters, the vault reader and names, the region-layer
+    # parser (audio_formats.region_layers / region_key) and the district stream reader.
+    'livingworld': ('asset_pipeline/optional_content.py', 'asset_pipeline/living_world.py',
+                    'asset_pipeline/living_world_anim.py', 'asset_pipeline/living_world_models.py', 'asset_pipeline/living_world_skaters.py',
+                    'asset_pipeline/living_world_roads.py', 'asset_pipeline/living_world_vehicles.py',
+                    'asset_pipeline/living_world_navmesh.py', 'asset_pipeline/marquee_hosts.py',
+                    'asset_pipeline/teleports.py',
+                    'asset_pipeline/character_glb.py', 'asset_pipeline/retail_character.py',
+                    'extract_default_skater.py', 'vendor/utt/**/*.py', 'asset_pipeline/vlt.py', 'asset_pipeline/names.txt',
+                    'asset_pipeline/audio_formats.py',
+                    'vendor/university/tools/vanilla_map_extraction/tools/skate3_streams.py'),
 }
 
 
@@ -74,7 +90,8 @@ def installed(base):
     if value.get('version') != 1 or not re.fullmatch(r'installations/[0-9a-f]{32}', directory):
         raise ValueError('Invalid installation record')
     root = (base/directory).resolve()
-    if not root.is_relative_to(base.resolve()):
+    # installations/ itself may be a link to another drive (docs/hails-additions/08-setup-performance.md, "Hard drive note").
+    if not root.is_relative_to((base/'installations').resolve()):
         raise ValueError('Installation escapes its package data directory')
     if not root.is_dir():
         return None

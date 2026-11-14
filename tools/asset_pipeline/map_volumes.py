@@ -105,7 +105,7 @@ def _box(raw, sections, index, item_matrix):
 
 
 def _matches_aabb(shape, lo, hi, tolerance=0.25):
-    # Retail bounds of rotated boxes differ from the box by a few centimetres
+    # Retail bounds of rotated boxes differ from the box by a few centimeters
     # (wrongway_vol_01: 7 cm); this only proves the link names the right box.
     extent = [sum(abs(shape['axes'][a][c]) * shape['half_extents'][a] for a in range(3)) + shape['fatness']
               for c in range(3)]
@@ -113,8 +113,9 @@ def _matches_aabb(shape, lo, hi, tolerance=0.25):
                abs(shape['center'][c] + extent[c] - hi[c]) <= tolerance for c in range(3))
 
 
-def arena_volumes(raw):
-    """Every named trigger volume in one decoded simulation arena."""
+def arena_volumes(raw, strict=True):
+    """Every named trigger volume in one decoded simulation arena. Not strict: a box that misses its stored bounds is
+    kept and flagged `bounds_mismatch` (two challenge hulls, doc 42) instead of failing the arena."""
     sections = _sections(raw)
     result = []
     for base, _, size, _, _, kind in sections:
@@ -140,12 +141,15 @@ def arena_volumes(raw):
                 raise ValueError(f'{name}: item link is not a volume link record')
             box_index = struct.unpack_from('>I', raw, sections[link][0])[0]
             shape = _box(raw, sections, box_index, item_matrix)
-            if not _matches_aabb(shape, lo, hi):
+            mismatch = not _matches_aabb(shape, lo, hi)
+            if mismatch and strict:
                 raise ValueError(f'{name}: oriented box does not match its bounds')
             result.append(dict(
                 id='%016x' % instance_id, name=short_name(name), full_name=name,
                 instance_id='%016x' % instance_id, link_guid='%016x' % link_guid,
                 group=group_of(group_word), shape=shape, aabb=dict(min=lo, max=hi)))
+            if mismatch:
+                result[-1]['bounds_mismatch'] = True
     return result
 
 
@@ -186,10 +190,10 @@ def stream_arenas(stream_directory):
             cursor += stride
 
 
-def district_volumes(stream_directory):
+def district_volumes(stream_directory, strict=True):
     result = []
     for stream, asset_id, arena in stream_arenas(stream_directory):
-        for volume in arena_volumes(arena):
+        for volume in arena_volumes(arena, strict):
             volume.update(stream=stream, arena='%016x' % asset_id)
             result.append(volume)
     ids = [v['id'] for v in result]

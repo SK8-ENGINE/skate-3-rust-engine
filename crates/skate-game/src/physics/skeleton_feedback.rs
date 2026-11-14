@@ -16,7 +16,19 @@ pub(super) fn publish(
     skater: &mut SkaterRuntime,
     request_partial_ragdoll: bool,
 ) {
-    let reports = collect(physics, skater);
+    let (reports, hits) = collect(physics, skater);
+    let (ped_hits, vehicle_hits): (Vec<_>, Vec<_>) = hits.into_iter().partition(|h| crate::living_world::ped_body::proxy_serial(h.0).is_some());
+    // Retail's ped reaction reads the part's own linear and angular speed after the skater's solve (`sub_82E38FB8`
+    // kind 5), not the closing speed.
+    let len = |v: &[f32; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    skater.vehicle_hits = vehicle_hits;
+    skater.ped_hits.clear();
+    skater.ped_hits.extend(ped_hits.into_iter().map(|(id, at, closing)| {
+        let after = physics.network_proxies.ped_after.iter().find(|p| p.0 == id);
+        (id, at, after.map_or([closing, 0.0], |(_, v, w)| [len(v), len(w)]))
+    }));
+    skater.ped_after.clear();
+    skater.ped_after.extend(physics.network_proxies.ped_after.iter().map(|(id, v, w)| (*id, [len(v), len(w)])));
     let p = &skater.player_input.processed;
     let deck = deck_frame(&physics.board);
     skater.skeleton_output.correction.observe_board(
@@ -113,7 +125,8 @@ fn publish_board_observations(
     frames.publish_centre_of_mass(physical_com, dt, flags_2472);
 }
 
-fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContactReport> {
+fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> (Vec<SkeletonContactReport>, Vec<(u64, [f32; 3], f32)>) {
+    let mut vehicle_hits = Vec::new();
     let rows = physics.board.solved_contacts();
     let mut storage: Vec<_> = rows
         .iter()
@@ -165,6 +178,17 @@ fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContact
             let destination=if matches!(other,CollisionBody::Attached(index)
                 if physics.network_proxies.solids.iter().any(|(i,_)|*i==index)) { &mut mod_reports } else { &mut reports };
             let vehicle = other_group == 8;
+            // Peds are group 11 (retail `sub_82BD4A30`, b138): their hits go back to the ped's reaction.
+            let ped = other_group == 11;
+            if let CollisionBody::Attached(index) = other {
+                if let Some((_, solid)) = physics.network_proxies.solids.iter().find(|(i, _)| *i == index).filter(|_| vehicle || ped) {
+                    // The relative velocity at the contact (the car alarm's impact, `sub_82C3C150` m+48; VEHHIT).
+                    let at = |id| resolve(id, physics, skater).map_or([0.0; 4], |b| linear_velocity_at_point(b, point));
+                    let (va, vb) = (at(spy[24]), at(spy[25]));
+                    let speed = (0..3).map(|i| (va[i] - vb[i]) * (va[i] - vb[i])).sum::<f32>().sqrt();
+                    vehicle_hits.push((solid.id, [point[0], point[1], point[2]], speed));
+                }
+            }
             destination.push(SkeletonContactReport {
                 part,
                 normal,
@@ -175,7 +199,12 @@ fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContact
                     spy[26] >> 16
                 },
                 other_group,
-                other_entity: None,
+                // The other body's owner (`Proxies::actors`: the player or a simulated NPC skater): retail's
+                // audio state `+604`, which the skater collide speech compares with the local player.
+                other_entity: match other {
+                    CollisionBody::Attached(index) => physics.network_proxies.actors.get(&index).map(|&(peer, _)| peer),
+                    _ => None,
+                },
                 body_a: contact_body(
                     resolve(spy[24], physics, skater),
                     point,
@@ -196,7 +225,7 @@ fn collect(physics: &GamePhysics, skater: &SkaterRuntime) -> Vec<SkeletonContact
     // group; the physical solve above still receives EVERY contact.
     mod_reports.extend(reports);
     mod_reports.truncate(16);
-    mod_reports
+    (mod_reports, vehicle_hits)
 }
 fn is_mod_solid_contact(id: u32, physics: &GamePhysics) -> bool {
     matches!(

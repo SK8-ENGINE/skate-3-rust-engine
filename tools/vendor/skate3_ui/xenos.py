@@ -9,6 +9,7 @@ from .binary import FormatError, align
 
 
 XENOS_FORMATS = {
+    4: "R5G6B5",
     6: "A8R8G8B8",
     18: "DXT1",
     19: "DXT3",
@@ -89,6 +90,8 @@ def _layout(fetch: FetchConstant) -> tuple[int, int]:
         return 4, 16
     if fetch.format_code == 6:
         return 1, 4
+    if fetch.format_code == 4:
+        return 1, 2
     raise FormatError(f"unsupported Xbox texture format {fetch.format_name}")
 
 
@@ -198,7 +201,8 @@ def _write_block(
             output[offset : offset + 4] = bytes((color[0], color[1], color[2], alpha))
 
 
-def _decode_dxt(width: int, height: int, data: bytes, format_code: int) -> bytes:
+def _decode_dxt_reference(width: int, height: int, data: bytes, format_code: int) -> bytes:
+    """The per-pixel decoder `_decode_dxt` replaced (tests compare the two byte for byte)."""
     output = bytearray(width * height * 4)
     block_bytes = 8 if format_code == 18 else 16
     blocks_wide = max(1, (width + 3) // 4)
@@ -240,6 +244,55 @@ def _decode_dxt(width: int, height: int, data: bytes, format_code: int) -> bytes
     return bytes(output)
 
 
+def _decode_dxt(width: int, height: int, data: bytes, format_code: int) -> bytes:
+    """DXT1 / DXT3 / DXT5 (format 18 / 19 / 20) base level to RGBA, every block at once: the same integer
+    arithmetic as `_decode_dxt_reference`, so the bytes are identical."""
+    import numpy as np
+
+    block_bytes = 8 if format_code == 18 else 16
+    blocks_wide = max(1, (width + 3) // 4)
+    blocks_high = max(1, (height + 3) // 4)
+    count = blocks_wide * blocks_high
+    if count * block_bytes > len(data):
+        raise FormatError("compressed texture base mip is truncated")
+    blocks = np.frombuffer(data, dtype=np.uint8, count=count * block_bytes).reshape(count, block_bytes).astype(np.int64)
+    colour = blocks[:, block_bytes - 8:]
+    c0 = colour[:, 0] | (colour[:, 1] << 8)
+    c1 = colour[:, 2] | (colour[:, 3] << 8)
+    bits = colour[:, 4] | (colour[:, 5] << 8) | (colour[:, 6] << 16) | (colour[:, 7] << 24)
+
+    def expand(value):
+        red, green, blue = (value >> 11) & 0x1F, (value >> 5) & 0x3F, value & 0x1F
+        return np.stack(((red << 3) | (red >> 2), (green << 2) | (green >> 4), (blue << 3) | (blue >> 2)), axis=-1)
+
+    e0, e1 = expand(c0), expand(c1)
+    four = (c0 > c1) if format_code == 18 else np.ones(count, dtype=bool)
+    third = np.where(four[:, None], (2 * e0 + e1) // 3, (e0 + e1) // 2)
+    fourth = np.where(four[:, None], (e0 + 2 * e1) // 3, 0)
+    table = np.stack((e0, e1, third, fourth), axis=1)
+    table_alpha = np.stack((np.full(count, 255), np.full(count, 255), np.full(count, 255), np.where(four, 255, 0)), axis=1)
+    rows = np.arange(count)[:, None]
+    index = (bits[:, None] >> (2 * np.arange(16))) & 3
+    rgb = table[rows, index]
+    if format_code == 19:
+        nibbles = np.stack((blocks[:, :8] & 0xF, blocks[:, :8] >> 4), axis=-1).reshape(count, 16)
+        alpha = nibbles * 17
+    elif format_code == 20:
+        a0, a1 = blocks[:, 0], blocks[:, 1]
+        steps7 = np.stack([((7 - i) * a0 + i * a1) // 7 for i in range(1, 7)], axis=1)
+        steps5 = np.stack([((5 - i) * a0 + i * a1) // 5 for i in range(1, 5)] + [np.zeros(count, np.int64), np.full(count, 255)], axis=1)
+        palette = np.concatenate((a0[:, None], a1[:, None], np.where((a0 > a1)[:, None], steps7, steps5)), axis=1)
+        alpha_bits = np.zeros(count, dtype=np.int64)
+        for byte in range(6):
+            alpha_bits |= blocks[:, 2 + byte] << (8 * byte)
+        alpha = palette[rows, (alpha_bits[:, None] >> (3 * np.arange(16))) & 7]
+    else:
+        alpha = table_alpha[rows, index]
+    pixels = np.concatenate((rgb, alpha[:, :, None]), axis=2).astype(np.uint8)
+    image = pixels.reshape(blocks_high, blocks_wide, 4, 4, 4).transpose(0, 2, 1, 3, 4).reshape(blocks_high * 4, blocks_wide * 4, 4)
+    return image[:height, :width].tobytes()
+
+
 def decode_rgba(data: bytes, fetch: FetchConstant) -> bytes:
     linear = linearize_base_level(data, fetch)
     if fetch.format_code in (18, 19, 20):
@@ -249,6 +302,12 @@ def decode_rgba(data: bytes, fetch: FetchConstant) -> bytes:
         for offset in range(0, len(output), 4):
             blue, green, red, alpha = linear[offset : offset + 4]
             output[offset : offset + 4] = bytes((red, green, blue, alpha))
+        return bytes(output)
+    if fetch.format_code == 4:
+        output = bytearray(fetch.width * fetch.height * 4)
+        for pixel in range(fetch.width * fetch.height):
+            value = struct.unpack_from("<H", linear, pixel * 2)[0]
+            output[pixel * 4 : pixel * 4 + 4] = bytes((*_expand_565(value), 255))
         return bytes(output)
     raise FormatError(f"unsupported Xbox texture format {fetch.format_name}")
 

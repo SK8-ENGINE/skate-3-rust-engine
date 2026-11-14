@@ -1,6 +1,6 @@
 # Crash report keeps the first panic
 
-Branch: `fix/crash-report-first-panic` (from `main` 4488651). Status: **done, uncommitted**. Diagnostics only
+Branch: `fix/crash-report-first-panic` (from `main` 4488651). Status: **done, in upstream main** (`6ed48ca3`, integrated through `c283cc57`). Diagnostics only
 (`crates/skate-game/src/crash_report.rs`); no gameplay or rendering change.
 
 ## Problem
@@ -52,7 +52,7 @@ and the discarded tail is never stored. Placeholder lines (`[… omitted]`) get 
   - `first_panic_without_location_pins_only_the_message`: a backtrace line after the message isn't mistaken for the
     location. An empty capture prints "Unavailable / not recorded" for the pinned section.
   - `unknown_backtrace_frames_are_dropped`: 200 `<unknown>` frames are kept neither in the panic ring nor in the logs,
-    and don't appear in the report. Symbolised frames (`7: skate3rust::main`) stay, and lines that only mention
+    and don't appear in the report. Symbolized frames (`7: skate3rust::main`) stay, and lines that only mention
     `<unknown>` are not filtered.
   - `long_lines_are_truncated_with_a_marker`: both paths (an over-long line through `sanitize`, a reader-cut line
     with the flag) keep their start plus ` [line truncated]` and stay within `LINE_LIMIT`. A line exactly at the limit

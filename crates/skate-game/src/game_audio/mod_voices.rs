@@ -13,7 +13,7 @@
 //!   record test of a sphere (`radius`, inner `core`) with the retail falloff curve
 //!   (`eVolumeFalloffType`, `emitters::shape_level`), as `level = volume × curve(d)`. A sound
 //!   without a position (`spatial = false`) takes the non-positional outputs (out2 dry, out7
-//!   send, out3 low-pass), centre-panned.
+//!   send, out3 low-pass), center-panned.
 //! - The private MixMap is retail's MixMap file with the Global slot and [`MIX_INSTANCES`] Emitter
 //!   instances; before each of its ticks it takes the retail MixMap's Global inputs (master,
 //!   music, reverb, pause), so its Emitter outputs are what a retail Emitter instance gives for
@@ -199,11 +199,11 @@ impl Reach {
 /// from what the game publishes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Anchor {
-    /// The local skater (its centre of mass, as retail's player sounds: MixMap 3DObjPos 60010010).
+    /// The local skater (its center of mass, as retail's player sounds: MixMap 3DObjPos 60010010).
     Player,
     /// A world owner by id: a car or a ped (`world_sources::WorldOwners`).
     World(u64),
-    /// An NPC skater by id (its centre of mass, `npc_skaters::NpcSkaters`).
+    /// An NPC skater by id (its center of mass, `npc_skaters::NpcSkaters`).
     Npc(u64),
     /// A fixed place and its reach (an emitter record: records do not move).
     Fixed(Vec3, Reach),
@@ -234,7 +234,7 @@ pub(crate) fn owner_offset(offset: Vec3, facing: Vec3) -> Vec3 {
 }
 
 /// A skater's facing from its wheels (front pair minus back pair; FL, FR, BL, BR), else its
-/// centre-of-mass velocity.
+/// center-of-mass velocity.
 fn board_facing(s: &skate_audio::player::AudioState) -> Vec3 {
     let w = s.wheel_position.map(Vec3::from_array);
     let along = (w[0] + w[1] - w[2] - w[3]) * 0.5;
@@ -573,7 +573,7 @@ pub(super) fn frame(
     if let (Some(pass), Some(retail)) = (native.pending, native.mixmap.as_ref()) {
         mix.tick(retail, pass.calls);
     }
-    let silenced = super::silenced(menu.as_deref(), &replay);
+    let silenced = super::speech_silenced(menu.as_deref(), &replay);
     let dt = if silenced { 0.0 } else { time.delta_secs().clamp(0.0, 0.25) };
     let ear = listener.single().ok();
     let skater = cues.riding.board;
@@ -623,7 +623,7 @@ pub(super) fn frame(
         }
         let Some((g, _, claimed_at)) = v.instance else { continue };
         // A rule sound's owner: its position now (when followed) and its default reach. An owner
-        // gone after it was found leaves the sound where it was; one never found plays it centred.
+        // gone after it was found leaves the sound where it was; one never found plays it centered.
         if let Some(f) = v.spec.follow {
             let emitter = |bits: u64| {
                 let (t, e) = published.get(Entity::try_from_bits(bits)?).ok()?;
@@ -928,7 +928,7 @@ pub(crate) mod tests {
     /// A mod WAV through the native mixer (data-gated): a looping tone 5 m to the listener's
     /// right plays in its mod bank, louder on the right, with an environment send and the
     /// emitter's dry level; out of its reach it is silent (and keeps its voice); a
-    /// non-positional one is centred; `reverb = false` has no send; stopping the mod frees the
+    /// non-positional one is centered; `reverb = false` has no send; stopping the mod frees the
     /// voice, the bank, the private-MixMap instance, and the frame idles again.
     #[test]
     #[ignore = "needs the private install data"]
@@ -956,7 +956,7 @@ pub(crate) mod tests {
         }
         let v = mod_voice(&world).expect("kept");
         assert_eq!(v.gain, 0.0);
-        // Non-positional, no reverb: centred and dry only.
+        // Non-positional, no reverb: centered and dry only.
         world.resource_mut::<ModVoices>().play("dev.a", "tone", VoiceSpec { reverb: false, ..spec("tone.wav", None) }).unwrap();
         let mut flat = Vec::new();
         for _ in 0..40 {
@@ -1096,7 +1096,7 @@ pub(crate) mod tests {
 
     /// A replace rule's sound plays through the native mixer (data-gated): the site's request
     /// queues it, the next voices frame opens it in the rule owner's bank (non-positional,
-    /// centred), and it ends as a one-shot.
+    /// centered), and it ends as a one-shot.
     #[test]
     #[ignore = "needs the private install data"]
     fn a_rule_sound_plays_in_the_mod_bank() {
@@ -1107,7 +1107,7 @@ pub(crate) mod tests {
         let rule: skate_mods::audio_rules::Rule = serde_json::from_value(serde_json::json!({"match": {"tag": "horn"}, "action": "replace", "play": {"path": "t.wav"}})).unwrap();
         let set = super::super::mod_rules::RuleSet::for_test(&[("dev.a", "honk", rule)], Default::default());
         world.resource_mut::<super::super::mod_rules::AudioRules>().set = Some(set.clone());
-        let row = super::super::mod_audio::EventRow { kind: super::super::mod_audio::EventKind::Post, source: super::super::mod_audio::Source::World, class: skate_audio::world::traffic::HORN_CLASS, slot: "horn", id: 0, owner: 7 };
+        let row = super::super::mod_audio::EventRow { kind: super::super::mod_audio::EventKind::Post, source: super::super::mod_audio::Source::World, class: skate_audio::world::traffic::HORN_CLASS, slot: "horn", id: 0, owner: 7, hit: None };
         assert!(set.mutes(&row), "replaced");
         let mut out = Vec::new();
         let mut heard = false;
@@ -1126,7 +1126,7 @@ pub(crate) mod tests {
     /// car (panned right at 5 m right, with the environment send), follows the car (left after it
     /// moves left), stays where it was when the car is gone, and is silent beyond the car's retail
     /// reach (40 m); `at = 'world'` plays at the fixed position (left), `offset` moves it, `centre`
-    /// is centred; the listener faces −Z (right = +X).
+    /// is centered; the listener faces −Z (right = +X).
     #[test]
     #[ignore = "needs the private install data"]
     fn a_positional_rule_sound_plays_at_its_owner() {
@@ -1156,8 +1156,8 @@ pub(crate) mod tests {
                 }
             }
         };
-        let world_row = |class: &'static str, slot: &'static str| EventRow { kind: EventKind::Post, source: Source::World, class, slot, id: 0, owner: 7 };
-        let player_row = |id: i32| EventRow { kind: EventKind::Post, source: Source::Player, class: "Class_x", slot: "x", id, owner: 0 };
+        let world_row = |class: &'static str, slot: &'static str| EventRow { kind: EventKind::Post, source: Source::World, class, slot, id: 0, owner: 7, hit: None };
+        let player_row = |id: i32| EventRow { kind: EventKind::Post, source: Source::Player, class: "Class_x", slot: "x", id, owner: 0, hit: None };
         // Run `frames`, return (left, right) RMS of the last half and the mod voice.
         let run = |world: &mut World, frames: usize| {
             let mut out = Vec::new();
@@ -1196,7 +1196,7 @@ pub(crate) mod tests {
         reset(&mut world);
         // An offset: the car 5 m right, the sound 10 m to its left (5 m left of the listener).
         car(&mut world, Some([5.0, 0.0, 0.0]));
-        assert!(!set.mutes(&EventRow { kind: EventKind::Post, source: Source::World, class: skate_audio::world::traffic::ALARM_CLASS, slot: "alarm", id: 0, owner: 7 }), "layered");
+        assert!(!set.mutes(&EventRow { kind: EventKind::Post, source: Source::World, class: skate_audio::world::traffic::ALARM_CLASS, slot: "alarm", id: 0, owner: 7, hit: None }), "layered");
         let (l, r, _) = run(&mut world, 30);
         assert!(l > 2.0 * r && l > 0.005, "offset to the left: L {l} R {r}");
         reset(&mut world);
@@ -1205,7 +1205,7 @@ pub(crate) mod tests {
         let (l, r, _) = run(&mut world, 30);
         assert!(l > 2.0 * r && l > 0.005, "at the fixed position: L {l} R {r}");
         reset(&mut world);
-        // Centred.
+        // Centered.
         assert!(!set.mutes(&player_row(2)));
         let (l, r, _) = run(&mut world, 30);
         assert!((l - r).abs() < 1e-4 && l > 0.001, "centred: L {l} R {r}");

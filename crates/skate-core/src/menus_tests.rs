@@ -18,7 +18,7 @@ fn fixture() -> MenuData {
     screens[3] = vec!["ID_GAMESETTINGS_SFXVOLUME".into(), "ID_GAMESETTINGS_SFXPACK".into()];
     MenuData {
         categories: ["Options", "SinglePlayer", "Create"].map(category).to_vec(),
-        items: ["ChallengeMap", "GameSettings", "SkateWith", "Project10", "SavePark", "ReplayEditor"].map(item).to_vec(),
+        items: ["ChallengeMap", "GameSettings", "SkateWith", "Project10", "SavePark", "ReplayEditor", "EnterSkatePark", "PartyPlay"].map(item).to_vec(),
         settings: vec![
             setting("ID_GAMESETTINGS_DIFFICULTY_SETTINGS", Widget::Option),
             setting("ID_GAMESETTINGS_AUDIO_SETTINGS", Widget::Option),
@@ -41,7 +41,60 @@ fn fixture() -> MenuData {
                 tabs: vec![tab("SinglePlayer", &["ChallengeMap", "SkateWith"]), tab("Create", &["SavePark", "ReplayEditor"])],
             },
         ],
+        map_nodes: Vec::new(), map_pictures: Default::default(), map_markers: Default::default(), map_debug: Default::default(),
     }
+}
+
+#[test]
+fn challenge_map_nodes_have_hooks_and_stay_greyed_until_handled() {
+    let node = |kind, key: &str, parent: Option<EntryRef>, order| MapNode { entry: EntryRef::map(kind, key), parent, label: format!("L_{key}"), order };
+    let root = EntryRef::map(EntryKind::MapListing, "progression");
+    let downtown = EntryRef::map(EntryKind::MapFilter, "downtown");
+    let challenges = EntryRef::map(EntryKind::MapListing, "progression_all");
+    let mut data = fixture();
+    data.map_nodes = vec![
+        node(EntryKind::MapListing, "progression", None, 0),
+        node(EntryKind::MapFilter, "downtown", Some(root.clone()), 1),
+        node(EntryKind::FeLocation, "dist_downtown_aletown", Some(downtown.clone()), 2),
+        node(EntryKind::FeLocation, "dist_downtown_canalplaza", Some(downtown.clone()), 1),
+        node(EntryKind::MapListing, "progression_all", Some(root.clone()), 2),
+        node(EntryKind::Challenge, "some_challenge", Some(challenges.clone()), 0),
+    ];
+    data.map_debug.insert("progression_all".into());
+    let mut registry = MenuRegistry::new(data);
+    // Career (game mode 1): the free-skate tab rules leave every node visible.
+    let ctx = MenuContext::new("Career").with(facts::GAME_MODE, 1.0).with(facts::DEBUG_MENUS, 1.0);
+    // progression_all is retail's debug-only listing: hidden unless Debug Menus is on.
+    let all = EntryRef::map(EntryKind::MapListing, "progression_all");
+    assert!(!registry.visible(&all, &MenuContext::new("Career").with(facts::GAME_MODE, 1.0)));
+    let aletown = EntryRef::map(EntryKind::FeLocation, "dist_downtown_aletown");
+    let challenge = EntryRef::map(EntryKind::Challenge, "some_challenge");
+    // Every node is a real entry with hooks; nothing has a handler yet, so all are grayed, folders too.
+    for n in registry.data().map_nodes.clone() {
+        assert!(registry.visible(&n.entry, &ctx), "{}", n.entry.hook_id());
+        assert!(!registry.enabled(&n.entry, &ctx), "{} greyed", n.entry.hook_id());
+    }
+    assert_eq!(aletown.hook_id(), "fe_locations:dist_downtown_aletown");
+    assert_eq!(EntryKind::parse("fe_locations"), Some(EntryKind::FeLocation));
+    // Display order inside a folder follows the sort order.
+    assert_eq!(registry.data().map_children(&downtown).iter().map(|n| n.entry.id.as_str()).collect::<Vec<_>>(), ["dist_downtown_canalplaza", "dist_downtown_aletown"]);
+    // A teleport handler enables the location and, through it, its folder and the root; the challenges stay grayed.
+    let count = Arc::new(AtomicUsize::new(0));
+    registry.register_handler(aletown.clone(), engine_handler("teleport", count.clone()));
+    assert!(registry.enabled(&aletown, &ctx) && registry.enabled(&downtown, &ctx) && registry.enabled(&root, &ctx));
+    assert!(!registry.enabled(&challenge, &ctx) && !registry.enabled(&challenges, &ctx));
+    assert_eq!(registry.dispatch(MenuAction::Select { entry: aletown.clone() }, &ctx), Outcome::Handled(Owner::Engine("teleport".into())));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    // A mod stacks over it, and its removal gives the engine's handler back.
+    registry.register_handler(aletown.clone(), mod_handler("m"));
+    assert!(matches!(registry.dispatch(MenuAction::Select { entry: aletown.clone() }, &ctx), Outcome::Forward(Owner::Mod(ref m), _) if m == "m"), "the mod's Lua gets it");
+    registry.remove_owner(&Owner::Mod("m".into()));
+    assert_eq!(registry.dispatch(MenuAction::Select { entry: aletown.clone() }, &ctx), Outcome::Handled(Owner::Engine("teleport".into())));
+    // Without the engine handler everything is grayed again.
+    registry.remove_owner(&Owner::Engine("teleport".into()));
+    assert!(!registry.enabled(&root, &ctx));
+    // A node not in the data is no entry.
+    assert!(!registry.visible(&EntryRef::map(EntryKind::FeLocation, "nowhere"), &ctx));
 }
 
 fn engine_handler(owner: &str, count: Arc<AtomicUsize>) -> Handler {
@@ -82,13 +135,22 @@ fn every_entry_is_greyed_until_a_handler_registers() {
 fn park_rules_and_dirty_park_confirmation() {
     let mut registry = MenuRegistry::new(fixture());
     let count = Arc::new(AtomicUsize::new(0));
-    for item in ["ChallengeMap", "SkateWith", "SavePark"] {
+    for item in ["ChallengeMap", "SkateWith", "SavePark", "EnterSkatePark", "PartyPlay"] {
         registry.register_handler(EntryRef::item(item), engine_handler("f", count.clone()));
     }
     let career = MenuContext::new("Career");
     let park = MenuContext::new("CareerPark");
     assert!(registry.enabled(&EntryRef::item("SkateWith"), &career));
     assert!(!registry.enabled(&EntryRef::item("SkateWith"), &park), "SkateWith is off in a park");
+    // b673: also off in a world flagged IsSkatePark; EnterSkatePark in career waits for progression; PartyPlay needs
+    // the San Van pack.
+    let free = MenuContext::new("FreePlay");
+    assert!(!registry.enabled(&EntryRef::item("SkateWith"), &free.clone().with(facts::WORLD_IS_SKATE_PARK, 1.0)));
+    assert!(registry.enabled(&EntryRef::item("SkateWith"), &free));
+    assert!(!registry.enabled(&EntryRef::item("EnterSkatePark"), &career.clone().with(facts::SKATE_PARK_LOCKED, 1.0)));
+    assert!(registry.enabled(&EntryRef::item("EnterSkatePark"), &free.clone().with(facts::SKATE_PARK_LOCKED, 1.0)));
+    assert!(!registry.enabled(&EntryRef::item("PartyPlay"), &free));
+    assert!(registry.enabled(&EntryRef::item("PartyPlay"), &free.with(facts::PARTY_PACK_OWNED, 1.0)));
     assert!(!registry.enabled(&EntryRef::item("SavePark"), &park));
     assert!(registry.enabled(&EntryRef::item("SavePark"), &park.clone().with(facts::PARK_SAVEABLE, 1.0)));
 
@@ -246,7 +308,7 @@ fn step_uses_the_retail_rule_and_engine_binding_round_trips() {
     let sfx = EntryRef::setting("ID_GAMESETTINGS_SFXVOLUME");
     let play = EntryRef::setting("ID_GAMESETTINGS_DIFFICULTY_OPTIONS");
     let engine = Owner::Engine("audio".into());
-    // Unbound rows are greyed and Left / Right does nothing.
+    // Unbound rows are grayed and Left / Right does nothing.
     assert_eq!(r.dispatch(MenuAction::Step { entry: sfx.clone(), direction: Direction::Right }, &ctx), Outcome::Ignored);
     r.bind_value(sfx.clone(), engine.clone(), ValueHook::Stored(SettingValue::Float(0.75)));
     r.bind_value(play.clone(), Owner::Engine("difficulty".into()), ValueHook::Stored(SettingValue::Int(2)));
@@ -260,7 +322,7 @@ fn step_uses_the_retail_rule_and_engine_binding_round_trips() {
     // The engine's own source changed (settings file): the binding follows without an event.
     r.set_owner_value(&sfx, &engine, SettingValue::Float(0.3));
     assert_eq!(r.value(&sfx), Some(SettingValue::Float(0.3)));
-    // Online, the Difficulty link is greyed but the rule itself is unaffected.
+    // Online, the Difficulty link is grayed but the rule itself is unaffected.
     assert!(!r.enabled(&EntryRef::setting("ID_GAMESETTINGS_DIFFICULTY_SETTINGS"), &MenuContext::new("Career").with(facts::GAME_MODE, 4.0)));
 }
 

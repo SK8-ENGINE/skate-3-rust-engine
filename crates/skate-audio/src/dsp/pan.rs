@@ -2,9 +2,9 @@
 //! L (+30°), C (0°), R (−30°), Ls (+110°), Rs (−110°), LFE in internal angles; the azimuth
 //! parameter is in degrees, positive = to the right, internal angle θ = −A.
 //!
-//! On the speaker circle (distance 1): constant-power pairwise panning with centre extraction in
+//! On the speaker circle (distance 1): constant-power pairwise panning with center extraction in
 //! the front sector. Inside the circle: a distance spread blended with the angular term and
-//! renormalised. A parameter change ramps every matrix cell over 64 samples.
+//! renormalized. A parameter change ramps every matrix cell over 64 samples.
 //!
 //! Computed in f64 and stored as f32: not bit-exact with retail's single-precision code (its
 //! constructor and speaker tables are unverified), checked against the spec's worked gains.
@@ -90,7 +90,7 @@ impl Pan2D {
     }
 }
 
-/// Clamp a position to the unit disc: r² > 1 → normalised; 0.999 < r² < 1 → r² treated as 1.
+/// Clamp a position to the unit disc: r² > 1 → normalized; 0.999 < r² < 1 → r² treated as 1.
 fn clamp(x: f64, y: f64) -> (f64, f64, f64) {
     let r2 = x * x + y * y;
     if r2 > 1.0 {
@@ -148,7 +148,7 @@ pub fn point_gains(x: f64, y: f64, focus: f64) -> [f64; 5] {
         let mut b = ((theta - alpha) as f64).to_radians().sin() / span;
         let mut angular = [0.0f64; 5];
         if ia == 2 && ib == 0 {
-            // Front sector: extract the shared part into the centre.
+            // Front sector: extract the shared part into the center.
             let share = a.min(b) * focus;
             a -= share;
             b -= share;
@@ -190,7 +190,7 @@ fn build(p: &[f32; 10], sources: usize, law: f32) -> [[f32; 6]; 6] {
         m[0][5] = p[LFE];
         return m;
     }
-    // Multichannel: entries around the layout centre.
+    // Multichannel: entries around the layout center.
     let (cx, cy) = (d * theta.cos(), d * theta.sin());
     let radius = f64::from(p[RADIUS]);
     let base = -deg(p[ANGLE] + p[TURN]);

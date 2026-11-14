@@ -316,7 +316,7 @@ fn skyline_waits_for_spawn_receipt_and_reports_failure_without_disabling_mod() {
 }
 
 /// `"enabled_by_default": false` keeps a mod off without a saved preference (dev / test mods),
-/// the manifest default keeps the old behaviour (on), and a saved preference wins.
+/// the manifest default keeps the old behavior (on), and a saved preference wins.
 #[test]
 fn opt_in_mods_start_disabled_without_a_preference() {
     let base = std::env::temp_dir().join(format!("skate-opt-in-{}", std::process::id()));
@@ -455,4 +455,23 @@ fn input_reads_controller_identity_and_accepts_action_keys() {
     }
     std::fs::remove_file(root.join("main.lua")).unwrap();
     std::fs::remove_dir(root).unwrap();
+}
+
+/// Dev and test mods in the repo's `mods/` ship disabled (lib.rs: a saved preference or SKATE3_MODS_ENABLE turns them
+/// on): a dev mod left on runs for every player and costs the mod snapshot every fixed step (research b553).
+#[test]
+fn shipped_dev_mods_are_off_by_default() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../mods");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&root).unwrap().flatten() {
+        if !entry.path().join("mod.json").is_file() {
+            continue;
+        }
+        let (manifest, _) = crate::validate_package_content(&entry.path()).unwrap_or_else(|e| panic!("{:?}: {e}", entry.path()));
+        if manifest.id.starts_with("dev-") || manifest.name.contains("(dev)") || manifest.id.contains("test") {
+            assert!(!manifest.enabled_by_default, "{}: dev mods ship off by default", manifest.id);
+            checked += 1;
+        }
+    }
+    assert!(checked > 0);
 }

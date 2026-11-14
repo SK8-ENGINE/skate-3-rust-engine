@@ -350,6 +350,8 @@ fn e2e_render() {
                         skate_audio::bus::Output::Eq(i) => i,
                         // A FootStep SubMix graph (sends on into the env bus and SFX Master).
                         skate_audio::bus::Output::Submix(i) => 20 + i,
+                        // The dynamic-object manager's graphs A / B (send on into SFX Master).
+                        skate_audio::bus::Output::Dynamic(i) => 30 + i,
                     };
                     writeln!(voices, "{}\t{bank}\t{}\t{:.5}\t{:.4}\t{:.5}\t{out}", frame - 60, v.slot, v.gain, v.pitch, v.send).unwrap();
                 }
@@ -373,7 +375,7 @@ fn e2e_render() {
         let (hits, transitions) = p.seam_hits();
         eprintln!("{name}: {} frames (+60 settle); Class_Seams hits {hits} ({transitions} material changes)", rows.len());
         if timing && !game_us.is_empty() {
-            // The raw times for the optimisation bench (`tools/audio-bench/`):
+            // The raw times for the optimization bench (`tools/audio-bench/`):
             // one line per measured game-thread call and per rendered block.
             let mut raw = std::io::BufWriter::new(std::fs::File::create(dir.join(format!("{name}.ours.timing.tsv"))).unwrap());
             writeln!(raw, "kind\tus").unwrap();

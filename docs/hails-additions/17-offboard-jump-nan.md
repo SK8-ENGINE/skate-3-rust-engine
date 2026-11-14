@@ -1,4 +1,4 @@
-# 17 — Offboard jump crash: "Nonfinite BipedAir launch packet" (upstream issue #10)
+# 17: Offboard jump crash: "Nonfinite BipedAir launch packet" (upstream issue #10)
 
 Branch: `fix/offboard-jump-nan` (from `main` 4488651). Upstream issue:
 SK8-ENGINE/skate-3-rust-engine#10, reported by @NoahVl with a first-divergence trace.
@@ -73,15 +73,15 @@ Why this is not "clamping NaNs away":
 - it sets a lane that is meaningless by construction, before any NaN can exist, and it changes no finite XYZ value;
 - the launch packet validation (`candidates::prepare`) stays untouched and still fails loudly on real non-finite state.
 
-Behaviour identity for gameplay: `velocity` W only reaches other W lanes (acceleration, predicted velocity,
+Behavior identity for gameplay: `velocity` W only reaches other W lanes (acceleration, predicted velocity,
 `velocity_480`). Every XYZ result is bit-identical: `dot`, `length`, `normalize`, `transform_vector` and `cross` build
 XYZ from XYZ only, and `filter` projects through columns with W = 0. On the clean path W was already 0, so nothing
 changes there at all.
 
 ## Files
 
-- `crates/skate-core/src/player/offboard/ground_motion/support.rs` — the fix (one lane, with comment).
-- `crates/skate-core/src/player/offboard/ground_motion/tests.rs` — two regression tests:
+- `crates/skate-core/src/player/offboard/ground_motion/support.rs`: the fix (one lane, with comment).
+- `crates/skate-core/src/player/offboard/ground_motion/tests.rs`: two regression tests:
   - `stray_position_w_is_not_amplified_by_support_velocity`: a 1e-3 W kick, 600 supported ticks; support velocity W
     stays 0, frame W stays bounded, XYZ unchanged;
   - `animation_target_w_scratch_cannot_blow_up_the_ground_frame`: seed via an animation-directed target frame with
@@ -115,5 +115,5 @@ changes there at all.
 
 - Which seed fired in the reported session (the trace's first line was truncated). A trace that logs the first
   non-zero `frame_0[3].W`, not only the first non-finite value, would answer this.
-- Retail VMX code does the same four-lane maths, so retail W lanes may well drift to Inf/NaN too, harmlessly, because
-  retail never validates W. The port's W = 0 host convention is a deliberate host choice, not measured retail behaviour.
+- Retail VMX (the Xbox 360 vector unit) code does the same four-lane maths, so retail W lanes may well drift to Inf/NaN too, harmlessly, because
+  retail never validates W. The port's W = 0 host convention is a deliberate host choice, not measured retail behavior.

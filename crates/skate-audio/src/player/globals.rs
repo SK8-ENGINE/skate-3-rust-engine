@@ -27,7 +27,7 @@ impl Default for Globals {
 }
 
 impl Globals {
-    /// `sub_824898C8`: `G+96` bit 13, or `X+932` with the copied `X+476` byte (not modelled:
+    /// `sub_824898C8`: `G+96` bit 13, or `X+932` with the copied `X+476` byte (not modeled:
     /// false), or mode 8.
     pub fn slew_full(&self) -> bool {
         self.flags_96 & 0x2000 != 0 || self.mode_1060 == 8

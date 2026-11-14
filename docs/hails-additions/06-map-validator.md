@@ -31,7 +31,7 @@ after the stock loads (config, gameplay config, manifest, graphs):
     `skate_world::validate_runtime`, physics with the map's collision, skater
     runtime. A panic inside one map becomes that map's error (`catch_unwind`).
   - **warnings** (reported, never rejecting): from
-    `physics/startup_check.rs` — no collision within 10 m below the spawn; deck
+    `physics/startup_check.rs`: no collision within 10 m below the spawn; deck
     spawned away from the map spawn/heading; a neutral startup (zero actions,
     as with no controller) must settle with wheel support for 12 consecutive
     ticks within 240 ticks (4 s at 60 Hz), with finite body state, no physics
@@ -58,15 +58,15 @@ after the stock loads (config, gameplay config, manifest, graphs):
   `setup-report.json` and the setup message; `install.py` and `tools/setup.py`
   call the wrapper. `optional_content.py` itself is deliberately untouched: it is
   part of the hud/environment/maps fingerprints **and** of every
-  character-customiser stage version (`customiser_cache.SHARED`), so editing it
-  would make every existing installation rebuild the customiser (~4 min), which
+  character-customizer stage version (`customiser_cache.SHARED`), so editing it
+  would make every existing installation rebuild the customizer (~4 min), which
   has no equivalence mechanism. (A first version edited it; the fingerprint
   check that caught this compares against the committed tree, not a local
   install.)
 - `pipeline-equivalence.json`: removing validation from `convert_map` changes the
   `maps` fingerprint without changing any output, so an old→new pair is added
   (combined with PR G's stream change, see doc 8). Verified: an installation
-  built from the committed code rebuilds no group, and the customiser
+  built from the committed code rebuilds no group, and the customizer
   fingerprint and all five stage versions are unchanged.
 
 ## Verification
@@ -75,10 +75,10 @@ after the stock loads (config, gameplay config, manifest, graphs):
   triangle counts equal the post-volume-fix baseline.
 - Negative cases (bad spawns written into copies of real maps):
   MegaPark's old void spawn → "no collision within 10 m below the spawn" +
-  "wheels never found support"; Industrial's old harbour-bed spawn → "no visible
+  "wheels never found support"; Industrial's old harbor-bed spawn → "no visible
   surface … (invisible collision)".
 - Known limit: a spawn on a solid, visible roof (Industrial Skate Park's old
-  roof spawn) is not flagged — rooftops are legitimate skate spots; only
+  roof spawn) is not flagged: rooftops are legitimate skate spots; only
   authored start data (doc 4) distinguishes them.
 - Unit tests: `map_validation::tests` (visible-surface heights, single-line JSON
   with the documented fields); Python `test_map_validator.py` with a fake

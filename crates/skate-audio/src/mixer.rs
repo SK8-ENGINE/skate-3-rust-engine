@@ -9,7 +9,7 @@
 //! ([`crate::bus`]). Direct (Splice / stream) voices take a [`Route`] instead: their bus and the
 //! env send of the owner one-shot bus they play through.
 //!
-//! Not modelled (UNCERTAIN in the spec): the 512/2048 buses — their codes are parsed and kept on
+//! Not modeled (UNCERTAIN in the spec): the 512/2048 buses: their codes are parsed and kept on
 //! the voice. Send B renders only while the returns are enabled ([`crate::bus::flange`]).
 //! The sample-group "level %" byte is not applied as gain (spec §3.4: its meaning is unproven).
 use std::collections::HashMap;
@@ -116,7 +116,7 @@ struct Voice {
     /// Send B (post-gain, N → 1 into the FlangeSub return of `routing.effect`), property 11.
     fx_send: Level,
     /// The output bus is a mono submix ([`Route::mono`]): the final Send sums L..Rs into the
-    /// bus's centre.
+    /// bus's center.
     mono_out: bool,
     /// The bank's volume group ([`Mixer::group_gain`]).
     group: u8,
@@ -188,7 +188,7 @@ impl Voice {
 
     fn render(&mut self, master: &mut [[f32; BLOCK]; 6], buses: &mut Buses, user: f32, scratch: &mut Scratch) {
         let channels = (self.header.channels as usize).clamp(1, 6);
-        // The mixer's scratch planes instead of zeroed stack arrays (optimisation pass 2): only the
+        // The mixer's scratch planes instead of zeroed stack arrays (optimization pass 2): only the
         // voice's own channels of `src` are read below, and each is written in full first (by the
         // resampler, or zeroed for the silent first block); the panner overwrites all six of `six`.
         let Scratch { src, six } = scratch;
@@ -202,7 +202,7 @@ impl Voice {
             // The last source frame this block reads: the resampler's phase after the block's 256
             // steps, plus its right-hand interpolation point. When that is inside the sample and no
             // stop fade runs, `sample(c, i)` is the channel's frame `i` for every index the block
-            // asks for, so the channel is read directly (the same values; optimisation pass 2).
+            // asks for, so the channel is read directly (the same values; optimization pass 2).
             let reach = (u64::from(self.resampler.frac) + u64::from(self.resampler.step) * BLOCK as u64) >> 16;
             let direct = self.fade.is_none() && self.resampler.position + reach + 1 < self.total();
             for (c, out) in src.iter_mut().enumerate().take(channels) {
@@ -342,8 +342,8 @@ impl Default for StreamDsp {
     }
 }
 
-/// A 6-channel send into a mono submix that sends on into its bus's centre: routes 6 → 1 (L, C,
-/// R, Ls, Rs at unity, LFE dropped; image tables 0x820ED700 / 0x820ED780) then 1 → 6 (centre).
+/// A 6-channel send into a mono submix that sends on into its bus's center: routes 6 → 1 (L, C,
+/// R, Ls, Rs at unity, LFE dropped; image tables 0x820ED700 / 0x820ED780) then 1 → 6 (center).
 const SIX_TO_MONO_CENTRE: &[crate::dsp::routes::Route] = &[(0, 1, 1.0), (1, 1, 1.0), (2, 1, 1.0), (3, 1, 1.0), (4, 1, 1.0)];
 
 /// The voice render's working planes, shared by every voice of a block (no per-voice zeroing of
@@ -397,6 +397,10 @@ pub struct Mixer {
     pub max_voices: usize,
     /// Opens refused because of `max_voices` or a missing sample.
     pub refused: u64,
+    /// Of [`Self::refused`]: the opens refused because of `max_voices` (diagnostics).
+    pub refused_cap: u64,
+    /// Finished voices freed to make room at the cap ([`Self::make_room`]; diagnostics).
+    pub evicted: u64,
     scratch: Box<Scratch>,
 }
 
@@ -408,7 +412,7 @@ impl Default for Mixer {
 
 impl Mixer {
     pub fn new() -> Self {
-        Self { voices: Vec::new(), buses: Buses::default(), next: 0, banks: HashMap::new(), fold: [0.0; 6], group_gain: [1.0; 2], max_voices: 96, refused: 0, scratch: Box::new(Scratch { src: [[0.0; BLOCK]; 6], six: [[0.0; BLOCK]; 6] }) }
+        Self { voices: Vec::new(), buses: Buses::default(), next: 0, banks: HashMap::new(), fold: [0.0; 6], group_gain: [1.0; 2], max_voices: 96, refused: 0, refused_cap: 0, evicted: 0, scratch: Box::new(Scratch { src: [[0.0; BLOCK]; 6], six: [[0.0; BLOCK]; 6] }) }
     }
 
     /// Register a bank's sample headers (by slot) and PCM (None = play silence for the sample's
@@ -455,6 +459,27 @@ impl Mixer {
         self.voices.len()
     }
 
+    /// Room for one more voice: at the cap free finished voices first (spec 6.6); below the cap nothing changes.
+    fn make_room(&mut self) -> bool {
+        if self.voices.len() < self.max_voices {
+            return true;
+        }
+        let before = self.voices.len();
+        let fold = &mut self.fold;
+        self.voices.retain(|v| {
+            if v.done {
+                for (f, l) in fold.iter_mut().zip(v.send.last) {
+                    *f += l;
+                }
+                false
+            } else {
+                true
+            }
+        });
+        self.evicted += (before - self.voices.len()) as u64;
+        self.voices.len() < self.max_voices
+    }
+
     fn voice(&mut self, id: u32) -> Option<&mut Voice> {
         self.voices.iter_mut().find(|v| v.id == id)
     }
@@ -476,10 +501,12 @@ impl Mixer {
             self.refused += 1;
             return None;
         };
-        if self.voices.len() >= self.max_voices {
+        if !self.make_room() {
             self.refused += 1;
+            self.refused_cap += 1;
             return None;
         }
+        let samples = self.banks.get(&bank);
         let pcm = samples.and_then(|b| b.pcm.get(usize::from(slot)).cloned().flatten());
         let group = samples.map_or(GROUP_WORLD, |b| b.group);
         self.next = self.next.wrapping_add(1).max(1);
@@ -550,7 +577,7 @@ impl Mixer {
 
     /// A speech stream's per-frame values (`world::speech_player::VoiceParams`): the voice takes
     /// the stream graph (PEAK, Send A, Gain, then the filters; `sub_82C5C318`) from now on.
-    /// `peak` = (centre Hz, linear gain, Q), `env` = Send A.
+    /// `peak` = (center Hz, linear gain, Q), `env` = Send A.
     pub fn set_stream_dsp(&mut self, voice: u32, hpf: f32, lpf: f32, env: f32, peak: [f32; 3]) {
         if let Some(v) = self.voice(voice) {
             v.hpf.cutoff = hpf;
@@ -608,12 +635,13 @@ impl Mixer {
     /// Render one block of SFX Master (6 channels, overwritten): the voices into their buses, then
     /// the environment network and the eEQChain buses.
     pub fn render(&mut self, bus: &mut [[f32; BLOCK]; 6]) {
-        self.render_with_env(bus, None);
+        self.render_with_env(bus, None, None);
     }
 
-    /// [`Mixer::render`] with another contributor's mono input to the environment bus, added after
-    /// the voices' (the grain chains' graph 2, pass order 5 after the voices' 0).
-    pub fn render_with_env(&mut self, bus: &mut [[f32; BLOCK]; 6], env: Option<&[f32; BLOCK]>) {
+    /// [`Mixer::render`] with another contributor's mono inputs to the environment bus and to
+    /// FlangeSub return A, added after the voices' (the grain chains' graph 2, pass order 5 after
+    /// the voices' 0).
+    pub fn render_with_env(&mut self, bus: &mut [[f32; BLOCK]; 6], env: Option<&[f32; BLOCK]>, flange_a: Option<&[f32; BLOCK]>) {
         for ch in bus.iter_mut() {
             *ch = [0.0; BLOCK];
         }
@@ -628,6 +656,12 @@ impl Mixer {
         }
         if let Some(env) = env {
             for (d, &x) in self.buses.env_in.iter_mut().zip(env.iter()) {
+                *d += x;
+            }
+        }
+        if let Some(flange) = flange_a.filter(|_| self.buses.flange.enabled()) {
+            self.buses.flange_active[0] = true;
+            for (d, &x) in self.buses.flange_in[0].iter_mut().zip(flange.iter()) {
                 *d += x;
             }
         }
@@ -656,10 +690,12 @@ impl VoiceHost for Mixer {
             self.refused += 1;
             return None;
         };
-        if self.voices.len() >= self.max_voices {
+        if !self.make_room() {
             self.refused += 1;
+            self.refused_cap += 1;
             return None;
         }
+        let samples = self.banks.get(&r.bank);
         let pcm = samples.and_then(|b| b.pcm.get(r.slot as usize).cloned().flatten());
         let group = samples.map_or(GROUP_WORLD, |b| b.group);
         self.next = self.next.wrapping_add(1).max(1);
@@ -708,12 +744,16 @@ impl VoiceHost for Mixer {
             pan,
             send: Send::default(),
             routing,
-            output: routing.output_bus.map_or(Output::Master, |(i, _)| Output::Eq(i)),
+            // Codes 2048 / 512: the dynamic-object manager's graphs A / B, mono (`sub_824A3140`, research b641).
+            output: match routing.fixed {
+                Some(code) => crate::bus::dynamic::CODES.iter().position(|&c| c == code).map_or(Output::Master, |i| Output::Dynamic(i as u8)),
+                None => routing.output_bus.map_or(Output::Master, |(i, _)| Output::Eq(i)),
+            },
             // Send A is posted 0 at open; property 5 / 2 set it.
             env: Level::new(0.0),
             owner_env: Level::new(0.0),
             fx_send: Level::new(0.0),
-            mono_out: false,
+            mono_out: routing.fixed.is_some(),
             group,
             fade: None,
             env_direct: None,
@@ -828,7 +868,7 @@ mod tests {
         m.render(&mut bus);
         assert!(bus.iter().all(|c| c.iter().all(|&s| s == 0.0)), "first block silent");
         m.render(&mut bus);
-        // Mono, azimuth 0 → centre only, unity gain, unity pitch: an exact copy.
+        // Mono, azimuth 0 → center only, unity gain, unity pitch: an exact copy.
         assert_eq!(&bus[1][..], &pcm.channels[0][..BLOCK]);
         assert!(bus[0].iter().all(|&s| s == 0.0));
         let status = m.query(v);
@@ -839,6 +879,49 @@ mod tests {
             m.render(&mut bus);
         }
         assert!(!m.query(v).alive);
+    }
+
+    /// The 2026-10-07 silent landings: at the cap, finished voices (sample ended, never released by
+    /// their owner) are freed for a new open; live voices still refuse it.
+    #[test]
+    fn finished_voices_do_not_block_a_new_open_at_the_cap() {
+        let (short, short_pcm) = mono(0.004, 48000, false); // under one block
+        let (long, long_pcm) = mono(1.0, 48000, false);
+        let mut m = Mixer::new();
+        m.max_voices = 4;
+        m.add_bank(0, vec![Some(short), Some(long)], vec![Some(short_pcm), Some(long_pcm)]);
+        let mut bus = [[0.0f32; BLOCK]; 6];
+        // Below the cap a finished voice stays until its owner releases it (unchanged behavior).
+        let a = m.open(&request(0)).unwrap();
+        for _ in 0..3 {
+            m.render(&mut bus);
+        }
+        assert!(!m.query(a).alive);
+        m.open(&request(1)).unwrap();
+        assert_eq!((m.voice_count(), m.evicted), (2, 0));
+        // Fill the cap with live voices: the next open is refused and counted.
+        m.open(&request(1)).unwrap();
+        m.open(&request(1)).unwrap();
+        assert_eq!(m.voice_count(), 4);
+        m.release(a);
+        m.open(&request(1)).unwrap();
+        assert!(m.open(&request(1)).is_none());
+        assert_eq!((m.refused, m.refused_cap), (1, 1));
+        // Four finished voices at the cap: the open frees them and succeeds.
+        let mut m = Mixer::new();
+        m.max_voices = 4;
+        let (short, short_pcm) = mono(0.004, 48000, false);
+        m.add_bank(0, vec![Some(short)], vec![Some(short_pcm)]);
+        for _ in 0..4 {
+            m.open(&request(0)).unwrap();
+        }
+        for _ in 0..3 {
+            m.render(&mut bus);
+        }
+        assert_eq!(m.voice_count(), 4);
+        let fresh = m.open(&request(0)).expect("finished voices make room");
+        assert_eq!((m.voice_count(), m.evicted, m.refused), (1, 4, 0));
+        assert!(m.query(fresh).alive);
     }
 
     #[test]
@@ -902,8 +985,8 @@ mod tests {
         };
         let (stereo, _) = render(Route::default());
         let (mono, env) = render(Route { mono: true, owner_env: 0.1, ..Route::default() });
-        // Panned off-centre: the plain route spreads it over the speakers; the submix folds every
-        // speaker (L..Rs) into the centre, louder than the centre alone by the pan's sum.
+        // Panned off-center: the plain route spreads it over the speakers; the submix folds every
+        // speaker (L..Rs) into the center, louder than the center alone by the pan's sum.
         assert!(stereo[2].iter().any(|&v| v != 0.0) && stereo[4].iter().any(|&v| v != 0.0));
         for k in 0..BLOCK {
             let sum: f32 = (0..5).map(|c| stereo[c][k]).sum();
@@ -911,6 +994,33 @@ mod tests {
             assert!((env[k] - 0.1 * sum).abs() < 1e-6, "the env send taps the same sum");
         }
         assert!((0..6).filter(|&c| c != 1).all(|c| mono[c].iter().all(|&v| v == 0.0)));
+    }
+
+    /// The grain bed's FlangeSub input (`flange_a`) reaches return A only while the returns are
+    /// enabled; without them it changes nothing.
+    #[test]
+    fn the_bed_flange_input_feeds_return_a_only_when_enabled() {
+        use crate::bus::flange::FlangePreset;
+        let mut tap = [0.0f32; BLOCK];
+        tap[0] = 1.0;
+        let render = |enabled: bool, input: Option<&[f32; BLOCK]>| {
+            let mut m = Mixer::new();
+            if enabled {
+                m.buses.flange.set_presets(FlangePreset([20.0, 0.3, 0.2, 0.1, 1500.0, 0.002, 0.5, 0.9, 0.03]), FlangePreset([1.7, 0.3, 0.0, 1.0, 250.0, 0.0005, 0.25, 0.6, 0.11]));
+                m.buses.flange.frame([32692, 2313, 32692, 2313]);
+            }
+            let mut out = Vec::new();
+            for b in 0..8 {
+                let mut bus = [[0.0f32; BLOCK]; 6];
+                m.render_with_env(&mut bus, None, input.filter(|_| b == 0));
+                out.push(bus);
+            }
+            out
+        };
+        assert_eq!(render(false, None), render(false, Some(&tap)));
+        let wet = render(true, Some(&tap));
+        assert_ne!(render(true, None), wet);
+        assert!(wet.iter().any(|b| b[1].iter().any(|&v| v != 0.0)), "the delayed copy lands in the centre");
     }
 
     #[test]
@@ -944,7 +1054,7 @@ mod tests {
         assert_eq!(render(false, &[(9, 5)]), render(false, &fx));
         // Enabled, but the voice has no effect record: identical to the plain render.
         assert_eq!(plain, render(true, &[]));
-        // Enabled with the record: the delayed copy adds into the centre.
+        // Enabled with the record: the delayed copy adds into the center.
         let wet = render(true, &[(9, 4096), (10, 1), (11, 16384)]);
         let diff: f32 = wet.iter().zip(&plain).map(|(a, b)| a[1].iter().zip(&b[1]).map(|(x, y)| (x - y).abs()).sum::<f32>()).sum();
         assert!(diff > 0.1, "{diff}");

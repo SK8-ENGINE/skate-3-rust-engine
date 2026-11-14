@@ -35,6 +35,10 @@ pub(crate) struct AnimatedSkeleton {
     pub animation_board: AnimationPartTransform,
     ///Skeleton12560, copied BEFORE board offsets and IK by82BD8CB0..8D10.
     pub unadjusted_board: AnimationPartTransform,
+    ///Skeleton14160 (24 parts x 64 bytes; part 0's translation row is +14208): the raw global animation bone of each
+    ///physics part, copied unmodified by ProcessData 82BD8918 before any part mapping (the skitch spring's height
+    ///and hands read it, b55 / b59).
+    pub raw_part_globals: [AnimationPartTransform; 24],
     landing_on_board_blend: PointGraph<8>,
     pub animation_hips: AnimationPartTransform,
     pub motion: SkeletonMotion,
@@ -113,6 +117,7 @@ impl AnimatedSkeleton {
             physics_frames,
             animation_board: IDENTITY,
             unadjusted_board: IDENTITY,
+            raw_part_globals: [IDENTITY; 24],
             landing_on_board_blend: {
                 let words = data
                     .words::<20>("physics_animation", "default", "LandingOnDeckBLendVsTime")?
@@ -147,6 +152,11 @@ impl AnimatedSkeleton {
         let trajectory = globals.first().ok_or("Animation has no trajectory bone")?;
         self.motion
             .process_trajectory(trajectory, &self.roots.animation_to_world, dt);
+        for (part, &bone) in self.bone_indices.iter().enumerate() {
+            if let Some(raw) = globals.get(bone) {
+                self.raw_part_globals[part] = *raw;
+            }
+        }
         let mut parts = map_animation_parts(globals, &self.bone_indices, &self.physics_frames)?;
         self.unadjusted_board = parts[0];
         SkeletonMotion::publish_unadjusted_board(&parts[0], flags_2472);

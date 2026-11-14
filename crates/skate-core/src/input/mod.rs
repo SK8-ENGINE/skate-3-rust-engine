@@ -25,3 +25,4 @@ pub mod wipeout_intentions;
 pub mod offboard_intentions;
 
 pub mod gameplay_gestures;
+pub mod skater_intent;

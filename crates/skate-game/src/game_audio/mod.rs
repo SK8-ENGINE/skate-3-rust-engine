@@ -30,9 +30,10 @@ pub(crate) mod mod_audio;
 pub(crate) mod mod_rules;
 pub(crate) mod mod_voices;
 pub(crate) mod mod_world;
-mod native;
+pub(crate) mod native;
 mod npc_skaters;
 mod player_audio;
+pub(crate) mod prop_sounds;
 mod random_programs;
 mod random_sets;
 pub(crate) mod skate_events;
@@ -40,12 +41,17 @@ mod state_log;
 mod seed;
 mod state_replay;
 mod swap;
-mod timing;
+pub(crate) mod timing;
+pub(crate) mod hitch_parts;
 pub(crate) mod tuning;
 mod voices;
 pub(crate) mod world_bridge;
 mod world_sources;
 mod world_speech;
+mod nis_speech;
+pub(crate) mod music;
+pub(crate) mod music_zones;
+pub(crate) mod music_caption;
 
 use bevy::{audio::Volume, prelude::*};
 use serde::{Deserialize, Serialize};
@@ -67,8 +73,13 @@ struct SavedSettings {
     effects: u32,
     /// Opt-in, NOT retail (user decision 2026-10-03): more audible world objects at once (8 cars,
     /// 24 peds, 3 NPC / remote skaters instead of retail's 4 / 15 / 1; `native::WorldInstances`).
-    /// Read at start. `SKATE_AUDIO_MORE_AUDIBLE=1` turns it on for one run.
+    /// Read at start (the PC overlay's More Audible World row). `SKATE_AUDIO_MORE_AUDIBLE=1` turns it on for
+    /// one run.
     more_audible_world: bool,
+    /// Setup decodes the streamed speech (peds, main cast, announcer: about 3.4 GB) so it plays; on by default
+    /// (USER-ASKS 338). The PC overlay's Ped Speech row; setup gets it as `SKATE_SETUP_SPEECH=1` / `0`
+    /// (`setup::run_release_setup`), which also works by hand for one setup run.
+    decode_speech: bool,
     /// Where mod emitters (`WorldEmitter`, `sdk.world_audio.spawn(key, 'emitter', …)`) get their
     /// emitter state: `"extra"` (the default, user decision 2026-10-04: their own instances of the
     /// private MixMap, so the map's emitters keep retail's 5) or `"shared"` (retail's rule: they
@@ -78,6 +89,14 @@ struct SavedSettings {
     /// Retail's option volumes (Settings menu rows SFX / Dialog / Music, settings object +128 /
     /// +132 / +136), fed to the MixMap's Master controller every pass (`RetailVolumes::master_inputs`).
     retail_volumes: RetailVolumes,
+    /// The Music Player screen's playlist (soundtrack track numbers, options block +0xF8; empty = every song) and
+    /// mode (`skate_core::music_player::MusicMode` code, +0xD4). docs/hails-additions/11-audio.md#music-player-screen
+    music_playlist: Vec<u32>,
+    music_mode: i64,
+    /// Which default changes this file has been through (`AUDIO_DEFAULTS_VERSION`; 0 in files from before the field):
+    /// files from before 1 get Ped Speech switched on once, so a later "off" sticks.
+    #[serde(default)]
+    defaults_version: u32,
     // Files saved before 2026-10-03 may hold `"interim"` (the opt-out to the removed interim cue
     // tables) or the older `"native"`; unknown keys are ignored, so they still load.
 }
@@ -88,9 +107,29 @@ impl Default for SavedSettings {
             ambience: 100,
             effects: 100,
             more_audible_world: false,
+            // On by default (user 2026-10-25, USER-ASKS 338), the player can switch it off.
+            decode_speech: true,
             mod_emitter_slots: ModEmitterSlots::Extra,
             retail_volumes: RetailVolumes::default(),
+            music_playlist: Vec::new(),
+            music_mode: 0,
+            defaults_version: AUDIO_DEFAULTS_VERSION,
         }
+    }
+}
+/// 1 (2026-10-25, USER-ASKS 338): Ped Speech on by default.
+const AUDIO_DEFAULTS_VERSION: u32 = 1;
+impl SavedSettings {
+    /// A file saved before a default changed takes the new default once; true when it changed (to be saved).
+    fn migrate(&mut self) -> bool {
+        if self.defaults_version >= AUDIO_DEFAULTS_VERSION {
+            return false;
+        }
+        if self.defaults_version < 1 {
+            self.decode_speech = true;
+        }
+        self.defaults_version = AUDIO_DEFAULTS_VERSION;
+        true
     }
 }
 
@@ -191,6 +230,25 @@ pub(crate) struct AudioSettings {
     /// Option volumes a mod holds through the retail menus (`sdk.menus.set_value`): in force
     /// over the saved ones, never saved, dropped when the mod stops.
     volume_overrides: RetailVolumeOverrides,
+    /// The world speech takes are decoded (`speech_decoded`), checked at start.
+    speech_decoded: bool,
+}
+
+/// The install holds decoded world speech takes (setup's opt-in decode; `speech/livingworld` beside the manifest).
+fn speech_decoded(asset_root: &std::path::Path) -> bool {
+    std::fs::read_dir(asset_root.join("private/audio/speech/livingworld")).is_ok_and(|mut d| d.next().is_some())
+}
+
+/// Setup's view of the Ped Speech choice: the saved audio settings of the install at `asset_root` (the default, on,
+/// without a file or for a file from before the default changed).
+pub(crate) fn decode_speech_saved(asset_root: &std::path::Path) -> bool {
+    std::fs::read(asset_root.parent().unwrap_or(asset_root).join("settings/audio.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<SavedSettings>(&b).ok())
+        .map_or(SavedSettings::default().decode_speech, |mut s| {
+            s.migrate();
+            s.decode_speech
+        })
 }
 
 /// Runtime-only replacements of the saved option volumes (None = the player's setting).
@@ -211,15 +269,61 @@ impl AudioSettings {
             Err(_) => SavedSettings::default(),
         }
         .validated();
-        Self { saved, path, muted: config.mute, volume_overrides: RetailVolumeOverrides::default() }
+        let mut saved = saved;
+        if path.is_file() && saved.migrate() {
+            info!("AUDIO_SETTINGS defaults updated to version {AUDIO_DEFAULTS_VERSION} (Ped Speech on)");
+            if let Ok(bytes) = serde_json::to_vec_pretty(&saved) {
+                if let Err(e) = std::fs::write(&path, bytes) {
+                    warn!("Audio settings: {e}");
+                }
+            }
+        }
+        let speech_decoded = speech_decoded(&config.asset_root);
+        if saved.decode_speech && !speech_decoded {
+            // Asked for but not decoded yet (or the refresh was canceled): the overlay offers the refresh.
+            crate::setup::mark_stale("audio");
+        }
+        Self { saved, path, muted: config.mute, volume_overrides: RetailVolumeOverrides::default(), speech_decoded }
     }
-    /// Linear master gain (0 when muted).
+    /// [`Self::more_audible_world`] as `load` would give it, without `load`'s side effects (the migration write, the
+    /// stale mark): for the audio start begun in `main` (`native::begin_early`).
+    pub(crate) fn more_audible_world_at_start(config: &crate::config::Config) -> bool {
+        let path = config.asset_root.parent().unwrap_or(&config.asset_root).join("settings/audio.json");
+        let saved = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<SavedSettings>(&b).ok()).unwrap_or_default();
+        saved.more_audible_world || std::env::var("SKATE_AUDIO_MORE_AUDIBLE").is_ok_and(|v| v == "1")
+    }
+    /// Linear master gain (0 when muted, and while the startup splash is up: the world loads and ticks behind it).
     pub(crate) fn master(&self) -> f32 {
-        if self.muted { 0.0 } else { self.saved.master as f32 / 100.0 }
+        if self.muted || crate::splash::active() { 0.0 } else { self.saved.master as f32 / 100.0 }
     }
     /// The non-retail "more audible" world layout (see `SavedSettings::more_audible_world`).
     pub(crate) fn more_audible_world(&self) -> bool {
         self.saved.more_audible_world || std::env::var("SKATE_AUDIO_MORE_AUDIBLE").is_ok_and(|v| v == "1")
+    }
+    /// The saved choice alone (the overlay row; the runtime takes it at the next start).
+    pub(crate) fn more_audible_world_saved(&self) -> bool {
+        self.saved.more_audible_world
+    }
+    pub(crate) fn set_more_audible_world(&mut self, on: bool) -> String {
+        self.saved.more_audible_world = on;
+        self.save()
+    }
+    /// The speech decode is asked for (`SavedSettings::decode_speech`).
+    pub(crate) fn decode_speech(&self) -> bool {
+        self.saved.decode_speech
+    }
+    /// The world speech takes are decoded in this install.
+    pub(crate) fn speech_decoded(&self) -> bool {
+        self.speech_decoded
+    }
+    /// Ask for the decode (or stop asking); switching it on without decoded takes marks the audio files out of
+    /// date, so the overlay's Refresh Game Files decodes them.
+    pub(crate) fn set_decode_speech(&mut self, on: bool) -> String {
+        self.saved.decode_speech = on;
+        if on && !self.speech_decoded {
+            crate::setup::mark_stale("audio");
+        }
+        self.save()
     }
     /// Whether mod emitters get their own instances (the default; see `SavedSettings::mod_emitter_slots`).
     pub(crate) fn extra_mod_emitter_slots(&self) -> bool {
@@ -262,7 +366,7 @@ impl AudioSettings {
     /// Default settings saved to `path` (tests outside this module).
     #[cfg(test)]
     pub(crate) fn for_test(path: PathBuf) -> Self {
-        Self { saved: SavedSettings::default(), path, muted: false, volume_overrides: Default::default() }
+        Self { saved: SavedSettings::default(), path, muted: false, volume_overrides: Default::default(), speech_decoded: false }
     }
     /// One of retail's option volumes (0..1, the settings object's float).
     pub(crate) fn retail_volume(&self, volume: RetailVolume) -> f32 {
@@ -271,6 +375,19 @@ impl AudioSettings {
     /// Set one of retail's option volumes (clamped to 0..1, as the menu's step rule keeps it) and save.
     pub(crate) fn set_retail_volume(&mut self, volume: RetailVolume, value: f32) -> String {
         *self.saved.retail_volumes.field(volume) = if value.is_finite() { value.clamp(0.0, 1.0) } else { 1.0 };
+        self.save()
+    }
+    /// The Music Player playlist for `songs` soundtrack tracks (the saved one kept to existing songs, else every song).
+    pub(crate) fn music_playlist(&self, songs: u32) -> Vec<u32> {
+        skate_core::music_player::sanitise(&self.saved.music_playlist, songs)
+    }
+    pub(crate) fn music_mode(&self) -> skate_core::music_player::MusicMode {
+        skate_core::music_player::MusicMode::from_code(self.saved.music_mode).unwrap_or_default()
+    }
+    /// Save the Music Player's playlist and mode.
+    pub(crate) fn set_music_player(&mut self, playlist: &[u32], mode: skate_core::music_player::MusicMode) -> String {
+        self.saved.music_playlist = playlist.to_vec();
+        self.saved.music_mode = mode.code();
         self.save()
     }
     /// Master.in1..in3 as retail's Master step writes them from the option volumes.
@@ -293,17 +410,32 @@ impl AudioSettings {
             RetailVolume::Music => &mut o.music,
         } = value;
     }
-    pub(crate) fn label(&self, row: AudioRow) -> String {
-        let (name, value) = match row {
-            AudioRow::Master => ("Master volume", self.saved.master),
-            AudioRow::Ambience => ("Ambience volume", self.saved.ambience),
-            AudioRow::Effects => ("Effects volume", self.saved.effects),
-        };
-        if row == AudioRow::Master && self.muted {
-            format!("{name:<22}{value}%  (muted)")
-        } else {
-            format!("{name:<22}{value}%")
+    /// A menu row's saved volume in percent.
+    pub(crate) fn percent(&self, row: AudioRow) -> u32 {
+        match row {
+            AudioRow::Master => self.saved.master,
+            AudioRow::Ambience => self.saved.ambience,
+            AudioRow::Effects => self.saved.effects,
         }
+    }
+    /// Set a menu row (0..=100, rounded to the row's step) and save; returns a status line.
+    pub(crate) fn set_percent(&mut self, row: AudioRow, percent: u32) -> String {
+        *self.field(row) = (percent.min(100) + STEP / 2) / STEP * STEP;
+        self.save()
+    }
+    /// Put a menu row back to its default and save.
+    pub(crate) fn reset(&mut self, row: AudioRow) -> String {
+        let defaults = SavedSettings::default();
+        let value = match row {
+            AudioRow::Master => defaults.master,
+            AudioRow::Ambience => defaults.ambience,
+            AudioRow::Effects => defaults.effects,
+        };
+        self.set_percent(row, value)
+    }
+    /// `--mute` silences everything whatever the saved volumes say.
+    pub(crate) fn muted(&self) -> bool {
+        self.muted
     }
 }
 
@@ -319,7 +451,7 @@ pub(crate) enum AudioRow {
 struct GameAudioListener;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-struct CueSet;
+pub(crate) struct CueSet;
 
 pub(crate) struct GameAudioPlugin;
 impl Plugin for GameAudioPlugin {
@@ -342,12 +474,14 @@ impl Plugin for GameAudioPlugin {
             .init_resource::<crate::world_audio::WorldEmitterStats>()
             .add_systems(Startup, setup)
             .add_systems(FixedUpdate, skate_events::observe.after(crate::app::SimulationSet::Physics))
+            .add_systems(FixedUpdate, record_replay_audio.after(skate_events::observe).after(crate::presentation::capture))
+            .add_systems(PreUpdate, feed_replay_audio.after(crate::replay::controls))
             .add_systems(
                 Update,
                 // The pass: inputs and the local player's process, the world / NPC owners' process,
                 // the ticks and the local update, then the beds (retail's process / tick / update).
                 // The front-end sounds (session marker) after the ticks, once per pass.
-                (content::frame, map_audio::update, mod_audio::events_frame, mod_rules::frame, mod_audio::drain, ambience::update, native::mixmap_frame, world_sources::frame, npc_skaters::frame_pre, native::mixmap_tick, ambience::mixmap_output, frontend::frame, mod_world::frame, mod_audio::readback, mod_voices::frame, grain_bed::update, emitters::reverb_zones, native::reverb_frame)
+                (content::frame, map_audio::update, mod_audio::events_frame, mod_rules::frame, mod_audio::drain, ambience::update, native::mixmap_frame, world_sources::frame, npc_skaters::frame_pre, prop_sounds::frame_pre, native::mixmap_tick, ambience::mixmap_output, frontend::frame, mod_world::frame, mod_audio::readback, mod_voices::frame, grain_bed::update, emitters::reverb_zones, native::reverb_frame)
                     .chain()
                     .before(CueSet)
                     .after(crate::app::FrameSet::Animation)
@@ -356,10 +490,25 @@ impl Plugin for GameAudioPlugin {
             .add_systems(Update, (emitters::update, random_sets::update).in_set(CueSet).after(crate::app::FrameSet::Animation))
             .add_systems(Update, voices::sync.after(CueSet))
             .add_systems(Update, timing::report)
+            .add_systems(Update, map_audio::read_ahead_next_map.before(map_audio::update))
             .add_plugins(native::register)
             .add_plugins(world_sources::register)
             .add_plugins(npc_skaters::register)
+            .add_plugins(prop_sounds::register)
             .add_plugins(world_speech::register)
+            .add_systems(Update, nis_speech::frame)
+            .init_resource::<music::Music>()
+            .add_message::<music::MusicTrackStarted>()
+            .add_systems(Update, music::frame)
+            .init_resource::<crate::music_player_host::MusicPlayerLink>()
+            .add_systems(Update, music_player_link.before(music::frame))
+            .init_resource::<emitters::MusicZone>()
+            .add_systems(Update, (emitters::music_zones, music_zones::environment).chain().after(music_player_link).after(map_audio::update).before(music::frame))
+            .init_resource::<music_caption::MusicCaptionStyle>()
+            .init_resource::<music_caption::PendingCaption>()
+            .init_resource::<crate::ui_fonts::FallbackFonts>()
+            .add_systems(Startup, crate::ui_fonts::load_ui_font)
+            .add_systems(Update, (crate::ui_fonts::install, music_caption::show.after(music::frame)).chain())
             .add_plugins(world_bridge::register)
             .add_plugins(car_alarm::register)
             .add_systems(
@@ -515,9 +664,38 @@ fn follow_camera(
     }
 }
 
-/// True while game sound must be silent: menu open, replay running.
+/// The player's audio step goes into the replay with the frame captured this step.
+fn record_replay_audio(cues: Res<skate_events::Cues>, replay: Option<ResMut<crate::replay::Replay>>) {
+    if let Some(mut replay) = replay.filter(|r| !r.active) {
+        replay.attach_riding(cues.raw);
+    }
+}
+
+/// During a replay the host hears the recorded steps the cursor crossed (instead of `observe`'s frozen live state).
+fn feed_replay_audio(
+    mut cues: ResMut<skate_events::Cues>,
+    replay: Option<ResMut<crate::replay::Replay>>,
+    presentation: Option<ResMut<crate::presentation::Presentation>>,
+) {
+    let Some(mut replay) = replay else { return };
+    for riding in replay.audio_steps() {
+        cues.publish(riding);
+    }
+    // A seek or rewind is a camera cut for the host (Doppler velocity reset, `native::mixmap_frame`).
+    if let Some(mut presentation) = presentation.filter(|_| replay.active && replay.jumped()) {
+        presentation.cuts += 1;
+    }
+}
+
+/// True while game sound must be silent: menu open, or a replay that is not moving forward (retail mutes a paused
+/// replay: Master.in6 with time scale 0, `sub_824D5160`, b375). A playing replay is heard from its recorded steps.
 fn silenced(menu: Option<&crate::graphics_menu::Menu>, replay: &crate::replay::Replay) -> bool {
-    menu.is_some_and(|m| m.open) || replay.active
+    menu.is_some_and(|m| m.open || m.fe_suspended) || (replay.active && !replay.audible())
+}
+
+/// Speech is silent in any replay (retail blocks speech requests in replay: `824AABD0`, `824ABA18`, b375).
+fn speech_silenced(menu: Option<&crate::graphics_menu::Menu>, replay: &crate::replay::Replay) -> bool {
+    menu.is_some_and(|m| m.open || m.fe_suspended) || replay.active
 }
 
 #[cfg(test)]
@@ -541,6 +719,7 @@ mod tests {
             path: std::env::temp_dir().join(format!("skate-audio-test-{}-{master}/audio.json", std::process::id())),
             muted: false,
             volume_overrides: RetailVolumeOverrides::default(),
+            speech_decoded: false,
         }
     }
 
@@ -549,18 +728,39 @@ mod tests {
     #[test]
     fn old_settings_files_with_interim_or_native_keys_still_load() {
         let old: SavedSettings = serde_json::from_str(r#"{"master":60,"ambience":75,"effects":75,"native":false}"#).unwrap();
-        assert_eq!(old, SavedSettings { master: 60, ambience: 75, effects: 75, ..SavedSettings::default() });
+        assert_eq!(old, SavedSettings { master: 60, ambience: 75, effects: 75, defaults_version: 0, ..SavedSettings::default() });
         let opted_out: SavedSettings = serde_json::from_str(r#"{"master":50,"interim":true}"#).unwrap();
-        assert_eq!(opted_out, SavedSettings { master: 50, ..SavedSettings::default() });
+        assert_eq!(opted_out, SavedSettings { master: 50, defaults_version: 0, ..SavedSettings::default() });
     }
 
     #[test]
     fn defaults_are_quiet_and_saved_values_are_bounded() {
         assert_eq!(SavedSettings::default().master, 75);
         let loaded: SavedSettings = serde_json::from_str(r#"{"master":400,"ambience":33,"effects":7}"#).unwrap();
-        assert_eq!(loaded.validated(), SavedSettings { master: 100, ambience: 30, effects: 5, ..SavedSettings::default() });
+        assert_eq!(loaded.validated(), SavedSettings { master: 100, ambience: 30, effects: 5, defaults_version: 0, ..SavedSettings::default() });
         let more: SavedSettings = serde_json::from_str(r#"{"more_audible_world":true}"#).unwrap();
         assert!(more.more_audible_world && more.master == 75);
+    }
+
+    /// The Ped Speech choice is on by default (USER-ASKS 338), also for a file from before that; setup reads it from
+    /// the install's saved settings (`decode_speech_saved`, beside `AudioSettings::load`'s path); a later "off" sticks;
+    /// the decoded takes are found by their folder.
+    #[test]
+    fn speech_decode_choice_reaches_setup() {
+        assert!(SavedSettings::default().decode_speech);
+        let root = std::env::temp_dir().join(format!("skate-audio-speech-{}", std::process::id()));
+        let assets = root.join("installations").join("a");
+        std::fs::create_dir_all(assets.join("private/audio/speech/livingworld")).unwrap();
+        assert!(decode_speech_saved(&assets) && !speech_decoded(&assets), "no settings file: the default");
+        std::fs::create_dir_all(root.join("installations/settings")).unwrap();
+        std::fs::write(root.join("installations/settings/audio.json"), br#"{"decode_speech":false}"#).unwrap();
+        assert!(decode_speech_saved(&assets), "a file from before the default changed takes it once");
+        std::fs::write(root.join("installations/settings/audio.json"), br#"{"decode_speech":false,"defaults_version":1}"#).unwrap();
+        assert!(!decode_speech_saved(&assets), "switched off after the change");
+        std::fs::write(root.join("installations/settings/audio.json"), br#"{"decode_speech":true}"#).unwrap();
+        std::fs::write(assets.join("private/audio/speech/livingworld/0.wav"), b"x").unwrap();
+        assert!(decode_speech_saved(&assets) && speech_decoded(&assets));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// Mod emitters get their own instances by default (user decision 2026-10-04); `"shared"` in
@@ -580,7 +780,7 @@ mod tests {
         assert_eq!(ModEmitterSlots::in_force(Extra, Some("shared")), Shared);
         assert_eq!(ModEmitterSlots::in_force(Shared, Some("extra")), Extra);
         assert_eq!(ModEmitterSlots::in_force(Shared, Some("1")), Shared, "unknown values are ignored");
-        let s = |slots| AudioSettings { saved: SavedSettings { mod_emitter_slots: slots, ..Default::default() }, path: std::env::temp_dir().join("x.json"), muted: false, volume_overrides: Default::default() };
+        let s = |slots| AudioSettings { saved: SavedSettings { mod_emitter_slots: slots, ..Default::default() }, path: std::env::temp_dir().join("x.json"), muted: false, volume_overrides: Default::default(), speech_decoded: false };
         if std::env::var("SKATE_AUDIO_MOD_EMITTER_SLOTS").is_err() {
             assert!(s(Extra).extra_mod_emitter_slots() && !s(Shared).extra_mod_emitter_slots());
         }
@@ -600,3 +800,56 @@ mod tests {
         let _ = std::fs::remove_dir_all(s.path.parent().unwrap());
     }
 }
+
+/// The Music Player screen's link (docs/hails-additions/11-audio.md#music-player-screen): loads the saved playlist and
+/// mode once the soundtrack is known, reports the volume and the playing song, and applies what the screen asked.
+fn music_player_link(mut link: ResMut<crate::music_player_host::MusicPlayerLink>, mut settings: Option<ResMut<AudioSettings>>, mut music: ResMut<music::Music>) {
+    use crate::music_player_host::MusicPlayerAction;
+    let Some(settings) = settings.as_deref_mut() else { return };
+    let count = music.soundtrack_count();
+    if !link.loaded && music.is_loaded() && count > 0 {
+        link.loaded = true;
+        link.songs = count;
+        link.playlist = settings.music_playlist(count);
+        link.mode = settings.music_mode();
+        apply_music_player(&mut music, &link.playlist, link.mode, count);
+    }
+    link.volume = settings.retail_volume(RetailVolume::Music);
+    link.playing = music.soundtrack_playing();
+    for action in std::mem::take(&mut link.actions) {
+        match action {
+            MusicPlayerAction::Volume(v) => {
+                settings.set_retail_volume(RetailVolume::Music, v);
+            }
+            MusicPlayerAction::Mode(mode) => {
+                link.mode = mode;
+                apply_music_player(&mut music, &link.playlist, mode, count);
+            }
+            MusicPlayerAction::PlaySong(track) if link.mode.soundtrack() && music.owner.is_none() => {
+                music.requests.push(music::MusicRequest::Soundtrack { owner: None, track: Some(track) });
+            }
+            MusicPlayerAction::Next if music.owner.is_none() => music.requests.push(music::MusicRequest::Skip),
+            _ => {}
+        }
+    }
+    if std::mem::take(&mut link.save) {
+        let status = settings.set_music_player(&link.playlist, link.mode);
+        info!("AUDIO_MUSIC music player saved ({} songs, {:?}): {status}", link.playlist.len(), link.mode);
+        apply_music_player(&mut music, &link.playlist, link.mode, count);
+    }
+}
+
+/// The soundtrack follows the playlist and mode; a mod's own queue is left alone (it ends with the mod).
+fn apply_music_player(music: &mut music::Music, playlist: &[u32], mode: skate_core::music_player::MusicMode, count: u32) {
+    let filter = (playlist.len() < count as usize).then(|| playlist.to_vec());
+    let off = !mode.soundtrack();
+    if music.soundtrack_playlist == filter && music.soundtrack_off == off {
+        return;
+    }
+    music.soundtrack_playlist = filter;
+    music.soundtrack_off = off;
+    if music.owner.is_none() {
+        music.requests.push(if off { music::MusicRequest::Stop { owner: None } } else { music::MusicRequest::Soundtrack { owner: None, track: None } });
+    }
+}
+

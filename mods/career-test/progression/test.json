@@ -1,0 +1,5 @@
+{
+  "actions": {
+    "career_test_bonus": {"conditions": [{"type": "board_sales", "threshold": 1000}], "graph": null, "record_fired": false}
+  }
+}

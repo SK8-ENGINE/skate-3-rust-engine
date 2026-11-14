@@ -93,8 +93,20 @@ impl SelectionSpace {
                     selected = Some(i);
                 }
             }
-            let chosen = selected
-                .ok_or_else(|| "SelectionSpace has no finite native minimum".to_string())?;
+            let chosen = selected.ok_or_else(|| {
+                // Name the inputs so a session log shows which one was not finite.
+                let inputs: Vec<String> = self
+                    .parameters
+                    .iter()
+                    .zip(&values)
+                    .map(|(parameter, value)| format!("{:?}={value}", parameter.name))
+                    .collect();
+                format!(
+                    "SelectionSpace has no finite native minimum; inputs [{}]; candidates {:?}",
+                    inputs.join(", "),
+                    self.candidates.iter().map(|c| c.name.as_str()).collect::<Vec<_>>()
+                )
+            })?;
             //82D26EE4..F88 resolves the first child record with the chosen name.
             self.selected = self
                 .candidates

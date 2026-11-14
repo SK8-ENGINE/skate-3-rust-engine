@@ -11,7 +11,7 @@ pub struct AudioState {
     pub dt: f32,
     /// `+208` board ground speed (m/s, SkateboardMotion+164; signed).
     pub ground_speed: f32,
-    /// `+96` centre-of-mass velocity (SystemReckoning+16); `+212` is its length.
+    /// `+96` center-of-mass velocity (SystemReckoning+16); `+212` is its length.
     pub com_velocity: [f32; 3],
     /// Record `+0` = SystemReckoning+64: the followed point (the skater).
     pub com_position: [f32; 3],
@@ -50,6 +50,8 @@ pub struct AudioState {
     pub bail: bool,
     pub bail_end: bool,
     pub on_foot: bool,
+    /// `+744` the skater is skitching (packer record `+152` bit `0x100` = physical state 104; `hand_grabs`).
+    pub skitching: bool,
     pub soft_wheels: bool,
     /// `+333 || +334` the push foot is planted; `+335` a new push plant this frame.
     pub push_planted: bool,
@@ -165,6 +167,13 @@ pub struct AudioState {
     /// the values before the bridge's speed graph: the poster applies it at [`Self::com_speed_216`]
     /// (retail stores the product back into `+496`).
     pub body_impact: [f32; 6],
+    /// This frame's largest contact speed against group 8 / 5 / 11 bodies (+596 / +600 / +608, 82BD60C8 tail).
+    pub collide_vehicle: f32,
+    pub collide_skater: f32,
+    pub collide_other: f32,
+    /// The skater contact was with the local player (retail `+604` == the local skater's index;
+    /// `SkeletonCollision::other_skater`): a bumped NPC's team line (8290) needs it.
+    pub collide_skater_local: bool,
     /// `+216`: the previous bridge frame's `+212` (|COM v|, m/s; the bridge `sub_824B0DA8` copies
     /// `+212` there after scaling the region impacts by the speed graph at it). The game sets it
     /// per physics step; 0 (graph value 1.0) when nobody does.
@@ -212,6 +221,7 @@ impl Default for AudioState {
             bail: false,
             bail_end: false,
             on_foot: false,
+            skitching: false,
             soft_wheels: false,
             push_planted: false,
             push_trigger: false,
@@ -257,6 +267,10 @@ impl Default for AudioState {
             body_tag: [0; 6],
             body_slide_flag: false,
             body_impact: [0.0; 6],
+            collide_vehicle: 0.0,
+            collide_skater: 0.0,
+            collide_other: 0.0,
+            collide_skater_local: false,
             com_speed_216: 0.0,
             hands_on_deck: [false; 2],
             in_water: false,

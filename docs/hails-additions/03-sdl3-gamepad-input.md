@@ -19,7 +19,7 @@ conversion with its own dead zone) still receives an XInput-shaped
 `XboxState` with raw values. Only the transport in
 `crates/skate-game/src/input/platform.rs` changes.
 
-- **Threading.** SDL must be pumped on the thread that initialised it, while
+- **Threading.** SDL must be pumped on the thread that initialized it, while
   Bevy runs systems on a pool. A dedicated `sdl-gamepad` thread owns SDL,
   polls every 1 ms, and publishes a per-slot snapshot behind a mutex; the
   game reads the latest snapshot each frame, exactly as `XInputGetState`
@@ -49,21 +49,21 @@ conversion with its own dead zone) still receives an XInput-shaped
 
 ## Files
 
-- `crates/skate-game/src/input/platform.rs` — SDL backend, conversions,
+- `crates/skate-game/src/input/platform.rs`: SDL backend, conversions,
   backend selection, paddle masks, unit tests.
-- `crates/skate-game/src/input.rs` — `start_controllers` startup system
+- `crates/skate-game/src/input.rs`: `start_controllers` startup system
   (settings + early backend start); log wording.
-- `crates/skate-game/src/app.rs` — comment on why Bevy's `GilrsPlugin` stays
+- `crates/skate-game/src/app.rs`: comment on why Bevy's `GilrsPlugin` stays
   disabled.
-- `crates/skate-core/src/input/xbox.rs` — `XboxState` derives
+- `crates/skate-core/src/input/xbox.rs`: `XboxState` derives
   `Clone, Copy, Debug, Default, PartialEq, Eq` (snapshots cross threads).
-- `crates/skate-game/Cargo.toml` — `sdl3 = "=0.20.0"` with
+- `crates/skate-game/Cargo.toml`: `sdl3 = "=0.20.0"` with
   `build-from-source-static` (SDL 3.4.16, statically linked, no DLL to ship).
-- `scripts/Ensure-CMake.ps1` (new) — finds CMake for the SDL build: uses
+- `scripts/Ensure-CMake.ps1` (new): finds CMake for the SDL build. Uses
   `cmake` on PATH, else Visual Studio's bundled copy via `vswhere`, and sets
   `CMAKE`. Dot-sourced by `Build.ps1`, `Build-Release.ps1`,
   `build-multiplayer-test.ps1`. CI runners already have CMake.
-- `vendor/sdl3-sys/` + root `Cargo.toml` `[patch.crates-io]` + `Cargo.lock` —
+- `vendor/sdl3-sys/` + root `Cargo.toml` `[patch.crates-io]` + `Cargo.lock`:
   static C runtime fix, below.
 
 ## Static C runtime (release/CI builds)

@@ -378,6 +378,11 @@ impl AnimationMetadata {
     pub fn clip_count(&self) -> usize {
         self.clips.values().map(Vec::len).sum()
     }
+
+    /// Every clip record, by name then record order.
+    pub fn clips(&self) -> impl Iterator<Item = &ClipMetadata> {
+        self.clips.values().flatten()
+    }
 }
 
 fn validate_name(name: &str, length: usize) -> Result<(), String> {

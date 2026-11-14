@@ -115,7 +115,7 @@ pub struct VehicleState {
     pub position: [f32; 3],
     /// For the 3DObjPos rates (m/s, world).
     pub velocity: [f32; 3],
-    /// `+112`: the heading (the world matrix's forward row, normalised; G1: dot with the recomp's
+    /// `+112`: the heading (the world matrix's forward row, normalized; G1: dot with the recomp's
     /// forward p50 1.0000), which the front / rear split measures against.
     pub direction: [f32; 3],
     /// `+148`: speed (m/s).
@@ -125,7 +125,7 @@ pub struct VehicleState {
     pub load: f32,
     /// `+156`: 0 = no horn, 1–5 = the horn kind, 6 = the car alarm.
     pub horn: i32,
-    /// `+160`: the tyres skid (skid w5).
+    /// `+160`: the tires skid (skid w5).
     pub skid: i32,
     /// The vehicle's `aud_traffic_engine` record (`+168`).
     pub engine: EngineRecord,
@@ -277,7 +277,7 @@ impl Engine {
         let (front, rear, near) = (out.level(3), out.level(4), out.level(5));
         w[0] = trunc_clamp(self.rpm, 0, 10000);
         // The front / rear split: cos of the angle between the vehicle's direction and the
-        // listener → vehicle vector (both normalised; retail uses vrsqrtefp + two Newton steps).
+        // listener → vehicle vector (both normalized; retail uses vrsqrtefp + two Newton steps).
         let dot = heading_dot(v.direction, v.position, camera);
         let bias = r.rear_bias as f32 * dot;
         let rear_cut = (rear as f32 * bias) * NEG_INV_Q15;

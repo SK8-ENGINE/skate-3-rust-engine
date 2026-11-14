@@ -172,10 +172,10 @@ impl Graph8 {
 /// The stream voice's PEAK filter by the speaker's azimuth (both speech owners' updates,
 /// `sub_824D9370` / `sub_824DA300`): the owner's raw azimuth (output 0, 0..65535) folded to the
 /// front / back angle (above 32767 → 65536 − raw), then three curves of the speech record
-/// (class `B29C3B2C13D96482` `default`, holder `*(0x830CFDA4)+44`): centre `2C166907CF51DB88`
+/// (class `B29C3B2C13D96482` `default`, holder `*(0x830CFDA4)+44`): center `2C166907CF51DB88`
 /// (600 Hz at the front, 4000 at the side, 600 behind), gain `EA2C18D9CE5CBA3A` (0.4 → 0.1),
 /// Q `CF8679F540B82B2B` (3). Setup export `world_tuning.speech_voice`; the defaults are the shipped
-/// curves. Recomp (163809): every speech voice's PEAK (centre, gain) lies on the two curves at one
+/// curves. Recomp (163809): every speech voice's PEAK (center, gain) lies on the two curves at one
 /// azimuth.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SpeechVoiceTuning {
@@ -212,7 +212,7 @@ impl Default for SpeechVoiceTuning {
 }
 
 impl SpeechVoiceTuning {
-    /// (centre Hz, linear gain, Q) for an owner's raw azimuth.
+    /// (center Hz, linear gain, Q) for an owner's raw azimuth.
     pub fn peak(&self, raw_azimuth: i32) -> [f32; 3] {
         let a = raw_azimuth as f32;
         let a = if a > 32767.0 { 65536.0 - a } else { a };
@@ -251,7 +251,7 @@ pub struct VoiceParams {
     pub azimuth: f32,
     pub hpf: f32,
     pub lpf: f32,
-    /// The PEAK filter (centre Hz, linear gain, Q) ([`SpeechVoiceTuning::peak`]).
+    /// The PEAK filter (center Hz, linear gain, Q) ([`SpeechVoiceTuning::peak`]).
     pub peak: [f32; 3],
 }
 
@@ -297,13 +297,13 @@ pub fn skater_outputs_focused(out: &dyn Outputs, model: u32, far: bool, focused:
     params(out, skater_level_ids_focused(model, far, focused), SKATER_SEND_A, SKATER_FILTERS, SKATER_ECHO_FILTERS, voice, scale)
 }
 
-/// The announcer's block constants (`sub_824A3C28`): the PEAK stays flat (centre `*(0x822F8920)`
+/// The announcer's block constants (`sub_824A3C28`): the PEAK stays flat (center `*(0x822F8920)`
 /// = 96000 Hz, gain 1.0, Q 3.0), the voice float is 1.0 and there is no echo send.
 pub const ANNOUNCER_PEAK: [f32; 3] = [96_000.0, 1.0, 3.0];
 
 /// The announcer's values (`out` = a snapshot of the Global slot's Announcer object with outputs
 /// 3 / 4 read as filters; `scale` = [`super::announcer::AnnouncerLevel::scale`]): the level is
-/// out2 × the scale truncated to an integer (`sub_824A7FA0`'s neighbour: `fctiwz`), the pitch
+/// out2 × the scale truncated to an integer (`sub_824A7FA0`'s neighbor: `fctiwz`), the pitch
 /// out1, the azimuth out0 (raw), the high pass out4, the low pass out3, the environment send out5
 /// (SFXObj_Announcer `sub_824D07B8` copies them into its object, the stream block takes them).
 pub fn announcer_outputs(out: &dyn Outputs, scale: f32) -> VoiceParams {
@@ -333,8 +333,22 @@ pub fn far_clip(name: &str) -> bool {
     name.strip_suffix(".dat").unwrap_or(name).ends_with("_f")
 }
 
+/// Whether a take's data is in ([`SpeechVoices::prepare`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Prepare {
+    Ready,
+    /// Still being read: the line keeps its stream and opens when it is in.
+    Loading,
+    /// It cannot play: the line ends as when [`SpeechVoices::open`] fails.
+    Failed,
+}
+
 /// What plays the takes (the host's mixer and decoded speech).
 pub trait SpeechVoices {
+    /// Whether `line`'s take can open now (retail start 82C5DC80 has no ready check; host answers Loading).
+    fn prepare(&mut self, _line: Line) -> Prepare {
+        Prepare::Ready
+    }
     /// Start `line`'s take with these values; None when it cannot play (no decoded take).
     fn open(&mut self, line: Line, p: &VoiceParams) -> Option<u32>;
     fn set(&mut self, voice: u32, p: &VoiceParams);
@@ -360,6 +374,12 @@ pub struct Request {
     pub lines: Vec<Line>,
     /// The `.evt` queue timeout in logical visual-game ticks (zero disables expiration).
     pub timeout: u32,
+    /// The event's speech tuning `+0` in console frames: the voice starts this long after the line takes its stream
+    /// (`sub_82C5DC80` schedules the voice at the library clock + `+0`; the stream is active meanwhile).
+    pub start_delay: u32,
+    /// The event's speech tuning `+4` in console frames: after the line starts, its stream takes no new line until
+    /// it has been idle this long (`sub_82C5DA88` stores it on the stream; it counts down only while idle).
+    pub gap: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -368,6 +388,8 @@ struct Stream {
     at: usize,
     voice: Option<u32>,
     low: u32,
+    /// Console frames left before the first voice opens ([`Request::start_delay`]).
+    wait: u32,
 }
 
 /// What [`SpeechPlayer::request`] did.
@@ -435,6 +457,8 @@ pub struct SpeechPlayer {
     /// channel × 2 + k.
     pub channel: u8,
     streams: [Option<Stream>; STREAMS],
+    /// Console frames each stream stays closed to new lines while idle ([`Request::gap`]).
+    cooldown: [u32; STREAMS],
     queue: Arc<Mutex<Pending>>,
     /// Counters (diagnostics).
     pub started: u64,
@@ -486,7 +510,12 @@ impl SpeechPlayer {
     ///not exposed here; this snapshot describes the running stream player.
     pub fn available(&self) -> bool {
         super::speech_queue::channel_available(self.channel,
-            std::array::from_fn(|k| self.streams[k].is_some()), [false; 2])
+            std::array::from_fn(|k| self.streams[k].is_some() || self.cooldown[k] > 0), [false; 2])
+    }
+
+    /// The first stream with no line whose gap ran out.
+    fn free_stream(&self) -> Option<usize> {
+        (0..STREAMS).find(|&k| self.streams[k].is_none() && self.cooldown[k] == 0)
     }
 
     ///824A73F0 preflight may control a different stream player. Living-world
@@ -507,8 +536,10 @@ impl SpeechPlayer {
             self.stop_stream(k, voices);
             self.interrupted += 1;
         }
-        if let Some(k) = self.streams.iter().position(Option::is_none) {
-            self.streams[k] = Some(Stream { req, at: 0, voice: None, low: 0 });
+        if let Some(k) = self.free_stream() {
+            self.cooldown[k] = req.gap;
+            let wait = req.start_delay;
+            self.streams[k] = Some(Stream { req, at: 0, voice: None, low: 0, wait });
             return (if stop == Some(k) && control_available.is_none() {
                 Outcome::Interrupted(k)
             } else { Outcome::Playing(k) }, external_stop);
@@ -570,6 +601,12 @@ impl SpeechPlayer {
     /// tick must not age pending requests again.
     pub fn frame_at(&mut self, index: &SpeechIndex, speaker: &mut dyn FnMut(u64, bool, u16) -> Option<VoiceParams>, voices: &mut dyn SpeechVoices, tick: u32) -> Vec<Event> {
         let mut events = Vec::new();
+        // A stream's gap counts down only while it is idle.
+        for k in 0..STREAMS {
+            if self.streams[k].is_none() {
+                self.cooldown[k] = self.cooldown[k].saturating_sub(1);
+            }
+        }
         {
             let mut queue = self.queue.lock().unwrap();
             queue.clock = tick;
@@ -582,7 +619,7 @@ impl SpeechPlayer {
                         if let Some(q) = slot.take() { events.push(Event::Expired { speaker: q.request.speaker }); }
                     }
                 }
-                let Some(k) = self.streams.iter().position(Option::is_none) else { break };
+                let Some(k) = self.free_stream() else { break };
                 let Some(best) = best else { break };
                 let q = queue.slots[best].take().expect("selected native queue slot");
                 //82971DA8 cancels older requests only after a successful start.
@@ -592,15 +629,29 @@ impl SpeechPlayer {
                 let far = index.clips.get(line.clip).is_some_and(|c| far_clip(&c.name));
                 let Some(mut p) = speaker(q.request.speaker, far, q.request.event) else { continue };
                 p.slot = self.channel * 2 + k as u8;
-                let Some(voice) = voices.open(line, &p) else { continue };
+                let voice = match voices.prepare(line) {
+                    // The start delay: the stream is taken now, the voice opens below once it ran out.
+                    _ if q.request.start_delay > 0 => None,
+                    Prepare::Failed => continue,
+                    // The stream is taken now; the stream loop below opens the voice once the take is in.
+                    Prepare::Loading => None,
+                    Prepare::Ready => {
+                        let Some(voice) = voices.open(line, &p) else { continue };
+                        Some(voice)
+                    }
+                };
                 candidates[best].active = true;
                 super::speech_queue::consumed(&mut candidates, best, tick, &retain);
                 for (slot, candidate) in queue.slots.iter_mut().zip(&candidates) {
                     if !candidate.active { *slot = None; }
                 }
-                self.started += 1;
-                events.push(Event::Started { k, speaker: q.request.speaker, line });
-                self.streams[k] = Some(Stream { req: q.request, at: 0, voice: Some(voice), low: 0 });
+                if voice.is_some() {
+                    self.started += 1;
+                    events.push(Event::Started { k, speaker: q.request.speaker, line });
+                }
+                self.cooldown[k] = q.request.gap;
+                let wait = q.request.start_delay;
+                self.streams[k] = Some(Stream { req: q.request, at: 0, voice, low: 0, wait });
             }
         }
         for k in 0..STREAMS {
@@ -646,12 +697,31 @@ impl SpeechPlayer {
                     let far = index.clips.get(line.clip).is_some_and(|c| far_clip(&c.name));
                     let mut p = speaker(s.req.speaker, far, s.req.event).unwrap_or(p);
                     p.slot = slot;
-                    s.voice = voices.open(line, &p);
-                    if s.voice.is_some() {
-                        events.push(Event::Started { k, speaker: s.req.speaker, line });
+                    // Not in yet: the next take opens from the arm below once it is.
+                    if voices.prepare(line) != Prepare::Loading {
+                        s.voice = voices.open(line, &p);
+                        if s.voice.is_some() {
+                            events.push(Event::Started { k, speaker: s.req.speaker, line });
+                        }
                     }
                 }
                 None => {
+                    if s.wait > 0 {
+                        s.wait -= 1;
+                        self.streams[k] = Some(s);
+                        continue;
+                    }
+                    match voices.prepare(line) {
+                        Prepare::Loading => {
+                            self.streams[k] = Some(s);
+                            continue;
+                        }
+                        Prepare::Failed => {
+                            events.push(Event::Finished { k, speaker: s.req.speaker });
+                            continue;
+                        }
+                        Prepare::Ready => {}
+                    }
                     s.voice = voices.open(line, &p);
                     match s.voice {
                         Some(_) => {
@@ -703,8 +773,21 @@ mod tests {
         opened: Vec<Line>,
         next: u32,
         last: Option<VoiceParams>,
+        /// `prepare` answers Loading this many more times, then Ready (or Failed with `fail`).
+        loading: u32,
+        fail: bool,
     }
     impl SpeechVoices for Voices {
+        fn prepare(&mut self, _: Line) -> Prepare {
+            if self.loading > 0 {
+                self.loading -= 1;
+                Prepare::Loading
+            } else if self.fail {
+                Prepare::Failed
+            } else {
+                Prepare::Ready
+            }
+        }
         fn open(&mut self, line: Line, p: &VoiceParams) -> Option<u32> {
             self.next += 1;
             self.live.push(self.next);
@@ -732,7 +815,7 @@ mod tests {
     }
 
     fn req(speaker: u64, clip: usize, priority: i32, interrupt: bool) -> Request {
-        Request { speaker, event: 8210, priority, queue_priority: priority as u16, retain_queued: false, interrupt, interrupt_when_full: false, lines: vec![Line { clip, take: 0, event: 501 }], timeout: 3 }
+        Request { speaker, event: 8210, priority, queue_priority: priority as u16, retain_queued: false, interrupt, interrupt_when_full: false, lines: vec![Line { clip, take: 0, event: 501 }], timeout: 3, start_delay: 0, gap: 0 }
     }
 
     #[test]
@@ -772,6 +855,66 @@ mod tests {
             assert!(!ev.iter().any(|e| matches!(e, Event::Cut { .. })));
         }
         assert_eq!((p.busy(), v.last.map(|p| p.slot)), (1, Some(6)), "channel 3: stream record 6");
+    }
+
+    /// A take still being read holds its stream (a second request waits in the queue) and opens once
+    /// it is in, with one Started; a take that cannot be read ends the line and frees the stream.
+    #[test]
+    fn a_loading_take_holds_its_stream_and_opens_when_it_is_in() {
+        let ix = index();
+        let params = |_: u64, _: bool, _: u16| Some(ped_outputs(&Out(9804), PedLevelSelect::default(), 8210, false, &SpeechVoiceTuning::default(), 1.0));
+        let mut p = SpeechPlayer::on_channel(1);
+        let mut v = Voices { loading: 3, ..Default::default() };
+        assert_eq!(p.request(req(1, 0, 620, false), &mut v), Outcome::Playing(0));
+        assert_eq!(p.request(req(2, 0, 620, false), &mut v), Outcome::Playing(1));
+        assert_eq!(p.request(req(3, 0, 620, false), &mut v), Outcome::Queued);
+        let mut started = Vec::new();
+        for _ in 0..4 {
+            assert!(p.speaking(1) && p.speaking(2) && !p.speaking(3), "the loading lines keep their streams");
+            started.extend(p.frame(&ix, &mut { params }, &mut v).into_iter().filter(|e| matches!(e, Event::Started { .. })));
+        }
+        assert_eq!(v.opened.len(), 2, "each opened once, after loading");
+        assert_eq!(started.len(), 2);
+        assert_eq!(p.started, 2);
+
+        let mut p = SpeechPlayer::on_channel(1);
+        let mut v = Voices { loading: 1, fail: true, ..Default::default() };
+        assert_eq!(p.request(req(1, 0, 620, false), &mut v), Outcome::Playing(0));
+        let ev = p.frame(&ix, &mut { params }, &mut v);
+        assert!(ev.is_empty() && p.speaking(1), "still loading");
+        let ev = p.frame(&ix, &mut { params }, &mut v);
+        assert_eq!(ev, vec![Event::Finished { k: 0, speaker: 1 }]);
+        assert!(!p.speaking(1) && v.opened.is_empty());
+    }
+
+    /// Tuning `+0`: the line takes its stream at once and its voice opens `start_delay` frames later; tuning `+4`: the
+    /// stream it started on takes no new line until it has been idle `gap` frames (a request in between takes the
+    /// other stream, or waits in the queue).
+    #[test]
+    fn the_start_delay_holds_the_voice_and_the_gap_holds_the_stream() {
+        let ix = index();
+        let params = |_: u64, _: bool, _: u16| Some(ped_outputs(&Out(9804), PedLevelSelect::default(), 8210, false, &SpeechVoiceTuning::default(), 1.0));
+        let mut p = SpeechPlayer::on_channel(1);
+        let mut v = Voices::default();
+        let delayed = Request { start_delay: 3, gap: 4, ..req(1, 0, 620, false) };
+        assert_eq!(p.request(delayed, &mut v), Outcome::Playing(0));
+        for frame in 0..3 {
+            p.frame(&ix, &mut { params }, &mut v);
+            assert!(v.opened.is_empty() && p.speaking(1), "frame {frame}: the stream is held, no voice yet");
+        }
+        p.frame(&ix, &mut { params }, &mut v);
+        assert_eq!(v.opened.len(), 1, "the voice opens after the delay");
+        // The line ends: stream 0 is idle but closed for 4 frames, so the next line takes stream 1.
+        v.live.clear();
+        p.frame(&ix, &mut { params }, &mut v);
+        assert!(!p.speaking(1));
+        assert_eq!(p.request(req(2, 0, 620, false), &mut v), Outcome::Playing(1));
+        // Stream 1 busy and stream 0 still closed: the next request waits in the queue (no expiry here).
+        assert_eq!(p.request(Request { timeout: 0, ..req(3, 0, 620, false) }, &mut v), Outcome::Queued);
+        for _ in 0..4 {
+            p.frame(&ix, &mut { params }, &mut v);
+        }
+        assert!(p.speaking(3), "after the gap the queued line takes stream 0");
     }
 
     #[test]

@@ -10,7 +10,9 @@ mod settings;
 mod tests;
 pub(crate) mod world;
 
-use crate::{grind_world::StaticProvider, physics::grind::ManagerObservation};
+#[cfg(test)]
+use crate::grind_world::StaticProvider;
+use crate::physics::grind::ManagerObservation;
 use skate_core::{
     air::trajectory::grind_surface::{self, GrindSurface, Probe, ProbeHit},
     physics::{
@@ -134,6 +136,11 @@ pub(crate) struct GrindInputState {
     /// Physical pop consumes this same cache/energy/cooldown, not a copy.
     pub jumper: manager::Jumper,
     pub investigation: GrindInvestigationFields,
+    /// The owner of the last rail a grind took (kept between investigations): the grinded prop is spared the
+    /// skater's push while the grind lasts (`solve`; grinding does not push the prop, the user from retail play).
+    pub rail_owner: Option<u64>,
+    /// The prop / car rail last reported by GRIND_NEAR (a rail in reach with no grind taken).
+    near_logged: Option<u64>,
     settings: settings::Settings,
 }
 
@@ -161,14 +168,26 @@ impl GrindInputState {
             engagement: entry::Engagement::default(),
             control: control::Control::default(),
             jumper: manager::Jumper::default(),
+            rail_owner: None,
+            near_logged: None,
             investigation: GrindInvestigationFields::default(),
             settings: settings::Settings::load(data)?,
         })
     }
 
-    ///82D8A638 resets the manager, not the separately constructed child objects.
     #[cfg(test)]
-    pub fn reset(&mut self) {
+    pub(crate) fn set_lock_for_test(&mut self, engagement_counter: u32, cooldown: u32) {
+        self.engagement_counter = engagement_counter;
+        self.cooldown = cooldown as _;
+    }
+    #[cfg(test)]
+    pub(crate) fn lock_for_test(&self) -> (u32, u32) {
+        (self.engagement_counter, self.cooldown as u32)
+    }
+
+    ///82D8A638 resets the manager, not the separately constructed child objects.
+    ///ResetSystems82DB92D0 calls it last on every teleport / placement (b297).
+    pub(crate) fn reset(&mut self) {
         self.previous_state = 0;
         self.engagement_counter = 0;
         self.cooldown = 0;

@@ -6,11 +6,13 @@ use crate::app::SimulationSet;
 const DPAD_RIGHT: u16 = 0x0008;
 const R3: u16 = 0x0080;
 const B: u16 = 0x2000;
+const Y: u16 = 0x8000;
 
 #[derive(Resource, Default)]
 pub(crate) struct DebugCam {
     want_toggle: bool,
     want_spawn: bool,
+    want_pose_log: bool,
     previous_buttons: u16,
     release_controls: bool,
 }
@@ -50,7 +52,7 @@ impl Plugin for DebugCamPlugin {
                     .before(crate::input::publish_actions),
             )
             .add_systems(Startup, setup_overlay)
-            .add_systems(Update, update_overlay);
+            .add_systems(Update, (update_overlay, log_pose));
     }
 }
 
@@ -94,17 +96,23 @@ fn on_camera_input(
     custom_models: Option<Res<crate::custom_models::CustomModels>>,
     time: Res<Time<Fixed>>,
 ) {
-    if replay.active && camera.manual_cam.manual_cam_active() {
+    // Opt-in (overlay OPT_INS "Fly Cam", off by default): turning it off leaves a running fly cam.
+    let enabled = menu.as_deref().is_some_and(|m| m.fly_cam());
+    if (replay.active || !enabled) && camera.manual_cam.manual_cam_active() {
         debug.want_toggle = true;
     }
 
     let raw = input.raw_input();
-    if !gameplay_blocked(menu, &replay, customiser, travel, mods, custom_models) {
+    if enabled && !gameplay_blocked(menu, &replay, customiser, travel, mods, custom_models) {
         if chord(raw.buttons, DPAD_RIGHT | R3, debug.previous_buttons) {
             debug.want_toggle = true;
         }
         if camera.manual_cam.manual_cam_active() && chord(raw.buttons, B, debug.previous_buttons) {
             debug.want_spawn = true;
+        }
+        // Not retail: Y logs the drawn camera, so a spot can be captured later (docs/hails-additions/09-water.md#fly-cam-pose-log).
+        if camera.manual_cam.manual_cam_active() && chord(raw.buttons, Y, debug.previous_buttons) {
+            debug.want_pose_log = true;
         }
     }
     debug.previous_buttons = raw.buttons;
@@ -231,4 +239,20 @@ mod tests {
         assert!(!chord(B, B, B));
         assert!(chord(B, B, 0));
     }
+}
+
+fn log_pose(
+    mut debug: ResMut<DebugCam>,
+    camera: Query<(&GlobalTransform, &Projection), With<crate::camera::GameplayCamera>>,
+) {
+    if !std::mem::take(&mut debug.want_pose_log) {
+        return;
+    }
+    let Ok((transform, projection)) = camera.single() else { return };
+    let (eye, look) = (transform.translation(), transform.translation() + transform.forward() * 10.0);
+    let fov = match projection { Projection::Perspective(p) => p.fov.to_degrees(), _ => 0.0 };
+    info!(
+        "DEBUG_CAM_POSE eye=[{:.2}, {:.2}, {:.2}] look=[{:.2}, {:.2}, {:.2}] fov={fov:.1}",
+        eye.x, eye.y, eye.z, look.x, look.y, look.z
+    );
 }

@@ -45,5 +45,11 @@ pub(super) fn publish(skater: &mut SkaterRuntime) {
     if output.request_teleport_69 {
         flags[69 - 52] = true;
         physical.state.flag_69 = 1;
+        let position = skater.animated_skeleton.roots.animation_to_world[3];
+        skater.respawn.note_request(
+            super::super::respawn::RespawnReason::WipeoutAutoReset,
+            0,
+            [position[0], position[1], position[2]],
+        );
     }
 }

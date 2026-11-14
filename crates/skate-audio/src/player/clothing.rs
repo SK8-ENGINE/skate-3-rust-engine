@@ -119,6 +119,15 @@ pub struct Clothing {
 }
 
 impl Clothing {
+    /// The owner's release: stop the held stroke and plant foley.
+    pub fn release_all(&mut self, host: &mut dyn super::contacts::SpliceHost) {
+        for slot in [&mut self.stroke, &mut self.plant] {
+            if let Some(sound) = slot.take() {
+                host.release(sound);
+            }
+        }
+    }
+
     /// `sub_824B72D8`'s words.
     pub fn falls_words(level: i32, ct: &ClothingTuning) -> Vec<i32> {
         let mut w = vec![0i32; 10];

@@ -4,7 +4,7 @@ settle second first) per segment of the scenario (rows with the same state/air/g
 /balance/speed bucket form one segment).
 
 Per segment and side: RMS (dBFS of the common fold L + 0.707*C + 0.5*Ls, no output gain),
-octave-band levels 63 Hz .. 16 kHz, spectral centroid, dominant pitch (autocorrelation, 60–2000 Hz)
+octave-band levels 63 Hz .. 16 kHz, spectral centroid, dominant pitch (autocorrelation, 60 to 2000 Hz)
 and the 10 ms envelope's onset count. Also the lag (ms) that best aligns the two envelopes and
 their correlation (rolling "sync").
 

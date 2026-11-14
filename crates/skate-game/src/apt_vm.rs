@@ -92,6 +92,9 @@ pub struct Instruction {
     pub parameters: Vec<Parameter>,
     #[serde(default)]
     pub name: String,
+    /// getURL (0x83) target ("_level1", a clip path).
+    #[serde(default)]
+    pub target_name: String,
 }
 
 #[derive(Clone, Debug)]
@@ -103,8 +106,54 @@ pub enum ObjectKind {
 #[derive(Clone, Debug)]
 pub struct Object {
     pub kind: ObjectKind,
-    pub fields: BTreeMap<String, Value>,
+    pub fields: Fields,
     pub prototype: Option<usize>,
+}
+/// An object's members (read through `Deref`), with a count of each key's ASCII-lowercase form so the case-insensitive
+/// lookup in [`Vm::get`] can skip objects that cannot match. Writes go through `insert` / `remove`, which keep the
+/// count; there is no `DerefMut`.
+#[derive(Clone, Default)]
+pub struct Fields {
+    map: BTreeMap<String, Value>,
+    folded: std::collections::HashMap<String, u32>,
+}
+impl Fields {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn insert(&mut self, key: String, value: Value) -> Option<Value> {
+        if let Some(slot) = self.map.get_mut(&key) {
+            return Some(std::mem::replace(slot, value));
+        }
+        *self.folded.entry(key.to_ascii_lowercase()).or_default() += 1;
+        self.map.insert(key, value)
+    }
+    pub fn remove(&mut self, key: &str) -> Option<Value> {
+        let old = self.map.remove(key)?;
+        let folded = key.to_ascii_lowercase();
+        if let Some(n) = self.folded.get_mut(&folded) {
+            *n -= 1;
+            if *n == 0 {
+                self.folded.remove(&folded);
+            }
+        }
+        Some(old)
+    }
+    /// Whether some key equals `lower` (an ASCII-lowercased name) ignoring ASCII case.
+    pub fn may_match_folded(&self, lower: &str) -> bool {
+        self.folded.contains_key(lower)
+    }
+}
+impl std::ops::Deref for Fields {
+    type Target = BTreeMap<String, Value>;
+    fn deref(&self) -> &Self::Target {
+        &self.map
+    }
+}
+impl std::fmt::Debug for Fields {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.map.fmt(f)
+    }
 }
 #[derive(Clone, Debug)]
 struct Function {
@@ -125,6 +174,11 @@ pub trait Host {
     /// ActionScript `trace` (opcode 0x26). Retail prints "AptTrace: %s" to the
     /// debug output (handler 82E6D958); hosts may log it, the default drops it.
     fn trace(&mut self, _message: &str) {}
+    /// getURL (opcode 0x83, retail 82E72590): "FSCommand:<cmd>" goes to the host's fscommand, a ".swf" url
+    /// loads that movie into `target`. Hosts without movies ignore it.
+    fn get_url(&mut self, _vm: &mut Vm, _this: usize, _url: &str, _target: &str) -> Result<(), String> {
+        Ok(())
+    }
     fn call(
         &mut self,
         vm: &mut Vm,
@@ -133,10 +187,19 @@ pub trait Host {
         arguments: Vec<Value>,
     ) -> Result<Value, String>;
 }
+/// Object slots a VM may hold: a runaway guard, not a retail limit. The front end alone keeps about 2000 live and
+/// a pause menu adds about 1300; hosts that load and unload movies `collect` between updates.
+pub const MAX_OBJECTS: usize = 16_384;
+/// Instructions one update (or one C++ call into the movies) may run before the VM stops it as a runaway loop. The
+/// text viewer's word layout over a long text (retail allows 81626 characters, FE 3) needs far more than the 100000
+/// this was (2026-10-19: 12.5 k characters ran out); a real infinite loop still stops.
+pub const UPDATE_BUDGET: usize = 2_000_000;
 #[derive(Default)]
 pub struct Vm {
     pub objects: Vec<Object>,
     free_objects: Vec<usize>,
+    /// `collect`'s mark bits, kept between collections.
+    marked: Vec<bool>,
     functions: Vec<Function>,
     pub global: usize,
     remaining: usize,
@@ -144,6 +207,8 @@ pub struct Vm {
     /// State of the script `random` generator (opcode 0x30). Seeded, so a run
     /// is deterministic (replays, multiplayer); see `seed_random`.
     random_state: u64,
+    /// Opcode and offset of the instruction executed last (error reports).
+    pub last_instruction: (u8, u32),
 }
 
 /// Retail ToInteger (82E5F2A8): int as is, float clamped to the i32 range
@@ -217,6 +282,79 @@ pub fn to_number(value: &Value) -> Value {
         }
     }
 }
+/// Math members (standard AS2 semantics).
+fn math(method: &str, args: &[Value]) -> Option<Value> {
+    let n = |i: usize| args.get(i).map_or(f64::NAN, Value::number);
+    Some(Value::Number(match method {
+        "floor" => n(0).floor(),
+        "ceil" => n(0).ceil(),
+        "round" => (n(0) + 0.5).floor(),
+        "abs" => n(0).abs(),
+        "sqrt" => n(0).sqrt(),
+        "sin" => n(0).sin(),
+        "cos" => n(0).cos(),
+        "atan2" => n(0).atan2(n(1)),
+        "pow" => n(0).powf(n(1)),
+        "min" => n(0).min(n(1)),
+        "max" => n(0).max(n(1)),
+        _ => return None,
+    }))
+}
+
+fn string_method(s: &str, method: &str, args: &[Value]) -> Value {
+    let chars: Vec<char> = s.chars().collect();
+    let len = chars.len() as i64;
+    let arg = |i: usize| args.get(i).filter(|v| **v != Value::Undefined);
+    let int = |i: usize, default: i64| arg(i).map_or(default, |v| to_integer(v) as i64);
+    let text = |a: i64, b: i64| -> Value { Value::Text(chars[a as usize..b as usize].iter().collect()) };
+    let find = |needle: &str, from: i64, last: bool| -> f64 {
+        let needle: Vec<char> = needle.chars().collect();
+        let n = needle.len() as i64;
+        let hit = |i: i64| chars[i as usize..(i + n) as usize] == needle[..];
+        let found = if last {
+            (0..=(len - n).min(from)).rev().find(|i| hit(*i))
+        } else {
+            (from.max(0)..=len - n).find(|i| hit(*i))
+        };
+        found.map_or(-1.0, |i| i as f64)
+    };
+    match method {
+        "indexOf" => Value::Number(find(&arg(0).map_or("undefined".into(), Value::text), int(1, 0), false)),
+        "lastIndexOf" => Value::Number(find(&arg(0).map_or("undefined".into(), Value::text), int(1, len), true)),
+        "substring" => {
+            let a = int(0, 0).clamp(0, len);
+            let b = int(1, len).clamp(0, len);
+            text(a.min(b), a.max(b))
+        }
+        "substr" => {
+            let mut a = int(0, 0);
+            if a < 0 {
+                a = (len + a).max(0);
+            }
+            let a = a.min(len);
+            let n = int(1, len - a).clamp(0, len - a);
+            text(a, a + n)
+        }
+        "slice" => {
+            let at = |v: i64| if v < 0 { (len + v).max(0) } else { v.min(len) };
+            let a = at(int(0, 0));
+            let b = at(int(1, len)).max(a);
+            text(a, b)
+        }
+        "charAt" => {
+            let i = int(0, 0);
+            if (0..len).contains(&i) { text(i, i + 1) } else { Value::Text(String::new()) }
+        }
+        "charCodeAt" => {
+            let i = int(0, 0);
+            Value::Number(if (0..len).contains(&i) { chars[i as usize] as u32 as f64 } else { f64::NAN })
+        }
+        "toUpperCase" => Value::Text(s.to_uppercase()),
+        "toLowerCase" => Value::Text(s.to_lowercase()),
+        "toString" | "valueOf" => Value::Text(s.into()),
+        _ => Value::Undefined,
+    }
+}
 impl Vm {
     fn variable(&self, scope: &Scope, key: &str) -> Value {
         if let Some(value) = scope.locals.get(key) {
@@ -231,13 +369,18 @@ impl Vm {
     pub fn new() -> Self {
         let mut vm = Self::default();
         vm.global = vm.object(ObjectKind::Plain);
+        // The AS2 Math object (standard semantics; NOT RETAIL YET: the retail player's Math natives are not
+        // decoded). options.apt lays out rows with Math.floor / ceil.
+        let math = vm.object(ObjectKind::Native("Math".into()));
+        let _ = vm.set(vm.global, "Math", Value::Object(math));
+        let _ = vm.set(math, "PI", Value::Number(std::f64::consts::PI));
         vm
     }
     pub fn object(&mut self, kind: ObjectKind) -> usize {
         if let Some(id) = self.free_objects.pop() {
             self.objects[id] = Object {
                 kind,
-                fields: BTreeMap::new(),
+                fields: Fields::new(),
                 prototype: None,
             };
             return id;
@@ -245,19 +388,22 @@ impl Vm {
         let id = self.objects.len();
         self.objects.push(Object {
             kind,
-            fields: BTreeMap::new(),
+            fields: Fields::new(),
             prototype: None,
         });
         id
     }
     /// Collect only between updates. Host-owned movie handles are explicit
     /// roots; script references and prototypes preserve retired clips when
-    /// they remain reachable. Stable handles never move during collection.
-    pub fn collect(&mut self, host_roots: impl IntoIterator<Item = usize>) -> Result<(), String> {
+    /// they remain reachable. Stable handles never move during collection. Returns every free slot (host side
+    /// tables drop entries for these).
+    pub fn collect(&mut self, host_roots: impl IntoIterator<Item = usize>) -> Result<&[usize], String> {
         if self.depth != 0 {
             return Err("Cannot collect during an APT call".into());
         }
-        let mut marked = vec![false; self.objects.len()];
+        let mut marked = std::mem::take(&mut self.marked);
+        marked.clear();
+        marked.resize(self.objects.len(), false);
         let mut pending: Vec<_> = host_roots.into_iter().collect();
         pending.push(self.global);
         while let Some(id) = pending.pop() {
@@ -277,17 +423,22 @@ impl Vm {
             }
         }
         self.free_objects.clear();
-        for (id, live) in marked.into_iter().enumerate() {
+        for (id, &live) in marked.iter().enumerate() {
             if !live {
-                self.objects[id] = Object {
-                    kind: ObjectKind::Plain,
-                    fields: BTreeMap::new(),
-                    prototype: None,
-                };
+                // A slot freed before and not reused is already this empty object.
+                let o = &self.objects[id];
+                if !(matches!(o.kind, ObjectKind::Plain) && o.fields.is_empty() && o.prototype.is_none()) {
+                    self.objects[id] = Object {
+                        kind: ObjectKind::Plain,
+                        fields: Fields::new(),
+                        prototype: None,
+                    };
+                }
                 self.free_objects.push(id);
             }
         }
-        Ok(())
+        self.marked = marked;
+        Ok(&self.free_objects)
     }
     pub fn set(
         &mut self,
@@ -302,16 +453,29 @@ impl Vm {
             .insert(key.into(), value);
         Ok(())
     }
+    /// Member lookup through the prototype chain. Names match case-insensitively when no exact match exists:
+    /// retail registers the pause menu object as "CoreMenu" (the only spelling in the image, 0x82300C68) and
+    /// core_menu.apt reads it as `coremenu`, so retail's lookup ignores case (SWF 6 rules).
     pub fn get(&self, object: usize, key: &str) -> Value {
-        let mut current = Some(object);
-        for _ in 0..64 {
-            let Some(o) = current.and_then(|i| self.objects.get(i)) else {
-                break;
-            };
-            if let Some(v) = o.fields.get(key) {
-                return v.clone();
+        let mut lower = None;
+        for exact in [true, false] {
+            let mut current = Some(object);
+            for _ in 0..64 {
+                let Some(o) = current.and_then(|i| self.objects.get(i)) else {
+                    break;
+                };
+                let found = if exact {
+                    o.fields.get(key)
+                } else if o.fields.may_match_folded(lower.get_or_insert_with(|| key.to_ascii_lowercase())) {
+                    o.fields.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v)
+                } else {
+                    None
+                };
+                if let Some(v) = found {
+                    return v.clone();
+                }
+                current = o.prototype;
             }
-            current = o.prototype;
         }
         Value::Undefined
     }
@@ -334,8 +498,12 @@ impl Vm {
         self.random_state = x;
         (x.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 32) as u32
     }
+    /// Objects in use (the VM's object budget counts every slot; collected slots are reused).
+    pub fn live_objects(&self) -> usize {
+        self.objects.len() - self.free_objects.len()
+    }
     pub fn begin_update(&mut self) {
-        self.remaining = 100_000;
+        self.remaining = UPDATE_BUDGET;
     }
     pub fn run(&mut self, code: &[Instruction], host: &mut impl Host) -> Result<Value, String> {
         self.begin_update();
@@ -375,7 +543,155 @@ impl Vm {
                 return self.invoke(*index, object, args, host);
             }
         }
+        if let Some(value) = self.array_method(object, method, &args)? {
+            return Ok(value);
+        }
+        if matches!(&self.objects[object].kind, ObjectKind::Native(n) if n == "Math") {
+            // Math.random(): [0, 1) from the seeded script generator (endchallenge_small picks its title comment with
+            // it; without it the title read "undefined", laptop run 2026-11-07).
+            if method == "random" {
+                return Ok(Value::Number(self.next_random() as f64 / (u32::MAX as f64 + 1.0)));
+            }
+            if let Some(value) = math(method, &args) {
+                return Ok(value);
+            }
+        }
         host.call(self, object, method, args)
+    }
+    /// Calls the script function object `function` with `this` (registerClass constructors).
+    pub fn call_function(
+        &mut self,
+        function: usize,
+        this: usize,
+        args: Vec<Value>,
+        host: &mut impl Host,
+    ) -> Result<Value, String> {
+        match self.objects.get(function).map(|o| o.kind.clone()) {
+            Some(ObjectKind::Function(index)) => self.invoke(index, this, args, host),
+            _ => Ok(Value::Undefined),
+        }
+    }
+    /// Built-in Array methods (standard AS2 semantics; the menu movies keep lists such as
+    /// ScreenManager.mMovieClipList in arrays). Applies to objects with a numeric `length`
+    /// that do not define the method themselves; everything else goes to the host.
+    fn array_method(
+        &mut self,
+        id: usize,
+        method: &str,
+        args: &[Value],
+    ) -> Result<Option<Value>, String> {
+        let Value::Number(length) = self.get(id, "length") else {
+            return Ok(None);
+        };
+        let len = length.max(0.0) as usize;
+        let items: Vec<Value> = (0..len).map(|i| self.get(id, &i.to_string())).collect();
+        let store = |vm: &mut Self, items: &[Value]| -> Result<(), String> {
+            for i in items.len()..len {
+                vm.objects[id].fields.remove(&i.to_string());
+            }
+            for (i, v) in items.iter().enumerate() {
+                vm.set(id, i.to_string(), v.clone())?;
+            }
+            vm.set(id, "length", Value::Number(items.len() as f64))
+        };
+        let index = |v: Option<&Value>, default: usize| -> usize {
+            match v {
+                None | Some(Value::Undefined) => default,
+                Some(v) => {
+                    let n = to_integer(v) as i64;
+                    if n < 0 {
+                        (len as i64 + n).max(0) as usize
+                    } else {
+                        (n as usize).min(len)
+                    }
+                }
+            }
+        };
+        let mut items = items;
+        let value = match method {
+            "push" => {
+                items.extend(args.iter().cloned());
+                store(self, &items)?;
+                Value::Number(items.len() as f64)
+            }
+            "unshift" => {
+                items.splice(0..0, args.iter().cloned());
+                store(self, &items)?;
+                Value::Number(items.len() as f64)
+            }
+            "pop" | "shift" => {
+                let v = if items.is_empty() {
+                    Value::Undefined
+                } else if method == "pop" {
+                    items.pop().unwrap()
+                } else {
+                    items.remove(0)
+                };
+                store(self, &items)?;
+                v
+            }
+            "splice" => {
+                let start = index(args.first(), 0);
+                let count = match args.get(1) {
+                    None => len - start,
+                    Some(v) => (to_integer(v).max(0) as usize).min(len - start),
+                };
+                let removed: Vec<Value> = items
+                    .splice(start..start + count, args.iter().skip(2).cloned())
+                    .collect();
+                store(self, &items)?;
+                Value::Object(self.array(removed)?)
+            }
+            "slice" => {
+                let start = index(args.first(), 0);
+                let end = index(args.get(1), len).max(start);
+                Value::Object(self.array(items[start..end].to_vec())?)
+            }
+            "concat" => {
+                for a in args {
+                    match a {
+                        Value::Object(o) if matches!(self.get(*o, "length"), Value::Number(_)) => {
+                            let n = self.get(*o, "length").number().max(0.0) as usize;
+                            for i in 0..n {
+                                items.push(self.get(*o, &i.to_string()));
+                            }
+                        }
+                        v => items.push(v.clone()),
+                    }
+                }
+                Value::Object(self.array(items)?)
+            }
+            "reverse" => {
+                items.reverse();
+                store(self, &items)?;
+                Value::Object(id)
+            }
+            "join" | "toString" => {
+                let sep = match args.first() {
+                    Some(v) if method == "join" && *v != Value::Undefined => v.text(),
+                    _ => ",".into(),
+                };
+                Value::Text(
+                    items
+                        .iter()
+                        .map(|v| if *v == Value::Undefined { String::new() } else { v.text() })
+                        .collect::<Vec<_>>()
+                        .join(&sep),
+                )
+            }
+            _ => return Ok(None),
+        };
+        Ok(Some(value))
+    }
+    /// A new script array holding `items`.
+    pub fn array(&mut self, items: Vec<Value>) -> Result<usize, String> {
+        let id = self.object(ObjectKind::Plain);
+        let n = items.len();
+        for (i, v) in items.into_iter().enumerate() {
+            self.set(id, i.to_string(), v)?;
+        }
+        self.set(id, "length", Value::Number(n as f64))?;
+        Ok(id)
     }
     fn invoke(
         &mut self,
@@ -472,12 +788,16 @@ impl Vm {
             s.pop().ok_or("APT stack underflow".into())
         }
         while let Some(i) = code.get(pc) {
-            if self.remaining == 0 || self.objects.len() > 4096 {
-                return Err("APT execution/object budget exceeded".into());
+            if self.remaining == 0 {
+                return Err(format!("APT execution budget exceeded ({UPDATE_BUDGET} instructions in one update)"));
+            }
+            if self.objects.len() > MAX_OBJECTS {
+                return Err(format!("APT object budget exceeded (slots {}, in use {})", self.objects.len(), self.live_objects()));
             }
             self.remaining -= 1;
             pc += 1;
             let op = i.opcode;
+            self.last_instruction = (op, i.offset);
             let operand = i.operand.as_u64().unwrap_or(0) as usize;
             let constant = |k: usize| {
                 constants
@@ -506,8 +826,17 @@ impl Vm {
                         vec![],
                     )?;
                 }
+                // GotoLabel: gotoAndStop(label) on the current target; a following Play makes it gotoAndPlay
+                // (challenge_info.apt: `GotoLabel "cycle"`).
+                0x8c => {
+                    let label = i.operand.as_str().ok_or("APT GotoLabel operand missing")?.to_owned();
+                    host.call(self, scope.this, "gotoAndStop", vec![Value::Text(label)])?;
+                }
+                // Retail pop (82E6D048) releases the top only while the stack is above its
+                // base; on an empty stack it does nothing. Retail movies rely on it
+                // (screenmanager.apt pops after a setMember that left nothing).
                 0x17 => {
-                    pop(&mut stack)?;
+                    stack.pop();
                 }
                 0x12 => {
                     let a = pop(&mut stack)?;
@@ -554,6 +883,10 @@ impl Vm {
                 }
                 0xa2 | 0xa3 => stack.push(constant(operand)?),
                 0xae => stack.push(self.variable(scope, &constant(operand)?.text())),
+                0x83 => {
+                    let url = i.operand.as_str().unwrap_or("").to_string();
+                    host.get_url(self, scope.this, &url, &i.target_name)?;
+                }
                 // EA trace (82E6D958): pop one value, print it.
                 0x26 => {
                     let v = pop(&mut stack)?;
@@ -619,10 +952,12 @@ impl Vm {
                     }
                     .text();
                     let obj = pop(&mut stack)?;
-                    stack.push(if let Value::Object(id) = obj {
-                        self.get(id, &name)
-                    } else {
-                        Value::Undefined
+                    stack.push(match obj {
+                        Value::Object(id) => self.get(id, &name),
+                        Value::Text(s) if name == "length" => {
+                            Value::Number(s.chars().count() as f64)
+                        }
+                        _ => Value::Undefined,
                     });
                 }
                 0x4f => {
@@ -631,6 +966,14 @@ impl Vm {
                     let o = pop(&mut stack)?;
                     if let Value::Object(id) = o {
                         self.set(id, &k, v)?;
+                        // An array (an object with its own numeric `length`) grows when an index at or past its end is
+                        // written (menu_picker's `mItemTextArray[index] = text`, counted with `.length`). Standard AS2
+                        // semantics, NOT RETAIL YET (the retail array object is not decoded).
+                        if let (Ok(index), Some(Value::Number(len))) = (k.parse::<u32>(), self.objects[id].fields.get("length")) {
+                            if f64::from(index) >= *len {
+                                self.set(id, "length", Value::Number(f64::from(index) + 1.0))?;
+                            }
+                        }
                         host.property_changed(self, id, &k)?;
                     }
                 }
@@ -638,10 +981,13 @@ impl Vm {
                     let k = pop(&mut stack)?.text();
                     stack.push(self.variable(scope, &k));
                 }
-                0x1d | 0x3c | 0xa6 => {
+                0x1d | 0x3c | 0x72 | 0xa6 => {
                     // 0xa6 (82E74028) pushes its string operand, then runs the
-                    // setVariable handler 82E6D248 (0x1d).
-                    let v = if op == 0xa6 {
+                    // setVariable handler 82E6D248 (0x1d); 0x72 (82E73C68) pushes 0, then the same (the Music Player
+                    // movie's `index = 0`).
+                    let v = if op == 0x72 {
+                        Value::Number(0.0)
+                    } else if op == 0xa6 {
                         Value::Text(
                             i.operand
                                 .as_str()
@@ -657,6 +1003,16 @@ impl Vm {
                     } else {
                         self.set(scope.this, &k, v)?;
                         host.property_changed(self, scope.this, &k)?;
+                    }
+                }
+                // DefineLocal2 (0x41): declares a local without a value (undefined), keeping one already there; outside a
+                // function it declares the variable on `this` (the reward summary movie uses it; laptop race-results2).
+                0x41 => {
+                    let k = pop(&mut stack)?.text();
+                    if scope.local_definitions {
+                        scope.locals.entry(k).or_insert(Value::Undefined);
+                    } else if matches!(self.get(scope.this, &k), Value::Undefined) {
+                        self.set(scope.this, &k, Value::Undefined)?;
                     }
                 }
                 0x3a => {
@@ -685,6 +1041,34 @@ impl Vm {
                         0x66 => Value::Bool(a == b),
                         _ => Value::Bool(a == b || a.number() == b.number()),
                     });
+                }
+                // typeof (82E6ECC0) with the standard AS2 result names. NOT RETAIL YET: retail's name table
+                // is not read (main.apt only tests "undefined" / "function" / "movieclip").
+                0x44 => {
+                    let v = pop(&mut stack)?;
+                    let name = match &v {
+                        Value::Undefined => "undefined",
+                        Value::Number(_) => "number",
+                        Value::Bool(_) => "boolean",
+                        Value::Text(_) => "string",
+                        Value::Object(id) => match self.objects.get(*id).map(|o| &o.kind) {
+                            Some(ObjectKind::Function(_)) => "function",
+                            Some(ObjectKind::Native(n)) if n.starts_with("movie:") => "movieclip",
+                            _ => "object",
+                        },
+                    };
+                    stack.push(Value::Text(name.into()));
+                }
+                // ToString (82E70458).
+                0x4b => {
+                    let v = pop(&mut stack)?;
+                    stack.push(Value::Text(v.text()));
+                }
+                // Modulo (82E6E5F8): both operands ToNumber, C fmod, result rounded to f32 (frsp).
+                0x3f => {
+                    let b = pop(&mut stack)?.number();
+                    let a = pop(&mut stack)?.number();
+                    stack.push(Value::Number((a % b) as f32 as f64));
                 }
                 0x50 | 0x51 => {
                     let a = pop(&mut stack)?.number();
@@ -717,8 +1101,13 @@ impl Vm {
                     self.set(object, "prototype", Value::Object(proto))?;
                     if i.name.is_empty() {
                         stack.push(Value::Object(object));
+                    } else if scope.local_definitions {
+                        // Retail (82E73010 -> 82E68770) stores a named function as a variable of the current
+                        // scope: a local inside a function, a member of the timeline in a frame action
+                        // (main.apt's RegisterChallengeEnum lives on _level0._root).
+                        scope.locals.insert(i.name.clone(), Value::Object(object));
                     } else {
-                        self.set(self.global, &i.name, Value::Object(object))?;
+                        self.set(scope.this, &i.name, Value::Object(object))?;
                     }
                 }
                 0x69 => {
@@ -747,6 +1136,15 @@ impl Vm {
                             self.set(id, j.to_string(), v)?;
                         }
                         self.set(id, "length", Value::Number(n as f64))?;
+                    } else if name == "TextFormat" {
+                        // AS2 TextFormat(font, size, color, bold, italic, underline, url, target, align, leftMargin,
+                        // rightMargin, indent, leading): a plain record of its arguments (standard semantics; NOT
+                        // RETAIL YET: applying it to text, setTextFormat, is not ported).
+                        const FIELDS: [&str; 13] = ["font", "size", "color", "bold", "italic", "underline", "url",
+                            "target", "align", "leftMargin", "rightMargin", "indent", "leading"];
+                        for (field, v) in FIELDS.iter().zip(args) {
+                            self.set(id, *field, v)?;
+                        }
                     } else if let Value::Object(class) = self.get(self.global, &name) {
                         if let Value::Object(proto) = self.get(class, "prototype") {
                             self.objects[id].prototype = Some(proto);
@@ -765,8 +1163,20 @@ impl Vm {
                     } else {
                         pop(&mut stack)?
                     };
+                    // Call by name resolves like a variable read: locals, the timeline (`this`), then _global
+                    // (main.apt calls its own root functions, e.g. RegisterComponentClasses, this way).
+                    // NOT RETAIL YET: the retail lookup (call-function handler) is not decoded.
+                    let mut local: Option<Value> = None;
                     let object = if matches!(op, 0x3d | 0xb0 | 0xb1) {
-                        Value::Object(self.global)
+                        let name = method.text();
+                        if let Some(f @ Value::Object(_)) = scope.locals.get(&name) {
+                            local = Some(f.clone());
+                            Value::Object(scope.this)
+                        } else if self.get(scope.this, &name) != Value::Undefined {
+                            Value::Object(scope.this)
+                        } else {
+                            Value::Object(self.global)
+                        }
                     } else {
                         pop(&mut stack)?
                     };
@@ -777,10 +1187,11 @@ impl Vm {
                     let args = (0..count)
                         .map(|_| pop(&mut stack))
                         .collect::<Result<Vec<_>, _>>()?;
-                    let value = if let Value::Object(id) = object {
-                        self.call_method(id, &method.text(), args, host)?
-                    } else {
-                        Value::Undefined
+                    let value = match (object, local) {
+                        (Value::Object(this), Some(Value::Object(f))) => self.call_function(f, this, args, host)?,
+                        (Value::Object(id), _) => self.call_method(id, &method.text(), args, host)?,
+                        (Value::Text(s), _) => string_method(&s, &method.text(), &args),
+                        _ => Value::Undefined,
                     };
                     if matches!(op, 0xb1 | 0xb3) {
                         return Ok(value);
@@ -802,6 +1213,55 @@ impl Vm {
 
 #[cfg(test)]
 mod tests {
+    /// `Vm::get` before the folded-key skip (exact pass, then a case-insensitive scan of every object in the chain).
+    fn get_reference(vm: &Vm, object: usize, key: &str) -> Value {
+        for exact in [true, false] {
+            let mut current = Some(object);
+            for _ in 0..64 {
+                let Some(o) = current.and_then(|i| vm.objects.get(i)) else { break };
+                let found = if exact { o.fields.get(key) } else { o.fields.iter().find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v) };
+                if let Some(v) = found {
+                    return v.clone();
+                }
+                current = o.prototype;
+            }
+        }
+        Value::Undefined
+    }
+
+    #[test]
+    fn get_with_folded_key_skip_matches_the_full_scan() {
+        let names = ["x", "X", "_x", "_X", "coremenu", "CoreMenu", "COREMENU", "length", "Length", "onEnterFrame", "onenterframe", "a\u{e9}", "A\u{e9}", "\u{c9}", "0", "1"];
+        let mut seed = 0x2545_F491_u64;
+        let mut next = |n: usize| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n as u64) as usize
+        };
+        let mut vm = Vm::new();
+        let ids: Vec<usize> = (0..12).map(|_| vm.object(ObjectKind::Plain)).collect();
+        for step in 0..20_000 {
+            let id = ids[next(ids.len())];
+            match next(4) {
+                0 | 1 => vm.set(id, names[next(names.len())], Value::Number(step as f64)).unwrap(),
+                2 => {
+                    vm.objects[id].fields.remove(names[next(names.len())]);
+                }
+                _ => vm.objects[id].prototype = if next(3) == 0 { None } else { Some(ids[next(ids.len())]) },
+            }
+            let (object, key) = (ids[next(ids.len())], names[next(names.len())]);
+            assert_eq!(vm.get(object, key), get_reference(&vm, object, key), "step {step}: {key} on {object}");
+            for o in &vm.objects {
+                let mut folded: std::collections::HashMap<String, u32> = Default::default();
+                for k in o.fields.keys() {
+                    *folded.entry(k.to_ascii_lowercase()).or_default() += 1;
+                }
+                assert_eq!(folded, o.fields.folded, "folded counts follow the keys");
+            }
+        }
+    }
+
     use super::*;
 
     struct Stub(Vec<String>);
@@ -811,6 +1271,15 @@ mod tests {
         }
         fn call(&mut self, _: &mut Vm, _: usize, _: &str, _: Vec<Value>) -> Result<Value, String> {
             Ok(Value::Undefined)
+        }
+    }
+    #[test]
+    fn math_random_is_a_unit_fraction() {
+        let mut vm = Vm::new();
+        let Value::Object(math) = vm.get(vm.global, "Math") else { panic!("no Math") };
+        for _ in 0..100 {
+            let Value::Number(x) = vm.call_method(math, "random", vec![], &mut Stub(vec![])).unwrap() else { panic!("not a number") };
+            assert!((0.0..1.0).contains(&x), "{x}");
         }
     }
     fn op(opcode: u8) -> Instruction {
@@ -828,6 +1297,7 @@ mod tests {
             flags: 0,
             parameters: vec![],
             name: String::new(),
+            target_name: String::new(),
         }
     }
     fn text(s: &str) -> Instruction {
@@ -845,6 +1315,12 @@ mod tests {
         (vm, host, r)
     }
 
+    #[test]
+    fn op_0x72_sets_the_named_variable_to_zero() {
+        // `index = 5; index = 0 (0x72); return index`.
+        let (_, _, r) = run(vec![text("index"), int(5), op(0x1d), text("index"), op(0x72), text("index"), op(0x1c)]);
+        assert_eq!(r, Ok(Value::Number(0.0)));
+    }
     #[test]
     fn trace_pops_and_reports() {
         let (_, host, r) = run(vec![int(7), text("hi"), op(0x26)]);

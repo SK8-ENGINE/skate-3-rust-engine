@@ -64,7 +64,7 @@ fn offboard_walk_off_edge_runs_ground_air_and_landing() {
     let assets = skate_data::GameAssets::load(root).unwrap();
     let graphs = crate::graph_runtime::StockGraphs::load(root, &assets).unwrap();
     let mut physics = GamePhysics::load(root).unwrap();
-    physics.world = edge_world(physics.settings.floor_material, 2.0, ground::FLOOR_HEIGHT);
+    physics.world = (edge_world(physics.settings.floor_material, 2.0, ground::FLOOR_HEIGHT)).into();
     let mut skater = SkaterRuntime::load(root, &graphs, &physics, "normal").unwrap();
     let mut controls = PlayerControls::default();
     let mut input = crate::input::ControllerInput::default();

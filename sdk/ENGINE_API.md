@@ -41,8 +41,11 @@ end}
 
 ## Native player movement and session authority
 
-`sdk.player.teleport({position={x,y,z}, heading=radians, velocity={x,y,z}})`
-uses native player travel. Heading defaults to zero; velocity is optional. This
+`sdk.player.teleport({position={x,y,z}, heading=radians, velocity={x,y,z}, ground_fit=true, on_board=true})`
+uses native player travel. Heading defaults to zero; velocity is optional. `ground_fit` (default true) puts the
+arrival onto the ground below as Skate 3's teleports do (a ray from 0.75 m above, landing 0.15 m over the hit);
+false places the skater exactly at `position`. `on_board` (default true) set to false lands the skater standing off
+the board, so an idle skater stays where it lands (a held start for test runs or a scene). This
 only moves the local skater. Coordinates are bounded to +/-100000 and velocity
 components to +/-200. Invalid commands fail validation.
 
@@ -69,6 +72,40 @@ inside it. This is a point overlap query, not a collider or a skater hull test.
 Boxes belong to their creating mod, max 32 per mod; remove with
 `sdk.volumes.remove(key)`. Changes become observable on the next snapshot.
 
+## Minimap icons (`sdk.minimap`, version 1)
+
+`sdk.minimap.icon(key, {position={x,y,z}, icon="race_gate", angle=0, scale=1, fade=true, max_distance=nil,
+colour={r,g,b,a}})` creates or moves an icon on the in-game HUD minimap. `icon` is a fe_map_icons record name (the
+disc's `race_gate`, `skater`, `teleport`, `pro`, ...; its texture and max distance come from that record); it defaults
+to `race_gate`, as retail's own script icons do. `max_distance` overrides the record's (0 = the minimap's 1000).
+Each mod's icons are one group, drawn after the groups added before it. Icons belong to their mod, max 32 per mod,
+and go when the mod is disabled; remove one with `sdk.minimap.remove(key)`. Local display only: in a session each
+peer's mods place their own icons.
+
+`sdk.minimap.show(false)` hides the HUD minimap (retail's minimap show / hide messages); `sdk.minimap.show(true)`
+takes the mod's hide back. It never shows a minimap the player turned off in Game Settings or one the HUD hides; while
+any mod hides it, it stays hidden. A disabled mod's hide goes with it.
+
+## Loading screen (`sdk.loading`, capability `loading` 2: timing, stat rows and events since 2)
+
+The loading screen between maps (Skate 3's tips loader, front-end screen 52) picks a Coach Frank line or a hint each time it opens.
+`sdk.loading.hint(key, {title=..., text=...})` and `sdk.loading.coach_frank(key, text)` add (or replace, by key) this
+mod's lines; a string id (`ID_HINTS_TITLE_3`) is localised, any other text shows as written.
+`sdk.loading.stat(key, {label=..., value=...})` adds a row to the Stats panel next to the player's career stats (the
+panel shows 5 rows picked at random from them). `sdk.loading.remove(key)` drops one. `sdk.loading.retail(false)` leaves only mods' lines on a panel mods give lines for (the retail lines stay
+on a panel no mod fills); `retail(true)` takes that back. Lines join the next time the screen opens.
+
+`sdk.loading.hold(key)` keeps a running load's screen up after the engine's own loading is done, until
+`sdk.loading.release(key)`, for at most 30 s; it never opens the screen by itself. Lines, the retail switch and holds
+belong to their mod and go when it is disabled. The movie itself is replaced through the menu movie overrides
+(`sdk.menus.movie`). Local display only: in a session each peer shows its own loading screen.
+
+`sdk.loading.timing({show=4.5, outro=0.5})` sets how long a panel shows (1 to 120 s, retail 9.0) and how long its
+outro takes (0 to 10 s, retail 0.5); a missing field keeps the retail value, `timing(nil)` drops the change, the
+newest mod's timing wins and it goes with the mod. Every mod's `on_event` gets `{name="loading_opened", map=...}`
+when the screen comes up and `{name="loading_closed", map=...}` when it has gone (`map` is the map being loaded,
+nil when unknown).
+
 ## Trigger volumes (`sdk.triggers`, capability `triggers` 1)
 
 The engine tracks the map's named trigger volumes the way retail Skate 3 does:
@@ -87,12 +124,12 @@ SkateSchool's map-wide `tut_sksc_reset_vol01` is `2c7017060025128f`). Custom map
 carry their own in a `<Map>.triggers` sidecar or a `TVOL` extension (same JSON;
 see `docs/hails-additions/24-trigger-volumes.md`).
 
-- `sdk.triggers.list()` — every volume: `{id, name, full_name, group, source="map"|"mod",
+- `sdk.triggers.list()`: every volume: `{id, name, full_name, group, source="map"|"mod",
   owner, instance_id, link_guid, center, axes, rotation, half_extents, fatness,
   aabb_min, aabb_max, enabled, inside={bodies}}`. `sdk.triggers.get(id_or_name)`.
-- `sdk.triggers.inside(body)` — volume ids the body (default `"player"`) is in.
+- `sdk.triggers.inside(body)`: volume ids the body (default `"player"`) is in.
 - `sdk.triggers.box(key, {center={x,y,z}, half_extents={x,y,z}, rotation={x,y,z,w},
-  name="...", group="challenge"})` — a mod volume with id `mod:<mod>:<key>`
+  name="...", group="challenge"})`: a mod volume with id `mod:<mod>:<key>`
   (max 64 per mod); `sdk.triggers.remove(key)`.
 - `sdk.triggers.set_enabled(id, false)` switches a map volume off for everyone
   until the same mod switches it on or stops.
@@ -106,6 +143,18 @@ see `docs/hails-additions/24-trigger-volumes.md`).
   The player's cylinder is built like retail's skater from its feet (ground
   point), head and hips: radius 0.34, half-height `length_scale * |head - feet| +
   length_pad` (0.5, 0.05), one end `foot_pad` (0.02) below the feet.
+- `sdk.triggers.teleporter(key, {volume="<volume id or own box key>", exits={{position={x,y,z},
+  heading=<radians>, map="<map name>", world="<world row>"}}, title="..."})` adds a teleporter like Skate 3's (max 64 per
+  mod): entering the volume shows the prompt with `title`, D-pad Up asks to confirm (one exit: No /
+  Yes; up to 8 exits: a list), and the skater lands at the exit, on another map after its loading
+  screen. An exit's optional `world` names a skate.Park world on that map (`dist_megapark_full` = Stadium - Full): the map
+  loads with that world's layout, as retail's park teleporters do. A `key` equal to a retail teleporter's id (`tele_world_to_stadium`) replaces it on that map;
+  `indicator="teleport"` gives it Skate 3's floating icon (any `ribbon_indicator` row key), anchored at
+  `indicator_position={x,y,z}` (default: the volume's centre) plus the row's offset, and `indicator_style="smallarrow"` picks another `visualindicators` look (`default`, `gates`, `trail`, `non_fade`, `lesswiggle`, `smallarrow_nonfade`, `clintjammie`) and `indicator_colour="red"` its colour (`default` = blue, `blue`, `red`, `green`, `yellow`, `orange`, `purple`, `domination`); without `indicator` it has none
+  (a retail teleporter replaced by key keeps no icon unless the mod names one).
+  `sdk.triggers.teleporter(key)` removes it. Every use posts `{name="teleporter_used", teleporter=,
+  exit=<1-based>, body="player"}`. Mod teleporters go when the mod stops and on a map change (re-add
+  them in `world_changed`).
 - Only `challenge` volumes post `trigger_entered` / `trigger_exited`; retail's
   `stairs` and `camera` groups have no tracked bodies (they are listed, not tracked).
 
@@ -128,6 +177,98 @@ Release it with `sdk.camera.clear_capture(key)`.
 including replication. Camera captures and volumes are local, mod-owned resources
 and are cleared when their mod stops or the world changes.
 
+## Challenges (`sdk.challenges`, capability `challenges` 1)
+
+The retail challenges (own the spot so far) as the engine runs them. They only
+run while the player has the **Challenges** opt-in on (Graphics overlay,
+Opt-Ins, or `SKATE_CHALLENGES=1`); `sdk.challenges.on()` says whether it is.
+
+    sdk.challenges.list()     -- this map's challenges: {id, family, map, title_id, title,
+                              --   position, enabled, owned_points, killed_points,
+                              --   completion="owned"|"killed"|nil, high_score, discovery=0|1|2}
+    sdk.challenges.get(id)    -- one of them, or nil
+    sdk.challenges.run()      -- the run going: {id, points, requirement, personal_best,
+                              --   out_of_bounds=seconds left outside the area or nil}, or nil
+    sdk.challenges.start(id)  -- sign the player up, as D-pad Up at its marker does
+    sdk.challenges.abort()    -- end the run going (abandoned)
+    sdk.challenges.set_enabled(id, false)  -- hide its sign-up and discovery until the mod stops
+    sdk.challenges.configure(id, {owned_points=, killed_points=, out_of_bounds_time=,
+                                  owned_display_time=, killed_display_time=})
+                              -- override setup values from the next start; nil options clear
+
+Events in `on_event`: `challenge_discovered`, `challenge_started`
+(`{challenge=id}`), `challenge_personal_best` (`{challenge, points}`),
+`challenge_ended` (`{challenge, points, completion="abandoned"|"owned"|"killed"}`).
+Discovery is 0 not discovered, 1 discovered, 2 intro seen (retail's statuses).
+Everything a mod hid or overrode is undone when it stops; a run already going
+keeps the values it started with. Details:
+`docs/hails-additions/42-challenges.md#mod-entry`.
+
+## Career (`sdk.career`, capability `career` 1)
+
+The career that runs with the Challenges opt-in: board sales, money, milestones,
+the progression actions, flags, the team and achievements.
+
+    sdk.career.on()           -- false without the opt-in or the progression data
+    sdk.career.get()          -- {board_sales, money, money_earned,
+                              --   milestone={index, count, start, goal, thresholds, pending},
+                              --   armed, fired, flags, achievements,
+                              --   team={name, logo, members, tiers,
+                              --     teammates={{joined, name, character, look={kind, id} or nil}}},
+                              --   unlocks={{kind, name, new}}, unlock_all, active (activated challenges),
+                              --   presets={{key, id, name_text}} (teammate presets),
+                              --   graph={id, state} or nil, queue}
+    sdk.career.add_sales(amount, reason)  -- board sales (counted as bonus sales), runs the checks
+    sdk.career.add_money(amount)          -- money, runs the checks
+    sdk.career.arm_action(id)             -- arm a progression action (fires at once if it holds)
+    sdk.career.set_flag(name, value)      -- "<mod id>:<name>" unless the career has that flag
+    sdk.career.grant_achievement(name)    -- an existing, enabled achievement row, once
+    sdk.career.grant_unlock(category, name)  -- an unlock by retail kind 0..12 and name
+    sdk.career.grant_reward(id, big)      -- a progression reward row (its unlock + the reward summary)
+    sdk.career.skip_start()               -- complete the career start's gate challenges (as owned),
+                                          --   so the crossbar shows board sales (also SKATE_CAREER_SKIP_START=1)
+    sdk.career.activate_challenge(id)     -- make a challenge available while gating is on
+    sdk.career.activate_group(id)         -- every challenge of a progression group
+    sdk.career.set_team_name(name)        -- the team's name (16 characters kept; empty allowed)
+    sdk.career.set_teammate_name(n, name) -- teammate n's name (1-based)
+    sdk.career.set_teammate_preset(n, key)   -- teammate n's look from a preset row (get().presets)
+    sdk.career.set_teammate_look(n, profile) -- teammate n's look (a settings/character.json style
+                                          --   table; nil clears); removed when the mod stops
+
+Events in `on_event`: `career_paid` (`{challenge, tier, money, sales, rewards}`),
+`career_action_fired` (`{action, graph}`), `career_milestone`, `career_teammate`,
+`career_tier` (`{tier}`), `career_achievement` (`{achievement}`),
+`career_unlock` (`{kind, unlock, reward}`), `career_team_name` (`{team_name}`),
+`career_teammate_name` (`{n, teammate_name}`), `career_teammate_look` (`{n, set}`).
+Career changes stay when the mod stops (the graphs they fired cannot be undone);
+the mod's own flags go. Amounts are capped at 10,000,000 per call. Details:
+`docs/hails-additions/43-career.md`.
+
+## Music (`sdk.music`, capability `music` 1)
+
+The music player: the disc soundtrack and players' own music banks (FLAC banks made with
+`skate3rust --pack-music-folder`, playlists with `--music-playlist`).
+
+    sdk.music.state()                -- {on, playing={title, artist, custom} or nil, queued, owner, volume}
+    sdk.music.playing()              -- the track heard now, or nil
+    sdk.music.play_playlist(path, opts)  -- a playlist JSON in the mod's folder replaces the queue
+    sdk.music.queue_playlist(path, opts) --   or is added to it (its banks relative to it; bank and
+                                     --   soundtrack entries can be mixed); opts: {soundtrack=true}
+                                     --   adds every disc soundtrack track, {shuffle=true|false}
+                                     --   overrides the playlist's shuffle
+    sdk.music.play_soundtrack(track) -- the disc soundtrack: track n (1-based) then the rest, or all shuffled
+    sdk.music.stop()                 -- silence
+    sdk.music.skip()                 -- the next track
+    sdk.music.set_volume(level)      -- 0..2 on the engine's music level; nil: back to the engine's
+    sdk.music.set_var(name, value)   -- a variable of the playing disc graph (PathFinder)
+    sdk.music.post(event)            -- an event to the playing disc graph
+    sdk.music.caption(options)       -- the custom-track caption: {enabled, fade_in, hold, fade_out,
+                                     --   left, bottom (percent), title_size, artist_size}; nil: default
+
+Events in `on_event`: `music_track_started` (`{title, artist, custom}`). A mod's queue, volume
+and caption changes end when the mod stops (the default soundtrack comes back). Do not share
+bank files with copyrighted music. Details: `docs/hails-additions/11-audio.md#music-banks`.
+
 ## Multiplayer names
 
 Edit **Your name** in the Multiplayer menu. Names are saved to
@@ -138,6 +279,18 @@ hyphens, and underscores, up to 16 characters. Empty names display as `Player`.
 See `skate.lua` for the complete annotated API. The sample mod in
 `examples/game-of-skate` implements game rules using these generic observations.
 
+
+## Central message
+
+`sdk.ui.central_message(text [, seconds])` shows one line in the HUD's central message,
+the retail `hudcentral` movie where a ped's taze shows "ZAP!". `text` is a language id
+of that movie (`ID_CHASE_TAZER_1`, shown as its text, "ZAP!") or plain text (1 to 64
+characters). It plays the movie's intro and sound, stays `seconds` (default 6, retail's;
+up to 60) and then plays the outro; a new line replaces it. Nothing to clean up.
+
+`sdk.ui.chase_alerts(enabled)` shows (`true`, the default) or hides the alerts
+over peds that warn or chase the player (retail's yellow and red arrows). A hide
+is released when the mod stops.
 
 ## Mod menus
 
@@ -290,6 +443,33 @@ graph's Low or High branch, which choose different stock shots (`bl_chase` vs
   command (use `sdk.commands.request` to get the error back).
 
 Disabling, failing or reloading the mod releases its angle and shot tunings.
+
+## Water look (`sdk.graphics.water_look`, capability `water_look` 1)
+
+Family 33 water (DownTown fountains, the Aletown canal) draws the retail
+`water_defaultPS` program plus an optional look layer. The player's values live in
+`settings/water-look.json` (missing file = the defaults below; the pause menu
+EXTRAS toggle "Better Water" sets `enabled`). With
+`enabled = false` the water is the plain retail program.
+
+| Key | Default | Retail |
+|---|---|---|
+| `enabled` | false (pause menu EXTRAS "Better Water") | false |
+| `ripple_scale` | 4 | 1 |
+| `reflection_blur` (cube mips) | 3 | 0 |
+| `reflection_tint` | {0.82, 1, 1.04} | {1, 1, 1} |
+| `third_wave` | true | false |
+| `body_calming` | true | false |
+| `wave_rate` | 0.75 | 1 |
+| `scroll_rate` | 0.5 | 1 |
+| `seamless_clock` | true | true (false: the scroll restarts every 10 s) |
+| `fountain_colour` (basin body colour, linear rgb 0..1) | {0.018, 0.024, 0.032} | basins keep their own |
+| `fountain_reflection` (basin share of its reflection mask, 0..2) | 0.15 | 1 |
+| `fountain_ripple` (basin wave tilt gain, 0..8) | 7 | 1 |
+
+`sdk.graphics.water_look(patch)` replaces any of these keys; `nil` restores the
+player's look. One mod at a time; unknown keys or out-of-range values fail the
+command. Disabling, failing or reloading the mod releases it.
 
 ## Local actor suspension and peer cameras
 

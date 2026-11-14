@@ -1,4 +1,4 @@
-# MixMap (`MixMapSK8.mxb`) — behavioural specification for a native Rust port
+# MixMap (`MixMapSK8.mxb`): behavioral specification for a native Rust port
 
 Written 2026-10-02 in our own words (no code transliterated from PR #4/#1, the recomp or b5-decomp; constants,
 offsets, addresses and EA's record names are facts). Companion notes: `aems-reference.md`,
@@ -65,13 +65,13 @@ Quirk: slot 0's section starts at 0x44, so its first word overlaps slot 13's tab
 
 ### 2.3 Tables. Each starts with a 16-byte header; records follow at +16.
 
-**A — MixCtl (input products).** Header `{count, count again (NumNewMixDataProcs), 0, 0}`.
+**A: MixCtl (input products).** Header `{count, count again (NumNewMixDataProcs), 0, 0}`.
 Record = (2 + n) words:
 - `w0` = input key (§3). Bits 24–27 are the curve kind applied to the input.
 - `w1` = bits 16–20: n, the number of scale references; low 16 bits: the **swing** (depth).
 - then n reference keys.
 
-**B — 3DMixCtl (distance/azimuth lookups).** Header `{count (low byte), 0, 0, 0}`. Record = 4 + 24·v bytes:
+**B: 3DMixCtl (distance/azimuth lookups).** Header `{count (low byte), 0, 0, 0}`. Record = 4 + 24·v bytes:
 - `w0` = controller selector: bits 24–27 = v (variants, always 1 here); slot/object bits name the SFXCTL
   controller whose input block is read (§3).
 - v × 24-byte variants (EA `st3DStateParams`):
@@ -81,14 +81,14 @@ Record = (2 + n) words:
   - `+4`: curve kind per quadrant: q0 bits 28–31, q2 bits 24–27, q3 bits 20–23, q1 bits 16–19. The low 16
     bits are the Doppler speed constant c (0 = no Doppler).
   - `+8, +12, +16, +20`: one range per direction d0..d3. Bits 0–14 = min distance; bits 16–30 = max
-    distance (integers, metres).
+    distance (integers, meters).
 
-**C — SubMixCh (clamped sums).** Header `{count, …}`. Record = (2 + n) words:
+**C: SubMixCh (clamped sums).** Header `{count, …}`. Record = (2 + n) words:
 - `w0` = `0xD0` top byte (type C), bits 16–23 = n, bits 8–15 = slot, low byte = index.
 - `w1` = bits 16–30: upper clamp; low 16 bits (signed): lower clamp.
 - then n reference keys.
 
-**E — MasterMixCh (output sums).** Header `{count, number of distinct destination controllers
+**E: MasterMixCh (output sums).** Header `{count, number of distinct destination controllers
 (NumUniqueSFXOBJs), …}`. Record = (3 + n) words:
 - `w0` = top byte `0xC0 | type` (0 volume, 1 pitch, 2 filter); bits 16–23 = n; bits 8–15 = slot; low byte
   = index.
@@ -96,7 +96,7 @@ Record = (2 + n) words:
 - `w2` = destination controller key (§3). Records with the same destination are consecutive in this file.
 - then n reference keys. B references ("specials") always come first.
 
-**G — Preset (output conversion list).** One entry per E record, in order. Each entry is a head word plus
+**G: Preset (output conversion list).** One entry per E record, in order. Each entry is a head word plus
 `count` output words:
 - head: bits 24–27 = type (same as E), 16–23 = slot, 8–15 = E index, 0–4 = count.
 - output word:
@@ -105,13 +105,13 @@ Record = (2 + n) words:
   - bits 21–25: special index (which B reference; ≥ the number of specials = none);
   - low 16 bits (signed): offset added to the sum.
 
-**F — EvtMixCtl (envelopes).** Header `{count, …}`. Record = (6 + n) words (EA `stMixEvtParams`):
+**F: EvtMixCtl (envelopes).** Header `{count, …}`. Record = (6 + n) words (EA `stMixEvtParams`):
 - `w0`:
   - bits 24–27: kind (0 = AR, 1 = AHR, 3 = ADSR; other kinds are inert);
   - bits 16–23: slot;
   - bit 10: retrigger;
   - bit 9: "linear", where the level is used directly as gain (no record in SK8 sets it);
-  - bit 8: gate — hold while the trigger is on;
+  - bit 8: gate: hold while the trigger is on;
   - low byte: index.
 - `w1` = bits 16–19: n scale references; low 16 bits: the swing.
 - `w2` = trigger key (§3). A non-zero value means "on".
@@ -137,7 +137,7 @@ Record = (2 + n) words:
 | 8 | Dynamic | 5 | 1 | 1 | 0 | 2 | 9 | Dynamic, Moving |
 | 9 | Speaker | 3 | 12 | 12 | 0 | 1 | 12 | |
 | 10 | Whoosh | 3 | 2 | 2 | 0 | 1 | 2 | |
-| 11 | ObjectInstance | 0 | — | — | — | — | — | (empty section) |
+| 11 | ObjectInstance | 0 | n/a | n/a | n/a | n/a | n/a | (empty section) |
 | 12 | NISCharacter | 5 | 0 | 1 | 0 | 2 | 5 | |
 | 13 | PlayerSpeech | 7 | 13 | 14 | 3 | 2 | 9 | |
 
@@ -251,7 +251,7 @@ Q15 linear (0..32767), mB (1/100 dB, 602 per halving), or cents.
 
 ### 5.1 Input stage
 For each input entry, in run order (§4.3):
-- raw = the source value in **linear flavour**:
+- raw = the source value in **linear flavor**:
   - controller → the raw i32 input word;
   - A key → the referenced product's *shaped input* (its entry's lin, not the product value);
   - B → its Q15 roll-off;
@@ -263,16 +263,16 @@ Entries that alias another entry (A-type input keys, e.g. Ambience A1 reads A2's
 value from this tick only if it sits in an earlier run. Otherwise they see last tick's value (one tick of
 lag, or the initial 32767 on the first tick).
 
-### 5.2 A — MixCtl products (per instance, in build order: slot, instance, record)
+### 5.2 A: MixCtl products (per instance, in build order: slot, instance, record)
 - From the swing w (low 16 bits of w1):
   - w bit 15 clear ("boost"): offset = w; ratio = 32767 − (mB→lin(−w)).
   - w bit 15 set ("cut", w is negative mB): offset = 0; ratio = 32767 − (mB→lin(w)).
 - x = 32767 − (((32767 − lin)·ratio) >> 15); dB = offset + lin→mB(x).
 - Result: a cut gives ≈ w mB at lin 0 and ≈ 0 at lin 32767; a boost gives ≈ 0 → ≈ +w.
-- Scale list: acc = 32767; for each reference, acc = (v·acc) >> 15, with v in **linear flavour**.
+- Scale list: acc = 32767; for each reference, acc = (v·acc) >> 15, with v in **linear flavor**.
 - **value = (acc·dB) >> 15.** The scales shrink the dB amount, which acts as a gate or depth control.
 
-### 5.3 B — 3DMixCtl lookups (per instance)
+### 5.3 B: 3DMixCtl lookups (per instance)
 Read the instance's SFXCTL input block `in` (§7.3).
 - If in[15] bit 0 is clear (inactive): dB = −10000, lin = 0, azimuth = 0, Doppler = 0. Done.
 - d = f32 distance per the variant's distance select. az = the azimuth input, a u32 (0..65535).
@@ -298,7 +298,7 @@ Read the instance's SFXCTL input block `in` (§7.3).
   - Only the select pairs (0,0), (0,1) and (1,0) occur.
   - No range has min = max (that would divide by zero).
 
-### 5.4 F — envelopes (per instance)
+### 5.4 F: envelopes (per instance)
 State: stage (0 off, 1 attack, 2 decay, 3 sustain/hold, 4 release); el = elapsed ms (f32); t0 = stage start
 offset (ms); start = level at stage start; level (Q15); out (mB).
 - **Idle:** stage 0 and trigger 0 → reset everything; out = 0 (or −10000 if linear). Skip.
@@ -333,8 +333,8 @@ offset (ms); start = level at stage start; level (Q15); out (mB).
   - A scale list multiplies the mB amount (or the linear gain, in linear mode) as in A.
 - Kinds other than 0/1/3 never leave stage 0 (level 0, so out = 0 mB). F184 is kind 4.
 
-### 5.5 C — sums (per instance, build order)
-- value = Σ references in **mB flavour**:
+### 5.5 C: sums (per instance, build order)
+- value = Σ references in **mB flavor**:
   - A → its value;
   - B → its dB;
   - F → its out;
@@ -344,9 +344,9 @@ offset (ms); start = level at stage start; level (Q15); out (mB).
 - Records read whatever is currently stored. An earlier record has this tick's value; a later index or a later
   stage has last tick's value (e.g. Global C3 reads C4 from the previous tick).
 
-### 5.6 E — output sums
+### 5.6 E: output sums
 - Output block disabled (word 15 bit 0 = 0) → value = −10000.
-- Otherwise value = base + Σ non-B references (mB flavour). B references are not summed; G uses them.
+- Otherwise value = base + Σ non-B references (mB flavor). B references are not summed; G uses them.
 
 ### 5.7 Output write (per E record, per G output word)
 v = value + offset; b = the special B reference, if any.
@@ -357,7 +357,7 @@ v = value + offset; b = the special B reference, if any.
 | 1 pitch (cents) | clamp(v, −4800, 2400) | x = b.Doppler + v; x > 2400 → 2400; **x < −4800 → 0** (quirk) |
 | 2 filter (Hz) | trunc(f32(cents→ratio(clamp(v, −10000, 0)) · 25000)) → 77..25000 Hz | clamp(v, −10000, 0), not converted |
 | 3 / ≥5 raw | clamp(v, 0, 25000) | the sum unchanged |
-| any + raw-azimuth bit | — | b.azimuth & 0xFFFF |
+| any + raw-azimuth bit | n/a | b.azimuth & 0xFFFF |
 
 - Type 4 behaves as type 0. Only types 0–2 occur in this file.
 - Disabled block: only the record's first output id is written: −10000 for volume (owners read it as
@@ -438,7 +438,7 @@ B0 reads SFXCTL `0x60060000` + g·0x800:
 
 ### 6.4 Player components (slot 1, per player instance g)
 Common pattern for each SFX object:
-- out0 = raw azimuth of B[Player.2] (or B0 for body-centred objects such as Clothing, OffBoard, HandGrabs,
+- out0 = raw azimuth of B[Player.2] (or B0 for body-centered objects such as Clothing, OffBoard, HandGrabs,
   Takedown, DropIn).
 - Volume outputs = base + B dB (via B2/B0/B4) + Player C sums + Global ducks + per-object A/F terms.
 - Pitch outputs = B1 Doppler (c 275) + C1 / C3 / C7 / C9… (each clamped ±5000).
@@ -455,7 +455,7 @@ Player B lookups:
 - B4: #2, 4–60 / 2–50 / 1–40 / 2–50 m.
 - Others are listed in `catalog.txt`.
 
-### 6.5 Ducking catalogue (Global section; all AHR envelopes, gated on a controller input)
+### 6.5 Ducking catalog (Global section; all AHR envelopes, gated on a controller input)
 - **Master.in1–in4** are category gains:
   - via A4/A0 → Music;
   - A5/A1 → nearly every SFX sum;
@@ -512,10 +512,10 @@ Free-skate values (PR #4 capture statistics):
 - Music in3/in6 from the combo multiplier; Jitter in0–4 random every frame; VU in0 = output meter level.
 - Everything else is 0 in free skate.
 
-### 7.5 Ambience in0 = the bed fade; emitter SFXCTL `0x60060000` — writer not traced (see §10).
+### 7.5 Ambience in0 = the bed fade; emitter SFXCTL `0x60060000`: writer not traced (see §10).
 
 ---------------------------------------------------------------------------------------------------------
-## 8. Port checklist (behaviour that is easy to get wrong)
+## 8. Port checklist (behavior that is easy to get wrong)
 
 1. 0 mB → 32730, not 32767. Volume outputs never exceed 32730.
 2. The kind-0 curve interpolates with a 4-bit fraction of at most ≈0.5 (§5.0).
@@ -589,7 +589,7 @@ Free-skate values (PR #4 capture statistics):
 
 ---------------------------------------------------------------------------------------------------------
 ## 11. Sources & credits
-| source | author | link | licence | what it contributed |
+| source | author | link | license | what it contributed |
 |---|---|---|---|---|
 | Upstream PR #4 (`skate-audio-core/src/mixmap/*`, docs `player-audio-retail-drivers.md`, `wheel-audio-handoff-2026-09-17.md`, `engine-defects.md`) | andrewnakas | https://github.com/SK8-ENGINE/skate-3-rust-engine/pull/4 (commit 368a433) | none (read-only reference) | The retail function map, stage order, controller/reader functions, input writers, instance counts, capture match rate. Its port is our golden oracle via the PoC. Described in our words only. |
 | Upstream PR #1 (`mx/audio-engine-vehicles`) | andrewnakas | https://github.com/SK8-ENGINE/skate-3-rust-engine/pull/1 | none | Same MixMap core (PR #4 is a superset); first "PathFinder 5.03 MixMap" identification |
@@ -598,12 +598,12 @@ Free-skate values (PR #4 capture statistics):
 | BP-Decomp_Workflow (DWARF/PDB pointers) | BurnoutDecomp | https://github.com/BurnoutDecomp/BP-Decomp_Workflow | MIT (content EA's) | Background only, via `rwaudio-prior-work.md` |
 | dbalatoni13/nfsmw | dbalatoni13 | https://github.com/dbalatoni13/nfsmw | CC0 | Not needed for the MixMap (AEMS only); listed for completeness of the prior-art search |
 | Skate 3 retail files (`MixMapSK8.mxb`, TU3 image tables at `0x82FDBFB0`/`0x82FDC7B0`/`0x82FDCFB4`/`0x82FDCFE8`) | EA Black Box | user's own disc / TU | proprietary | Measured data. Never committed; the tables are regenerated by formula (§5.0) or read from the user's image. |
-| Our notes `ems-emitters-re.md`, `aems-*.md`, `rwaudio-prior-work.md` | this project | — | — | Ambience/emitter consumer side, payload words |
+| Our notes `ems-emitters-re.md`, `aems-*.md`, `rwaudio-prior-work.md` | this project | n/a | n/a | Ambience/emitter consumer side, payload words |
 
 ## 12. Files
 - Spec: this file.
 - Tools (local, not published):
-  - `mxb_tool.py`: `catalog` / `tables` / `eval` — decoder + reference evaluator, our own code;
+  - `mxb_tool.py`: `catalog` / `tables` / `eval`: decoder + reference evaluator, our own code;
   - `mxb_diff.py`.
 - Data (local): `catalog.txt/.json`, `outputs.txt`, `tables-check.txt`,
   `golden{1,2}.txt`, `golden{1,2}.{poc,py}.csv`.

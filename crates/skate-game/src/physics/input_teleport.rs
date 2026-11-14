@@ -23,6 +23,7 @@ impl Callbacks<'_, '_> {
         // live switch flip (Processed2468 bit20), so pre-flip here to cancel it.
         let target = match_board_stance(horizontal_spawn(requested), p.flags_2468);
         bevy::log::info!(
+            actor = crate::physics::log_actor(),
             on_board = p.byte_1600 & 1 != 0,
             requested_x = requested[3][0],
             requested_y = requested[3][1],

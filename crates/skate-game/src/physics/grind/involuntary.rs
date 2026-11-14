@@ -47,6 +47,7 @@ pub(super) fn advance(
             } else {
                 state.output.slide_wipeout = true;
                 state.output.slide_impulse = manager.geometry.direction_1136.map(|x| x * 136.);
+                bevy::log::info!("GRIND_WIPEOUT fired=[\"slide_exit\"] kind={kind}");
                 skater.wipeout.state.request(10, 0.);
             }
             lifecycle::clear_wheel_spin(&mut physics.board);

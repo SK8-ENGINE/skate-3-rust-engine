@@ -34,6 +34,8 @@ def write(manifest_path, output):
     for asset in manifest['other_presentation_assets']:
         groups.extend(decode((manifest_path.parent / asset['rx2']).read_bytes()))
     output.parent.mkdir(parents=True, exist_ok=True)
+    # A new file, never written through a hard link of the previous installation's (doc 08 "Maps refresh").
+    output.unlink(missing_ok=True)
     with output.open('wb') as f:
         f.write(b'SHP1' + struct.pack('<I', len(groups)))
         for records in groups:

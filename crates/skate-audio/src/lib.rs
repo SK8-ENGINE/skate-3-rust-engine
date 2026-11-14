@@ -1,4 +1,4 @@
-//! Native port of Skate 3's retail audio runtime, written from our own behavioural specs
+//! Native port of Skate 3's retail audio runtime, written from our own behavioral specs
 //! (`audio-specs/aems-evaluator-spec.md`, `audio-specs/aems-voice-graph-spec.md`; `audio-specs/` in this crate
 //! means `docs/hails-additions/audio-specs/`, the published specs).
 //!
@@ -25,7 +25,7 @@
 //! - [`splice`]: the Splice one-shot player of the `SPLC` banks (pops, landings, touchdowns,
 //!   collisions), driven by owner blocks once per frame.
 //!
-//! Nothing here is code from upstream PR #4, skate3recomp or BurnoutDecomp (no licence); constants,
+//! Nothing here is code from upstream PR #4, skate3recomp or BurnoutDecomp (no license); constants,
 //! offsets and opcode numbers are facts. See `docs/hails-additions/11-audio.md` (Credits).
 #![forbid(unsafe_code)]
 
@@ -39,6 +39,7 @@ pub mod frontend;
 pub mod grain;
 pub mod mixer;
 pub mod mixmap;
+pub mod music;
 pub mod player;
 pub mod runtime;
 pub mod splice;

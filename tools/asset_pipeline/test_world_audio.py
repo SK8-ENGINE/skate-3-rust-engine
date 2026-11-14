@@ -190,3 +190,13 @@ class SpeechRules(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class NisLineNames(unittest.TestCase):
+    def test_line_names_give_character_id_take_and_platform(self):
+        m = world.NIS_LINE.fullmatch('31_5097_TUT-ABCD_2.sns')
+        self.assertEqual((m[1], m[2], m[3], m[4], m[5], m[6]), ('31', '5097', 'TUT', 'ABCD', '2', None))
+        m = world.NIS_LINE.fullmatch('19_6537_1UP-CHAL_1_360.sns')
+        self.assertEqual((m[3], m[4], m[6]), ('1UP', 'CHAL', '_360'))
+        self.assertEqual(world.NIS_LINE.fullmatch('99_5455_TUT-ABCD-NIS_2.sns')[4], 'ABCD-NIS')
+        self.assertIsNone(world.NIS_LINE.fullmatch('99_9200_test.sns'))

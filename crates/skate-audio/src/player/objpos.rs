@@ -13,7 +13,7 @@
 //! reads it.
 //!
 //! Azimuths are measured in the horizontal plane (retail drops the height) from the frame's
-//! direction, clockwise seen from above, 65535 = 360°. Retail takes an `acos` of the normalised dot
+//! direction, clockwise seen from above, 65535 = 360°. Retail takes an `acos` of the normalized dot
 //! product and mirrors it by the cross product's sign; we compute the same angle with `atan2`
 //! (not bit-exact in the last unit).
 use crate::mixmap::{MixMap, keys::pos};

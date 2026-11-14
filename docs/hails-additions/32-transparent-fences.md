@@ -28,7 +28,7 @@ mesh with the background visible through it.
   the output alpha at 1.0 (`crates/skate-game/src/retail_world.wgsl:119`,
   `var alpha = 1.0`; only families 7 and up take the diffuse alpha, `:307`).
   The blended draw is therefore fully opaque, and the wire texture's empty
-  texels (alpha 0, near-black colour) fill the panel.
+  texels (alpha 0, near-black color) fill the panel.
 
 ## Evidence (retail program)
 
@@ -86,7 +86,7 @@ retail shading, with its own diffuse alpha, lightmap and specular textures.
 Nothing here is a per-object rule.
 
 Hard-coded values that could become data (open, not changed here): the
-specular pseudo light `(-0.14, 0.5, 0.9)` and colour `(2.1, 1.8, 1.5)` and the
+specular pseudo light `(-0.14, 0.5, 0.9)` and color `(2.1, 1.8, 1.5)` and the
 shadow floor are shader constants shared with the other world families
 (`retail_world.wgsl:293`, `:297`), and the material multiplier
 (`m_params[0].y`) is still the constant 1 for every world family, the same open

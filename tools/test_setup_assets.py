@@ -44,7 +44,11 @@ class HudWorkspace(unittest.TestCase):
             self.assertEqual(json.loads((assets/'private/hud-availability.json').read_text())['status'],'unavailable')
             receipt=record(root,'hud')
             self.assertTrue(receipt)
-            self.assertEqual(damaged(root,{'outputs':{'hud':receipt}},exclude=('core','character','environment','maps','audio')),set())
+            self.assertEqual(damaged(root,{'outputs':{'hud':receipt}},exclude=('core','character','environment','maps','audio','livingworld')),set())
+            # Setup's window shows the file check per group (it can take minutes on a hard drive).
+            shown=[]
+            self.assertEqual(damaged(root,{'outputs':{'hud':receipt}},exclude=('core','character','environment','maps','audio','livingworld'),report=shown.append),set())
+            self.assertEqual(shown,['Checking your installed game files: hud (1 of 1)...'])
 
     def test_failure_keeps_verified_existing_huds(self):
         with tempfile.TemporaryDirectory() as temp:

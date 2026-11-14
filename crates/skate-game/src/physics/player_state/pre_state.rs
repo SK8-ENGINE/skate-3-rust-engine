@@ -9,25 +9,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     //KnownAir ctor82D35130 installs82327210; vslot24 at82327228 is
     //the same82D34DA8. Its target-following trajectory is not this deck sample.
     //Six grind vtables call82D2D860 directly;701 calls the82D34DA8 wrapper.
-    if !skater.player_state.current().is_grind()
-        && !matches!(
-            skater.player_state.current(),
-            PhysicalStateId::PhysicsGround
-                | PhysicalStateId::PhysicsAir
-                    | PhysicalStateId::PhysicsAirSecondary
-                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
-                | PhysicalStateId::KnownAir
-                | PhysicalStateId::BipedAir
-                | PhysicalStateId::BipedGround
-                | PhysicalStateId::OffBoardPushing
-                | PhysicalStateId::GroundAnimation
-                | PhysicalStateId::SlideGround
-                | PhysicalStateId::WipeoutGround
-                | PhysicalStateId::Teleporting
-                | PhysicalStateId::LandingOnDeck
-                | PhysicalStateId::Nonspecific
-        )
-    {
+    if !predicts_deck(skater.player_state.current()) {
         return Err("PreState requires the selected state's actual PredictFutureOfDeck".into());
     }
     let deck = physics.board.part_transforms()[BodyId::Deck.index()];
@@ -59,4 +41,28 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     );
     skater.offboard_grab.sync(&scene, context)?;
     Ok(())
+}
+
+/// The states whose PredictFutureOfDeck is the deck sample above (`82D34DA8` / `82D2D860`): every grind and these.
+pub(super) fn predicts_deck(state: PhysicalStateId) -> bool {
+    state.is_grind()
+        || matches!(
+            state,
+            PhysicalStateId::PhysicsGround
+                | PhysicalStateId::PhysicsAir
+                    | PhysicalStateId::PhysicsAirSecondary
+                | PhysicalStateId::FootPlant | PhysicalStateId::Boneless | PhysicalStateId::HandPlant | PhysicalStateId::RevertGround
+                | PhysicalStateId::KnownAir
+                | PhysicalStateId::BipedAir
+                | PhysicalStateId::BipedGround
+                | PhysicalStateId::OffBoardPushing
+                | PhysicalStateId::GroundAnimation
+                | PhysicalStateId::SlideGround
+                | PhysicalStateId::WipeoutGround
+                | PhysicalStateId::Teleporting
+                | PhysicalStateId::LandingOnDeck
+                | PhysicalStateId::Nonspecific
+                //Skitching104 vtable0x82327398 slot6 is the same82D34DA8 (the first live skitch crashed here).
+                | PhysicalStateId::Skitching
+        )
 }

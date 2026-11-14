@@ -74,7 +74,7 @@ fn safe_exit(mods:&Mods,a:&AttachState,options:&DetachOptions) -> Option<Transfo
 
 pub(super) fn detach(world:&mut World,mods:&mut Mods,forced:bool,options:&DetachOptions) -> bool {
     let Some(a)=mods.attach.as_ref() else { return true };
-    let pending=world.resource::<crate::physics::SkaterRuntime>().player_input.pending_teleport().is_some();
+    let pending=world.resource::<crate::physics::SkaterRuntime>().teleport_pending();
     let target=if pending && forced { None } else {
         safe_exit(mods,a,options).or_else(|| {
             forced.then(|| {
@@ -97,8 +97,8 @@ pub(super) fn detach(world:&mut World,mods:&mut Mods,forced:bool,options:&Detach
     if let Some(target)=target {
         let mut matrix=target.to_matrix().to_cols_array_2d();matrix[3][3]=0.;
         let mut skater=world.resource_mut::<crate::physics::SkaterRuntime>();
-        if skater.player_input.pending_teleport().is_none() {
-            let _=skater.player_input.request_teleport(matrix);
+        if !skater.teleport_pending() {
+            // One move through the actor reply (b471), as every teleport now.
             skater.teleport_state.request_manual(matrix,false); // false = on FOOT, not board
             mods.detach_pending=Some((target,Instant::now()));
         }

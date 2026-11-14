@@ -8,7 +8,7 @@
 //! arithmetic runs in f32 with a fused multiply-add like the console's `fmadds`.
 use crate::menus::SettingValue;
 
-/// A Left / Right press on a settings row (serialisable by name).
+/// A Left / Right press on a settings row (serializable by name).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Direction {
     Left,
@@ -126,7 +126,7 @@ pub fn number(value: &SettingValue) -> f64 {
 }
 
 /// Retail's rule for a Game Settings row, by string id. `None` = the row is not a value
-/// row or its rule is not decoded yet (it stays greyed until something binds a rule).
+/// row or its rule is not decoded yet (it stays grayed until something binds a rule).
 ///
 /// Labels and offsets ([code] sub_8260C258 / sub_8260D968, settings object
 /// `[[0x83067060] + 28]`): 11 Camera Angle +188 (0 LOW, 1 HIGH); 12 / 13 offboard axis
@@ -160,7 +160,7 @@ pub fn retail_rule(id: &str) -> Option<ValueRule> {
         | "ID_GAMESETTINGS_SKATEFEED_STATUS_MESSAGE" => ValueRule::toggle(OFF, ON),
         "ID_GAMESETTINGS_UNITS_TOGGLE" => ValueRule::toggle("ID_GAMESETTINGS_UNITS_METRIC", "ID_GAMESETTINGS_UNITS_IMPERIAL"),
         // Labels: sub_825E7648 maps 0..4 (values above 4 show nothing); the rule cycles 0..2,
-        // Motorized (3) and the test slot (4, our Custom) are only labelled.
+        // Motorized (3) and the test slot (4, our Custom) are only labeled.
         "ID_GAMESETTINGS_DIFFICULTY_OPTIONS" => ValueRule::Cycle {
             count: 3,
             labels: ["EASY", "NORMAL", "HARDCORE", "MOTORIZED", "TEST"].map(|l| format!("ID_GAMESETTINGS_DIFFICULTY_{l}")).to_vec(),
@@ -172,10 +172,60 @@ pub fn retail_rule(id: &str) -> Option<ValueRule> {
     })
 }
 
+/// Retail settings row defaults before any save (recomp-read settings object): docs/hails-additions/31-retail-menus.md#settings-defaults
+pub fn retail_default(id: &str) -> Option<SettingValue> {
+    Some(match id {
+        "ID_GAMESETTINGS_SFXVOLUME" | "ID_GAMESETTINGS_DIALOGVOLUME" | "ID_GAMESETTINGS_MUSICVOLUME" => SettingValue::Float(1.0),
+        "ID_GAMESETTINGS_MINIMAP_TOGGLE"
+        | "ID_GAMESETTINGS_HUD_TOGGLE"
+        | "ID_GAMESETTINGS_SKATEFEED_BOOTFLOW"
+        | "ID_GAMESETTINGS_SKATEFEED_CHYRON"
+        | "ID_GAMESETTINGS_SKATEFEED_INCOMING_MESSAGE"
+        | "ID_GAMESETTINGS_SKATEFEED_OUTGOING_MESSAGE"
+        | "ID_GAMESETTINGS_SKATEFEED_STATUS_MESSAGE"
+        | "ID_GAMESETTINGS_DIFFICULTY_OPTIONS"
+        // Units +168: the reset writes 1 (Imperial) and only a PAL console switches it to Metric (research b1008); the
+        // disc's movies are the NTSC versions.
+        | "ID_GAMESETTINGS_UNITS_TOGGLE" => SettingValue::Int(1),
+        "ID_GAMESETTINGS_SUBTITLE_TOGGLE"
+        | "ID_GAMESETTINGS_CAM_MAN_TOGGLE"
+        | "ID_GAMESETTINGS_HOM_MODE_OPTIONS"
+        | "ID_GAMESETTINGS_CAMERA_ANGLE_TOGGLE"
+        | "ID_GAMESETTINGS_OFFBOARD_Y_AXIS_TOGGLE"
+        | "ID_GAMESETTINGS_OFFBOARD_X_AXIS_TOGGLE"
+        | "ID_GAMESETTINGS_TRANSPARENCY_TOGGLE" => SettingValue::Int(0),
+        // NOT RETAIL (user 2026-10-17, "set that to default to off for now"): retail's Vibration default is on (+163 =
+        // 1, above); off until the rumble that starts with the game and outlives it is fixed (todo
+        // rumble-starts-and-sticks). Switching it on in Game Settings still works and is saved.
+        "ID_GAMESETTINGS_VIBRATION_TOGGLE" => SettingValue::Int(0),
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use SettingValue::{Bool, Float, Int};
+
+    #[test]
+    fn every_rule_row_has_a_retail_default_that_displays() {
+        for id in [
+            "ID_GAMESETTINGS_SFXVOLUME", "ID_GAMESETTINGS_SUBTITLE_TOGGLE", "ID_GAMESETTINGS_MINIMAP_TOGGLE",
+            "ID_GAMESETTINGS_HUD_TOGGLE", "ID_GAMESETTINGS_CAM_MAN_TOGGLE", "ID_GAMESETTINGS_UNITS_TOGGLE",
+            "ID_GAMESETTINGS_DIFFICULTY_OPTIONS", "ID_GAMESETTINGS_HOM_MODE_OPTIONS", "ID_GAMESETTINGS_SKATEFEED_CHYRON",
+        ] {
+            let (rule, value) = (retail_rule(id).unwrap(), retail_default(id).unwrap());
+            assert!(!matches!(rule.display(&value), Display::Label(ref l) if l.contains("ERROR")), "{id}");
+        }
+        let label = |id: &str| match retail_rule(id).unwrap().display(&retail_default(id).unwrap()) {
+            Display::Label(l) => l,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(label("ID_GAMESETTINGS_SUBTITLE_TOGGLE"), "ID_COMMON_OFF");
+        assert_eq!(label("ID_GAMESETTINGS_HUD_TOGGLE"), "ID_COMMON_ON");
+        assert_eq!(label("ID_GAMESETTINGS_DIFFICULTY_OPTIONS"), "ID_GAMESETTINGS_DIFFICULTY_NORMAL");
+        assert!(retail_default("ID_GAMESETTINGS_SFXPACK").is_none());
+    }
 
     fn f(v: SettingValue) -> f32 {
         number(&v) as f32

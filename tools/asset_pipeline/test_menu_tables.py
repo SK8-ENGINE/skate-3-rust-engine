@@ -17,7 +17,7 @@ if open(xex, 'rb').read(4) != b'XEX2':
     print('Menu table extraction failed: Not an XEX2 executable', file=sys.stderr)
     sys.exit(1)
 item = {'name': 'A', 'label': 'B', 'icon': 'c', 'sub_option_kind': -1, 'help': 'd'}
-open(out, 'w').write(json.dumps({'schema': 1, 'items': [item, item], 'modes': [{'key': 'M'}]}))
+open(out, 'w').write(json.dumps({'schema': 1, 'items': [item, item], 'modes': [{'key': 'M'}], 'templates': [{'name': 'CrossBar', 'path': 'main/core_menu.swf', 'kind': 0}], 'screens': [{'key': '0000000000000000', 'blur': True}], 'settings_titles': ['ID_GAMESETTINGS_TITLE'], 'sub_options': [{'labels': ['ID_A'], 'helpers': ['']}], 'trick_guide': {'categories': ['046ed0ccbda1091f'], 'gestures': [''], 'buttons': ['']}, 'career_stats': [{'label': 'ID_RECORD_A', 'enabled': True}], 'speakers': ['S%d' % i for i in range(104)]}))
 print('MENU_TABLES_READY')
 '''
 

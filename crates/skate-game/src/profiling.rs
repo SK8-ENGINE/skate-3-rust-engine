@@ -37,6 +37,14 @@ struct Options {
 
 fn options() -> Result<Option<Options>, String> {
     let args: Vec<String> = std::env::args().collect();
+    if crate::trace_all::on() && !args.iter().any(|a| a == "--trace") {
+        // Trace-all arms the Chrome capture for F9 / F10 (armed costs only the span bookkeeping:
+        // nothing is timed or written until F9), next to the other trace-all outputs.
+        let dir = std::env::var_os("SKATE_PERF_REPORT")
+            .and_then(|p| PathBuf::from(p).parent().map(PathBuf::from))
+            .unwrap_or_default();
+        return Ok(Some(Options { output: dir.join("chrome-trace.json"), wait: true, gpu: false, seconds: None }));
+    }
     let Some(index) = args.iter().position(|a| a == "--trace") else {
         // The modifiers are meaningless alone; catching that here avoids a run
         // that silently produces no trace.
@@ -151,6 +159,9 @@ where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
     fn on_new_span(&self, attrs:&Attributes<'_>, id:&Id, ctx:Context<'_,S>) {
+        // A span without fields is labeled by its static name at exit: no allocation here
+        // (trace-all keeps this layer armed for a whole session).
+        if attrs.fields().is_empty() {return;}
         let mut label=TraceLabel(attrs.metadata().name().to_owned());attrs.record(&mut label);
         if let Some(span)=ctx.span(id) {span.extensions_mut().insert(label);}
     }
@@ -181,6 +192,297 @@ impl Drop for Guard {
             capture.finish();
             info!("SKATE_TRACE finished");
         }
+        drain_log_queue(std::time::Duration::from_secs(2));
+    }
+}
+
+/// Lines waiting for (or being written by) the log writer thread.
+static LOG_PENDING: AtomicU64 = AtomicU64::new(0);
+/// Lines dropped because the queue was full (the writer reports them).
+static LOG_DROPPED: AtomicU64 = AtomicU64::new(0);
+static LOG_QUEUE: OnceLock<std::sync::mpsc::SyncSender<Vec<u8>>> = OnceLock::new();
+/// Queued lines before new ones are dropped (never blocks the game).
+const LOG_QUEUE_LINES: usize = 16_384;
+
+/// Whether log lines go through the writer thread (trace-all) rather than straight to stderr.
+pub(crate) fn log_writer_threaded() -> bool {
+    LOG_QUEUE.get().is_some()
+}
+
+/// The Chrome capture's state for the startup line.
+pub(crate) fn chrome_trace_state() -> &'static str {
+    match CAPTURE.get() {
+        None => "off",
+        Some(c) if c.recording.load(Ordering::Relaxed) => "recording",
+        Some(_) => "armed (F9 start, F10 stop)",
+    }
+}
+
+/// Wait until the writer thread has written every queued line and the stderr pump has forwarded it, at most `limit`.
+fn drain_log_queue(limit: std::time::Duration) {
+    let until = Instant::now() + limit;
+    if LOG_QUEUE.get().is_some() {
+        while LOG_PENDING.load(Ordering::Acquire) != 0 && Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+    #[cfg(any(windows, unix))]
+    stderr_pump::drain(until);
+}
+
+/// The process's stderr as an 8 MB pipe that its own thread forwards to the real stderr (the log file or console).
+/// Every stderr write in the process (`eprintln!`, the log writer, Bevy, native libraries) then costs a copy into
+/// memory, never a disk write: a synchronous write to a slow log file held the game for up to 1.9 s per frame
+/// (desktop 2026-11-12, `crash_context::sample` waiting on stderr inside `Last`). A write blocks only when 8 MB are
+/// already waiting.
+#[cfg(windows)]
+mod stderr_pump {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
+    use windows::Win32::System::Console::{GetStdHandle, STD_ERROR_HANDLE, SetStdHandle};
+    use windows::Win32::System::Pipes::CreatePipe;
+
+    const PIPE_BYTES: u32 = 8 << 20;
+    /// The original stderr and the pipe's write end (as addresses: HANDLE is not Send).
+    static ENDS: OnceLock<(usize, usize)> = OnceLock::new();
+    static CLOSED: AtomicBool = AtomicBool::new(false);
+    /// The pump read end of file: everything written before the close is forwarded.
+    static STOPPED: AtomicBool = AtomicBool::new(false);
+
+    pub(super) fn install() -> bool {
+        // SAFETY: plain Win32 handle calls; every handle passed is one these calls returned.
+        unsafe {
+            let Ok(original) = GetStdHandle(STD_ERROR_HANDLE) else { return false };
+            if original.is_invalid() || original.0.is_null() {
+                return false;
+            }
+            let (mut read, mut write) = (HANDLE::default(), HANDLE::default());
+            if CreatePipe(&mut read, &mut write, None, PIPE_BYTES).is_err() {
+                return false;
+            }
+            let (read_at, out_at) = (read.0 as usize, original.0 as usize);
+            let pump = std::thread::Builder::new().name("stderr-pump".into()).spawn(move || {
+                let (read, out) = (HANDLE(read_at as _), HANDLE(out_at as _));
+                let mut buf = vec![0u8; 256 << 10];
+                loop {
+                    let mut n = 0u32;
+                    if ReadFile(read, Some(&mut buf), Some(&mut n), None).is_err() || n == 0 {
+                        STOPPED.store(true, Ordering::Release);
+                        return;
+                    }
+                    let mut at = 0usize;
+                    while at < n as usize {
+                        let mut wrote = 0u32;
+                        if WriteFile(out, Some(&buf[at..n as usize]), Some(&mut wrote), None).is_err() || wrote == 0 {
+                            break;
+                        }
+                        at += wrote as usize;
+                    }
+                }
+            });
+            if pump.is_err() || SetStdHandle(STD_ERROR_HANDLE, write).is_err() {
+                return false;
+            }
+            let _ = ENDS.set((out_at, write.0 as usize));
+            true
+        }
+    }
+
+    /// At exit or panic: stderr goes back to the original, the write end closes, and the pump forwards what is left
+    /// and stops (waited for until until). Nothing may query the read end meanwhile: a synchronous pipe handle runs
+    /// one call at a time, so a PeekNamedPipe waited behind the pump's idle ReadFile forever and the process never
+    /// exited (--check-assets hung, laptop 2026-11-12).
+    pub(super) fn drain(until: std::time::Instant) {
+        let Some(&(original, write)) = ENDS.get() else { return };
+        if !CLOSED.swap(true, Ordering::AcqRel) {
+            // SAFETY: both handles came from install; CLOSED makes the close happen once.
+            unsafe {
+                let _ = SetStdHandle(STD_ERROR_HANDLE, HANDLE(original as _));
+                let _ = CloseHandle(HANDLE(write as _));
+            }
+        }
+        while !STOPPED.load(Ordering::Acquire) && std::time::Instant::now() < until {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+}
+
+/// The same pump on Linux and macOS: fd 2 becomes a pipe's write end, a thread forwards the read end to the original
+/// stderr. Linux asks for an 8 MB pipe (`F_SETPIPE_SZ`, falling back to the kernel default when not allowed); macOS keeps
+/// its fixed pipe size.
+#[cfg(unix)]
+mod stderr_pump {
+    use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static READ: OnceLock<i32> = OnceLock::new();
+    static FORWARDING: AtomicBool = AtomicBool::new(false);
+
+    pub(super) fn install() -> bool {
+        // SAFETY: plain POSIX descriptor calls on descriptors these calls returned; the buffer outlives every read.
+        unsafe {
+            let original = libc::dup(2);
+            if original < 0 {
+                return false;
+            }
+            let mut fds = [0i32; 2];
+            if libc::pipe(fds.as_mut_ptr()) != 0 {
+                libc::close(original);
+                return false;
+            }
+            #[cfg(target_os = "linux")]
+            if libc::fcntl(fds[1], libc::F_SETPIPE_SZ, 8 << 20) < 0 {
+                libc::fcntl(fds[1], libc::F_SETPIPE_SZ, 1 << 20);
+            }
+            let read = fds[0];
+            let pump = std::thread::Builder::new().name("stderr-pump".into()).spawn(move || {
+                let mut buf = vec![0u8; 256 << 10];
+                loop {
+                    let n = libc::read(read, buf.as_mut_ptr().cast(), buf.len());
+                    if n < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                        continue;
+                    }
+                    if n <= 0 {
+                        return;
+                    }
+                    FORWARDING.store(true, Ordering::Release);
+                    let mut at = 0usize;
+                    while at < n as usize {
+                        let wrote = libc::write(original, buf[at..].as_ptr().cast(), n as usize - at);
+                        if wrote < 0 && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
+                            continue;
+                        }
+                        if wrote <= 0 {
+                            break;
+                        }
+                        at += wrote as usize;
+                    }
+                    FORWARDING.store(false, Ordering::Release);
+                }
+            });
+            if pump.is_err() || libc::dup2(fds[1], 2) < 0 {
+                return false;
+            }
+            libc::close(fds[1]);
+            let _ = READ.set(read);
+            true
+        }
+    }
+
+    /// Wait (until `until`) for the pump to forward everything written so far.
+    pub(super) fn drain(until: std::time::Instant) {
+        let Some(&read) = READ.get() else { return };
+        loop {
+            let mut waiting: libc::c_int = 0;
+            // SAFETY: the read end stays open for the process lifetime; FIONREAD writes one int.
+            let ok = unsafe { libc::ioctl(read, libc::FIONREAD, &mut waiting) } == 0;
+            if !ok || (waiting == 0 && !FORWARDING.load(Ordering::Acquire)) || std::time::Instant::now() >= until {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+    }
+}
+
+/// Log writer: a bounded queue on its own thread, drained on panic or exit, so a slow log disk never stalls a
+/// game thread (desktop 2026-11-12: synchronous stderr writes to an HDD log held systems for 0.3-4 s). Stderr
+/// directly only if the writer thread cannot start.
+#[derive(Clone, Copy)]
+enum LogWriter {
+    Stderr,
+    Queued,
+}
+
+impl LogWriter {
+    fn install(threaded: bool) -> Self {
+        #[cfg(any(windows, unix))]
+        if !stderr_pump::install() {
+            eprintln!("LOG stderr pump unavailable; stderr writes go straight to the log");
+        }
+        if !threaded {
+            return Self::Stderr;
+        }
+        let (tx, rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(LOG_QUEUE_LINES);
+        let spawned = std::thread::Builder::new().name("log-writer".into()).spawn(move || {
+            let mut reported = 0u64;
+            while let Ok(line) = rx.recv() {
+                let mut err = std::io::stderr().lock();
+                let _ = err.write_all(&line);
+                LOG_PENDING.fetch_sub(1, Ordering::Release);
+                // Batch: write everything already queued before flushing.
+                while let Ok(line) = rx.try_recv() {
+                    let _ = err.write_all(&line);
+                    LOG_PENDING.fetch_sub(1, Ordering::Release);
+                }
+                let dropped = LOG_DROPPED.load(Ordering::Relaxed);
+                if dropped != reported {
+                    let _ = writeln!(err, "LOG_DROPPED lines={} (log queue full)", dropped - reported);
+                    reported = dropped;
+                }
+                let _ = err.flush();
+            }
+        });
+        if spawned.is_err() || LOG_QUEUE.set(tx).is_err() {
+            return Self::Stderr;
+        }
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            drain_log_queue(std::time::Duration::from_millis(500));
+            previous(info);
+            drain_log_queue(std::time::Duration::from_millis(500));
+        }));
+        Self::Queued
+    }
+}
+
+/// One formatted event, sent whole when the formatter drops it.
+enum LineWriter {
+    Stderr(std::io::Stderr),
+    Queued(Vec<u8>),
+}
+
+impl Write for LineWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Stderr(err) => err.write(bytes),
+            Self::Queued(buf) => {
+                buf.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Stderr(err) => err.flush(),
+            Self::Queued(_) => Ok(()),
+        }
+    }
+}
+
+impl Drop for LineWriter {
+    fn drop(&mut self) {
+        let Self::Queued(buf) = self else { return };
+        if buf.is_empty() {
+            return;
+        }
+        let Some(tx) = LOG_QUEUE.get() else { return };
+        LOG_PENDING.fetch_add(1, Ordering::AcqRel);
+        if tx.try_send(std::mem::take(buf)).is_err() {
+            LOG_PENDING.fetch_sub(1, Ordering::AcqRel);
+            LOG_DROPPED.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+impl<'a> bevy::log::tracing_subscriber::fmt::MakeWriter<'a> for LogWriter {
+    type Writer = LineWriter;
+    fn make_writer(&'a self) -> LineWriter {
+        match self {
+            Self::Stderr => LineWriter::Stderr(std::io::stderr()),
+            Self::Queued => LineWriter::Queued(Vec::with_capacity(256)),
+        }
     }
 }
 
@@ -190,19 +492,25 @@ pub(crate) fn init() -> Result<Guard, String> {
     // Installing one here as well makes that call fail with `SetLoggerError`,
     // and `init` unwraps, so doing this "defensively" panics before the window
     // ever opens.
+    let options = options()?;
+    // Bevy's per-system spans (feature `trace`) are only read by the Chrome capture and the SYSTEM_TIMING /
+    // FIXED_TIMING readouts; without them every system run still paid the span enter / exit (doc 34 "Gameplay
+    // frame-time pass"). Info level, so `warn` drops the spans and keeps that module's warnings.
+    let spans = if options.is_none() && crate::system_timing::layer().is_none() { ",bevy_ecs::system::function_system=warn,bevy_ecs::query::state=warn" } else { "" };
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,wgpu=warn,naga=warn,bevy_render=info"));
+        .unwrap_or_else(|_| EnvFilter::new(format!("info,wgpu=warn,naga=warn,bevy_render=info{spans}")));
     let stderr = bevy::log::tracing_subscriber::fmt::layer()
-        .with_writer(std::io::stderr)
+        .with_writer(LogWriter::install(true))
         .with_target(false);
 
-    let Some(options) = options()? else {
+    let Some(options) = options else {
         // `try_init` rather than `init`: losing the race for the global
         // subscriber costs log formatting, and killing the process over log
         // formatting is never the right trade.
         if let Err(error) = bevy::log::tracing_subscriber::registry()
             .with(filter)
             .with(stderr)
+            .with(crate::system_timing::layer())
             .try_init()
         {
             eprintln!("SKATE_TRACE could not install the log subscriber: {error}");
@@ -233,6 +541,7 @@ pub(crate) fn init() -> Result<Guard, String> {
         .with(filter)
         .with(stderr)
         .with(ChromeLayer { capture })
+        .with(crate::system_timing::layer())
         .try_init()
         .map_err(|e| format!("Could not install the trace subscriber: {e}"))?;
 

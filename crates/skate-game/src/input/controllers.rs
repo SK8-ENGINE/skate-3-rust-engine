@@ -70,6 +70,13 @@ impl ControllerInput {
         (modifier, modifier && flags(1) & 0xff00_0000 != 0,
             modifier && flags(0) & 0xff00 != 0)
     }
+    /// Original input.cfg DPadU.pressed (the teleporter prompt, b421; user: D-pad Up), from the same debounced Pad
+    /// publication as `session_marker_actions` (record 0 = D-pad Up, its high byte = pressed this batch).
+    pub(crate) fn dpad_up_pressed(&self) -> bool {
+        let Some(device) = self.active_slot() else { return false };
+        let pad = &self.pads[device];
+        pad.count() != 0 && pad.records().first().is_some_and(|r| r[1] & 0xff00_0000 != 0)
+    }
     /// The slot gameplay reads: the first ready one.
     pub(crate) fn active_slot(&self) -> Option<usize> {
         self.status.iter().position(|s| *s == ControllerStatus::Ready)

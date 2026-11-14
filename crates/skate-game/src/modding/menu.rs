@@ -140,7 +140,7 @@ fn setup(mut commands: Commands) {
                 rail.spawn((Node{padding:UiRect::all(px(12)),margin:UiRect::top(px(18)),..default()},BackgroundColor(Color::srgb(0.24,0.33,0.12))))
                     .with_child((Text::new("MOD LIBRARY"),TextFont{font_size:16.,..default()},TextColor(Color::WHITE)));
                 rail.spawn((Text::new("Select a mod to turn it on, change its settings, or see more details."),TextFont{font_size:16.,..default()},TextColor(Color::srgb(0.65,0.72,0.72))));
-                rail.spawn((Text::new("ESC / B   BACK"),TextFont{font_size:12.,..default()},TextColor(Color::srgb(0.55,0.62,0.62))));
+                crate::prompt_glyphs::hint_row(rail,&[(&["B"],"Esc","BACK")],12.,Color::srgb(0.55,0.62,0.62));
             });
             panel.spawn(Node{flex_grow:1.,min_width:px(0),flex_direction:FlexDirection::Column,row_gap:px(10),..default()}).with_children(|body| {
                 body.spawn((Title,Text::new("MODS"),TextFont{font_size:32.,..default()},TextColor(Color::WHITE)));
@@ -157,7 +157,7 @@ fn setup(mut commands: Commands) {
                     pages.spawn((Page,Text::new(""),TextFont{font_size:13.,..default()},TextColor(Color::srgb(0.65,0.72,0.72))));
                 });
                 body.spawn((Detail,Text::new(""),TextFont{font_size:14.,..default()},TextColor(Color::srgb(0.65,0.72,0.72)),Node{flex_grow:1.,min_height:px(0),overflow:Overflow::clip(),..default()}));
-                body.spawn((Text::new("Up/Down Select   Enter / A Open   Left/Right Adjust   Esc / B Back"),TextFont{font_size:12.,..default()},TextColor(Color::srgb(0.55,0.62,0.62))));
+                crate::prompt_glyphs::hint_row(body,&[(&["DPad_Up","DPad_Down"],"Up / Down","Select"),(&["A"],"Enter","Open"),(&["DPad_Left","DPad_Right"],"Left / Right","Adjust"),(&["B"],"Esc","Back")],12.,Color::srgb(0.55,0.62,0.62));
             });
         });
     });

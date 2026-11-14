@@ -1,11 +1,11 @@
 # Setup survives a dead console (#20)
 
-Branch: `fix/setup-dead-console` (from `main` 4488651). Status: **done, uncommitted**. Setup (Python) only; no asset
-rebuild, no game behaviour change.
+Branch: `fix/setup-dead-console` (from `main` 4488651). Status: **done, in upstream main** (`d4e00bad`, integrated through `c283cc57`). Setup (Python) only; no asset
+rebuild, no game behavior change.
 
 ## Problem
 
-Upstream issue #20 (reported by @NotTylor): setup from `default.xex` stopped in the customiser library stage with
+Upstream issue #20 (reported by @NotTylor): setup from `default.xex` stopped in the customizer library stage with
 
 ```
 File "tools\asset_pipeline\customisation_library.py", line 152, in prepare

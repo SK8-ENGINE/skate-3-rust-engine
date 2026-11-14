@@ -1,4 +1,4 @@
-# 21 — Low camera: the retail "Camera Angle" setting (upstream issue #3)
+# 21: Low camera: the retail "Camera Angle" setting (upstream issue #3)
 
 Branch: `feature/low-camera` (from `main` 4488651). Upstream issue: SK8-ENGINE/skate-3-rust-engine#3, requested by
 @HittaJP ("In the original Skate 3 there is a 'Low' camera angle setting ... It seems like the camera angle is the
@@ -55,7 +55,7 @@ looks slightly up; the field of view (lens 12) is the same.
 
 ### Measurement in the recomp
 
-A short muted scripted run of the recomp (`.local/research/low-camera/`, watch list `cam_watch.txt`:
+A short muted scripted run of the recomp (a local data folder, watch list `cam_watch.txt`:
 `0x83085450 @ +20`) read the camera type once a second from boot through gameplay and the Career menu: **0 (Low)** in
 every sample with the local save, which matches a profile set to Low. Driving the Career menu by script to flip the
 option did not work (only the first menu input of a run registered, twice), so the write itself was not observed; no
@@ -73,7 +73,7 @@ static writer of +20 was found either (the value presumably arrives with the pro
 - `camera/shot_data.rs`: a tuning layer over the stock shots, applied when a shot is loaded (also inside blend trees).
 - Pause menu (`graphics_menu.rs`): **SKATER > Camera angle High / Low** (Left / Right / A), saved at once. Switching
   live is safe: the graph re-evaluates its priority states on the next tick and blends to the other branch's shot.
-- Default: **High**, the engine's behaviour so far. Retail has no silent default (the boot flow asks), so no shipped
+- Default: **High**, the engine's behavior so far. Retail has no silent default (the boot flow asks), so no shipped
   value exists to copy; the retail constructor's 0 (Low) is overwritten by the player's choice before play.
 
 ### Mod surface (Lua API 2, `sdk.capabilities.camera` = 4)
@@ -81,7 +81,7 @@ static writer of +20 was found either (the value presumably arrives with the pro
 - `sdk.camera.angle()` → `{selected, active, owner, shot, tuned}` (also `sdk.snapshot.camera_angle`): the player's
   setting, what the graph uses, the mod forcing it, the current stock shot and the tuned shots with their owners.
 - `sdk.camera.set_angle("low" | "high" | nil)`: force the angle; nil hands it back to the player. One mod at a time.
-- `sdk.camera.tune_shot(shot, patch | nil)`: replace stock values of one shot by retail attribute name and unit —
+- `sdk.camera.tune_shot(shot, patch | nil)`: replace stock values of one shot by retail attribute name and unit:
   `PositionDistance`, `PositionElevation`, `PositionHeading`, `FramingLensLength`, `FramingRoll` / `Yaw` / `Pitch`,
   `ReferenceBoardOffset`, `SmoothingDirection` / `Elevation` / `Yaw` / `Pitch`, `TransitionTime`. Unknown names, out of
   range values and unknown shots fail the command. One mod per shot.
@@ -117,7 +117,7 @@ Tests:
   `graphics_menu::tests::sections_expose_only_real_rows_and_all_maps` (the new row).
 - skate-mods: `presentation::tests::camera_shot_tuning_uses_retail_names_and_rejects_bad_values`,
   `vm::driving_extension_tests::camera_angle_api_crosses_the_lua_boundary` (real Lua → commands, rejected input).
-- Asset-backed (`--ignored`, `SKATE3_ASSET_ROOT`): `camera_angle_switches_between_the_stock_low_and_high_graphs` — a
+- Asset-backed (`--ignored`, `SKATE3_ASSET_ROOT`): `camera_angle_switches_between_the_stock_low_and_high_graphs`: a
   standing skater through the real stock graph gets `bl_high_chase`, then `bl_chase` after switching to Low (camera
   lower), a mod tuning reload keeps `bl_chase`, and High returns to the same height.
 - In game (@Hailey-Ross, 2026-10-04), riding with Low selected: "just tried out the low camera build and it looks
@@ -132,3 +132,43 @@ Tests:
   setting.
 - `IsInObserverMode` also forces the low graph in retail; our condition maps it to the subject's special-effect flag
   (unchanged by this work).
+
+## Camera slow motion: retail's subject gate (2026-10-23 / 24, USER-ASKS 294, 326)
+
+- **Problem:** desktop session 2026-10-23 17:57 (hails-additions 28181a30), MegaPark full: the user reported significant lag
+  while jumping the mega ramp, with the rendering slowing down mid jump, and, asked whether retail slows down there,
+  that it does not happen in retail.
+- **Evidence:** the air 17:03:27.9 to 17:03:31.5 (3.6 s): the game drew 210+ frames a second throughout, but the
+  simulation ran 39 and 48 ticks a second (FIXED_TIMING, `FixedMain::run_fixed_main` x39 / x48): slow motion.
+- **Cause:** the stock camera graph's `SlowMotionController` (settings `slowmotion_controller` / `default`,
+  `fps_at_scale_one`) sends simulation-rate requests on a long air; `physics::frame::advance` applied them to the
+  tick timer (`SimulationClock`, ported from `Simulation::OnRequestSetSimRate` 82857EC8). Upstream code since
+  a47da5bb (2026-09-06). Retail does not slow down on the mega ramp, so a retail condition that keeps these requests
+  out (or makes them inert) is missing from the port; not found yet.
+- **First change (2026-10-23, replaced on 2026-10-24 below):** the requests were logged (`CAMERA_SLOW_MOTION begin` /
+  `end` in `camera/graph.rs`, `CAMERA_SLOW_MOTION request` in `physics/frame.rs`) and did not change the tick rate.
+- **Tests:** camera 38, physics 222 OK; the data-gated
+  `stock_skater_startup_builds_the_graphs_and_physical_body_from_the_same_rig` now expects the normal period after a
+  request (it then stops at tick 600 on "Canonical world has no authored query metadata", a test-world limit
+  unrelated to the clock).
+- **Recomp trace (2026-10-24, USER-ASKS 326; trace b584 run1, hooks `hooks_slowmo.cpp`, research
+  b573 / b584):** a scripted Stadium - Full mega ramp air (camera height 36.6 m on the deck, 13.2 m at the bottom of
+  the roll-in, 23.8 m at the top of the air, landing at 51 s; screenshot "Very High Gap, Air Height 13.0 ft"). The
+  controller's Begin ran at the takeoff (47.98 s) and posted 1/60 (the curve at 0); 82857EC8 kept the simulation at
+  1/60; Update ran through the air (65 logged calls) with its elapsed time staying 0 and posted nothing; End posted
+  1/60 after the landing (50.55 s). So retail starts the controller on this air but never slows the simulation [trace].
+  The gate that stops Update is its second one [code, b573 + the trace]: the subject's component at `+0x710` was null
+  (the first gate, online, passed, as Begin posted). Our controller has no such gate and its Update follows the curve
+  (`skate_core::camera::slow_motion`), hence 39 / 48 ticks.
+- **The subject (research b586, trace b584 run2):** `+0x710` of an Actor (vtable 823004A8,
+  ctor 82590DC0) is its PhysicalPlayerHiLOD, always allocated by the ctor, so a live Actor always passes [code]. The
+  controller's subject is word 1 of the CameraGraph's context block, copied from the camera system's subject
+  (`camsys+0xA0`) when the graph is built (82DF49B0, built once by 82DF6590) [code]. In the run that word was 0 in all
+  60 logged Updates while `camsys+0xA0` held a live subject (`SMSUBJ` / `CAMSUBJ` lines) [trace]: the copy is empty,
+  so Update returns before it advances, every time. (The recomp boots straight into gameplay; a console goes through
+  the front end first. The user's report that it does not happen in retail agrees.)
+- **Change (2026-10-24):** `CameraGraph::slow_motion_subject` (false, retail's empty copy) gates the controller's
+  Update (`slow_motion_update`: no request and no time passes without it), and the frame applies the requests again
+  (Begin / End only ask for the normal 1/60, so nothing changes in play; a slower one is logged as
+  `CAMERA_SLOW_MOTION request`). Test `camera::graph::slow_motion_tests`; the startup test expects an injected 1/35
+  request to apply again. Open: whether retail's copy is ever set (another boot path, replays); a mod switch for it.

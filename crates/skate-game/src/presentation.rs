@@ -43,7 +43,7 @@ impl Presentation {
     }
 }
 
-fn capture(skater: Res<SkaterRuntime>, camera: Res<CameraRuntime>,
+pub(crate) fn capture(skater: Res<SkaterRuntime>, camera: Res<CameraRuntime>,
     time: Res<Time<Fixed>>, mut history: ResMut<Presentation>,
     mut replay: ResMut<crate::replay::Replay>) {
     if skater.pose_generation == history.generation && !camera.manual_cam.manual_cam_active() {

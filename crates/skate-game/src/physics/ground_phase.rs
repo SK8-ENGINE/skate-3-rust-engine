@@ -204,8 +204,8 @@ pub(crate) fn advance(
     let mut launch = |info: &GroundLaunchInfo| {
         let mut input = selector_input;
         input.board_vertical_velocity = info.velocity[1];
-        skater.trajectory.launch(info.selector_launch(), input, &physics.world)?;
-        skater.trajectory.update(input, &physics.world, grind_context)?;
+        skater.trajectory.launch(info.selector_launch(), input, &physics.world, physics.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world))?;
+        skater.trajectory.update(input, &physics.world, physics.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world), grind_context)?;
         Ok(())
     };
     let physical = GroundPhysicalFrame {

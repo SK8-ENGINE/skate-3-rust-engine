@@ -1,15 +1,15 @@
-# Ragdoll contact response vs the bail-sound gap — research spec (2026-10-03, research only, no engine change)
+# Ragdoll contact response vs the bail-sound gap: research spec (2026-10-03, research only, no engine change)
 
 Question asked: retail's per-step Δv along the contact normal (p99 1.8–13 m/s, max 7.6–20 m/s, one-step "contact
 stops") vs ours (~2 m/s peak, "lands and slides"). Find retail's ragdoll contact mechanism, compare with ours, say what
-would have to change. Sources: the skate3recomp TU3 lifted code (reference only, our own words), recomp traces from our
+would have to change. Sources: the skate3recomp TU3 (title update 3) lifted code (reference only, our own words), recomp traces from our
 own scripted runs, our code (read only). Credit: skate3recomp by @mchughalex, rexglue SDK, Xenia.
 
 ## TL;DR (what the user decides on)
 1. **The physics gap is mostly a measurement artefact.** The retail Δv figures came from the scripted runs at the
    Super-Ultra Mega-Park spawn, where the skater fell ~2 s into the gap (or slid down the MegaRamp roll-in) and hit at
    **11–23 m/s**. In ordinary-height tumbles (first 2 s of the bails in `bailx3_20261003_110208`) retail's per-step
-   |Δv·n| is p90 2.3 / p99 3.7 / max 3.7 m/s with approach speeds ≥ −4.3 m/s — the same size as ours (~2 m/s).
+   |Δv·n| is p90 2.3 / p99 3.7 / max 3.7 m/s with approach speeds ≥ −4.3 m/s: the same size as ours (~2 m/s).
    Retail's large "one-step stops" are 1–3-step stops of 15–20 m/s impacts, removing 70–100 % of the normal velocity per
    step: what restitution 0 in the shared contact solver does, and what ours (a port of the same solver) also does.
 2. **The bail-sound gap is audio-side: a missing speed curve.** The audio bridge `sub_824B0DA8`, after copying the
@@ -20,7 +20,7 @@ own scripted runs, our code (read only). Credit: skate3recomp by @mchughalex, re
    the body poster's impact = 5.0 × the clamped region impact (p50 of the ratio 5.0 over 218 posts; 4.106 = 5 × 0.821,
    1.033 = 5 × 0.207, the 0.001 floor → 0.005). Our `skate_events::region_impacts` → `body_impact` skips this, so our
    impacts are 1/5 of retail's at the poster. Our max 0.21 per bail × 5 = 1.05 → tier 2 for every body material (bands
-   0.25–0.65), and tier 1 / 2 on concrete (bands 1.0 / 1.85) become reachable — exactly the "concrete 1047 / 991 from a
+   0.25–0.65), and tier 1 / 2 on concrete (bands 1.0 / 1.85) become reachable: exactly the "concrete 1047 / 991 from a
    different impact" open question in doc 11.
 3. Recommendation: **fix the audio side first (the curve), keep the physics as is**, then re-measure the bail density
    against the recomp before considering any physics change.
@@ -32,7 +32,7 @@ own scripted runs, our code (read only). Credit: skate3recomp by @mchughalex, re
   (`8277A828` / `8277BFAC`). Contact rows solve velocity + position error together, a 4th lane position-only; normal
   impulse clamped to [0, ∞), friction cone static → dynamic. **50 iterations** (Simulation +176, doc 12).
 - Skeleton world query: its own query record (`82BE5094` → `82768728` with edge threshold −1); the ground job's shared
-  values (volume padding 0.05, max separating distance 0.5 — speculative contacts).
+  values (volume padding 0.05, max separating distance 0.5; speculative contacts).
 - 60 Hz fixed step: the recomp's BAILSTEP shows 16.6 ms steps and SkeletonState dt 0.01667 always.
 ### 1.2 Materials, masses, damping (stock vault, `physics_skeleton` / `physics_wipeout`)
 - Normal (riding / driven) collision: friction 0, restitution 0 (`FrictionNormal` / `RestitutionNormal`).
@@ -54,7 +54,7 @@ own scripted runs, our code (read only). Credit: skate3recomp by @mchughalex, re
 - `82BEBD28`: SkeletonState velocities = finite differences × 60 of the part frames (body COM ⊗ local mass frame,
   `82585CB0`), Δv = v − v_prev (ours: `SkeletonPhysicalRecord::update`, identical).
 - `82BD60C8`: region impact = clamp01(max(0.001, |Δv·n| × mass × 10)) → Collision `+80 + 4i` (8 regions; note retail
-  takes |Δv·n|, ours the signed value — doc 11 masses section).
+  takes |Δv·n|, ours the signed value; doc 11 masses section).
 - `82773298` (conditioner): 4-frame ring, per-region max → block `+92` → skater entry `+320` → audio state `+496`.
 - **`824B0DA8` (bridge): `+496 + 4i` ×= graph(`+216`), i = 0..7; then `+216` := `+212` (|COM v|).** ← missing in ours.
 - Body poster `824BC188`: per region 0..5 with impact > 0 and no cooldown, tier = `82497088(material, impact)`
@@ -91,14 +91,14 @@ B. **Physics (not recommended now):** nothing identified that differs from retai
   ask the user to listen); every slow body contact while moving (> 1 m/s) also ×5 → more tier-0 posts at the floor
   (0.001 × 5 = 0.005 ≥ the arm floor 0.005, ≥ 0.0025 for the others): retail does the same (BANDQ shows thousands of floor
   queries per run, mostly tier 3 for arms); the cooldown limits posts. `+212` = |COM v| in m/s is our port's reading of
-  the state; the curve's x range (0–0.95) means "moving at all", UNCERTAIN whether retail's `+212` is in m/s — the
+  the state; the curve's x range (0–0.95) means "moving at all", UNCERTAIN whether retail's `+212` is in m/s; the
   measured ×5 at running / falling speeds and ~×1 at rest agree with that reading.
-- Optimisation / regression: e2e bail scenarios change (expected), everything else must stay byte-identical.
+- Optimization / regression: e2e bail scenarios change (expected), everything else must stay byte-identical.
 
 ## 5. Decision points for the user
-1. Accept that the ragdoll physics is not the cause (no physics change) — yes / no.
-2. Port the bridge's speed graph on the region impacts (audio only) — yes / no.
-3. Together with it: the |Δv·n| abs and the 30 fps body-poster cadence (both already documented) — yes / no.
+1. Accept that the ragdoll physics is not the cause (no physics change): yes / no.
+2. Port the bridge's speed graph on the region impacts (audio only): yes / no.
+3. Together with it: the |Δv·n| abs and the 30 fps body-poster cadence (both already documented): yes / no.
 4. If wanted later: a per-step skeleton contact log in our engine (diagnostic, behind an env var) for a matched-drop
    comparison with the recomp.
 

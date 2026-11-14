@@ -71,6 +71,43 @@ fn teleport_request_has_priority_and_fallthrough_sets_the_native_request_byte() 
 }
 
 #[test]
+fn air_timeout_requests_the_checkpoint_on_the_301st_air_frame_at_retail_default() {
+    assert_eq!(StateSelector::default().air_timeout.0, super::RETAIL_AIR_TIMEOUT_FRAMES);
+    assert_eq!(super::RETAIL_AIR_TIMEOUT_FRAMES, 300);
+    let mut selector = StateSelector::default();
+    let mut frame = input(200);
+    for tick in 1..=300 {
+        calculate(&mut selector, State::PhysicsAir, &frame);
+        assert!(!selector.request_teleport, "no request on air frame {tick}");
+    }
+    // Animation packet flag 10375 (flags+2468 bit 3) holds the counter.
+    frame.processed.flags_2468 = 8;
+    calculate(&mut selector, State::PhysicsAir, &frame);
+    assert_eq!(selector.air_frames, 300);
+    assert!(!selector.request_teleport);
+    frame.processed.flags_2468 = 0;
+    assert_eq!(calculate(&mut selector, State::PhysicsAir, &frame), State::PhysicsAir);
+    assert_eq!(selector.air_frames, 301);
+    assert!(selector.request_teleport);
+    // Touching anything that is not air (category 200) restarts the count.
+    calculate(&mut selector, State::PhysicsAir, &input(100));
+    assert_eq!(selector.air_frames, 0);
+    assert!(!selector.request_teleport);
+}
+
+#[test]
+fn air_timeout_setting_moves_the_request_tick() {
+    let mut selector = StateSelector { air_timeout: super::AirTimeoutFrames(120), ..Default::default() };
+    let frame = input(200);
+    for _ in 0..120 {
+        calculate(&mut selector, State::PhysicsAir, &frame);
+        assert!(!selector.request_teleport);
+    }
+    calculate(&mut selector, State::PhysicsAir, &frame);
+    assert!(selector.request_teleport);
+}
+
+#[test]
 fn all_six_grind_types_use_the_exact_native_state_mapping() {
     let expected = [
         State::GrindFiftyFifty,

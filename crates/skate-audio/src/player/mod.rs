@@ -11,7 +11,7 @@
 //! `process` before the tick, `update` after it.
 //!
 //! Written from our specs and our reading of the retail code (addresses in the docs); upstream PR
-//! #4 / #1 (no licence) were read for behaviour only. Values the vault holds come in as
+//! #4 / #1 (no license) were read for behavior only. Values the vault holds come in as
 //! [`tuning::PlayerTuning`] (exported by setup, `tools/asset_pipeline/audio_export.py`
 //! `player_tuning`).
 pub mod clothing;
@@ -20,6 +20,7 @@ pub mod components;
 pub mod contacts;
 pub mod globals;
 pub mod footsteps;
+pub mod hand_grabs;
 pub mod inputs;
 pub mod jitter;
 pub mod objpos;

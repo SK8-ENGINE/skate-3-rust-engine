@@ -5,7 +5,8 @@ mod math;
 mod polyline;
 mod selection;
 #[cfg(test)] mod tests;
-pub use selection::best_spline;
+pub use selection::{best_spline,best_spline_excluding};
+pub use polyline::{nearest_distance,at_distance,at_along};
 use super::Record;
 use crate::player::offboard::ground_sync::{Bounds,BoardLimits};
 use math::*;
@@ -18,6 +19,13 @@ pub fn qualify(record: &Record, position: Vector, bounds: Bounds,
     if margin > length*0.5 { margin = length*0.5; }
     let distance = polyline::nearest_distance(record,position)
         .max(margin).min(length-margin);
+    qualify_at(record, position, distance, bounds, limits)
+}
+
+/// 82E08EE8: the [`qualify`] tests at an arc distance (82E08DB8 nearest point; 82D44A10 grip +1128).
+pub fn qualify_at(record: &Record, position: Vector, distance: f32, bounds: Bounds,
+    limits: BoardLimits) -> bool {
+    let length = record.scalar(176);
     let point = polyline::at_distance(record,distance);
     let endpoints = record.endpoints();
     let direction = sub(endpoints[0],endpoints[1]);

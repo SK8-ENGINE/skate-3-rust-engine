@@ -11,8 +11,8 @@ retail does. But the engine has no traffic, pedestrian or AI-skater system yet. 
 in any fork has one, and no issue asks for one (prior-work check, 2026-10-03). The sounds therefore
 had no way in.
 
-The goal (the user, 2026-10-03): "build out everything that can then easily be hooked to by the game
-engine once they are added", in this PR, and moddable like the rest of the engine.
+The goal (the user, 2026-10-03): build out everything the game engine can easily hook into once those
+systems are added, in this PR, and moddable like the rest of the engine.
 
 ## The change in one paragraph
 
@@ -38,11 +38,11 @@ remove the component. Owner ids are `Entity::to_bits()`, so a reused index count
 
 | field | retail | meaning | who fills it | default |
 |---|---|---|---|---|
-| `engine` | vehicle record `+168` | the `aud_traffic_engine` record by name, **or the living-world model** (`taxi01`, `sedan02`, `suv`, `minivan01`, …), which setup maps through retail's attribute chain (entity → vehicle spec → record, G1; export `world_tuning.traffic_models`): sedans / hatchback → `c01_family01`, sports / muscle → `c03_sports01`, taxi / patrol → `c04_taxi01`, SUV / pickup / minivan → `c05_truck01`. The engine's patch override picks c06 / c07 / c08 itself. | the vehicle system, from the model | — (an unknown name is logged once and stays silent) |
+| `engine` | vehicle record `+168` | the `aud_traffic_engine` record by name, **or the living-world model** (`taxi01`, `sedan02`, `suv`, `minivan01`, …), which setup maps through retail's attribute chain (entity → vehicle spec → record, G1; export `world_tuning.traffic_models`): sedans / hatchback → `c01_family01`, sports / muscle → `c03_sports01`, taxi / patrol → `c04_taxi01`, SUV / pickup / minivan → `c05_truck01`. The engine's patch override picks c06 / c07 / c08 itself. | the vehicle system, from the model | none (an unknown name is logged once and stays silent) |
 | `speed` | `+148` | m/s | the vehicle system | the length of the velocity |
 | `load` | `+144` | the driver's signed acceleration in m/s². G1 measured −15.6 in a hard stop, up to +3 pulling away, and 0 while cruising. It goes into the engine and skid words × 3000. | the driving AI | derived from the speed change |
 | `horn` | `+156` | `None`, `Honk(1..=5)` or `Alarm` | the AI (honk decisions) | `None` |
-| `skidding` | `+160` | the tyres skid | the AI (hard braking or a swerve) | false |
+| `skidding` | `+160` | the tires skid | the AI (hard braking or a swerve) | false |
 
 ### `PedAudio` (retail `SFXObj_PedestrianSFX` / `PedestrianSpeech`, ped state S, G2)
 
@@ -114,7 +114,7 @@ is unchanged. The setting is read at start. The runtime has one NPC grain bed, s
 1 has granular rolling. Default: off (retail).
 
 **Remote multiplayer players (not retail; user decision 2026-10-03):** another real player nearby
-takes the NPC skater instance, ahead of the NPCs in the list order. Retail's online behaviour is
+takes the NPC skater instance, ahead of the NPCs in the list order. Retail's online behavior is
 not traced. The remote state carries only the body and pose, so the bridge gives remote players a
 lite state from their root transform. The material under them comes from the same stock line query
 the wheel lines use.
@@ -215,8 +215,8 @@ the spot where the mod starts:
   mod menu, or run with `SKATE3_MODS_ENABLE=dev-world-audio-test`. While it publishes, the game logs one
   `WORLD_AUDIO cars N/audible M, peds N/M (footsteps K), skaters N/M, posts +P (npc +Q), speech lines +S`
   line per second.
-- Debug **boxes**: green = holds an instance (audible), grey = not. An on-screen line shows the
-  audible counts, the limits and the ghost's status. **F9** re-centres everything on the skater.
+- Debug **boxes**: green = holds an instance (audible), gray = not. An on-screen line shows the
+  audible counts, the limits and the ghost's status. **F9** re-centers everything on the skater.
 
 ## Proofs and tests
 
@@ -255,7 +255,7 @@ the spot where the mod starts:
   - command validation per kind, and the event options;
   - the Lua wrappers cross the serde boundary;
   - the bundled test mod runs 400 frames with no Lua error or invalid command, stays within 128
-    commands per callback, and its F9 re-centre spawns everything again.
+    commands per callback, and its F9 re-center spawns everything again.
 
   `check_mod` validates the mod.
 
@@ -312,7 +312,7 @@ New in this pass:
 
 **Data and failure modes.**
 - The index and rules are part of the normal setup.
-- The takes need the opt-in decode (`SKATE_SETUP_SPEECH=1`, about 2.4 GB). The dev install now has all 40
+- The takes need the speech decode (on by default since 2026-10-25, USER-ASKS 338; `SKATE_SETUP_SPEECH=0` skips it, about 2.4 GB). The dev install now has all 40
   free-roam events: 13,322 takes, 2.3 GB.
 - A take is read from disk when its line starts, as retail streams it. The last 24 stay loaded.
 - Without the index, speech is off and the log says so once.
@@ -461,7 +461,7 @@ and §8.6.
 
 Built from the P3–P5 state and checked headless against the existing recordings, plus one scripted background
 recomp run for the NPC board slide (user-approved gap runs; muted, one game at a time). All numbers are "the
-recomp". Reference only: the TU3 recompilation (skate3recomp / rexglue / Xenia); our own code.
+recomp". Reference only: the TU3 (title update 3) recompilation (skate3recomp / rexglue / Xenia); our own code.
 
 ### Tazer (`skate_audio::world::peds::PedTazer`)
 - **Decoded:** `SFXObj_Tazer` (Pedestrian object 3, factory `sub_824F12D0`). Its process posts the 9-word
@@ -486,7 +486,7 @@ recomp". Reference only: the TU3 recompilation (skate3recomp / rexglue / Xenia);
 
 ### Speech details
 - **PEAK filter:** a head shadow by azimuth. The owner's raw azimuth, folded front / back, goes through three
-  curves of the speech record (centre 600 → 4000 Hz at the side → 600, gain 0.4 → 0.1, Q 3; setup export
+  curves of the speech record (center 600 → 4000 Hz at the side → 600, gain 0.4 → 0.1, Q 3; setup export
   `world_tuning.speech_voice`). Every recomp PEAK (6 / 6) lies on the curves at one azimuth; ours at the estimated
   geometry 3 / 6 within 10 %. The mixer plays speech on the stream graph (PEAK, Send A, gain, then the filters).
 - **Two sends, and the echo submix (ported):** the stream system (`sub_82C5CEF0`) multiplies the gain and both
@@ -498,7 +498,7 @@ recomp". Reference only: the TU3 recompilation (skate3recomp / rexglue / Xenia);
   the environment bus). The **post-filter** send (`desc+32`, `+0x7D0`) carries out15 (skater out10) straight to
   the environment bus. Correction to the first decode: it had out15 feeding the echo; the code says the pre-gain
   send does. Recomp: the pre-gain send = out21 in 17 of 29 lines within 25 % (out15: 10); the post-filter send =
-  out15 in 19 of 27. Modelled mono: the graph's two-channel Pn21 / Sen0 routing is a unity tap (its gains are not
+  out15 in 19 of 27. Modeled mono: the graph's two-channel Pn21 / Sen0 routing is a unity tap (its gains are not
   traced).
 - **Value 49 = a phone call:** the ped's phone rings (CellPhone_Rings container 5, now part of setup) and when the
   ring ends the ped asks for value 64 (`4402_cell_greet`). Recomp 164620: both rings answered 1.00 / 1.19 s
@@ -561,7 +561,7 @@ recomp". Reference only: the TU3 recompilation (skate3recomp / rexglue / Xenia);
   a phone call, F4 the photographer, F3 the ghost sees your trick, F2 the ghost switches between its AI voice and
   a pro's (24) and crashes.
 - Setup data (`world_tuning`): `ped_objects` (fall containers, eq bus, ring container, the tazer hold from the ped
-  state graph) and `speech_voice` (the PEAK curves, the echo delay factor / per-metre / cap / refresh frames);
+  state graph) and `speech_voice` (the PEAK curves, the echo delay factor / per-meter / cap / refresh frames);
   `ped_models` gained `cast_bit` / `cast_word` / `cast_word2`; `speech_tuning["0"]` (the main cast's) is now used;
   `speech/maincast.json` + the opt-in decode; `CellPhone_Rings.bnk` decoded with its patch tree;
   `world_audio.py` joined the audio group's fingerprint. Every field defaults to the retail value and the world
@@ -657,14 +657,14 @@ recompilation (skate3recomp / rexglue / Xenia); addresses and constants are fact
   behind (MixMap catalog). `sub_824AE6E0` writes input 1 = |listener `+0` − emitter| and input 3 = the azimuth in
   the frame (listener `+0` pulled back 0.25 m, listener `+32`); inputs 0 / 2 use listener `+64` / `+96`.
   `sub_8248CC08` fills the listener: `+0` / `+32` from the camera's matrix, `+64` from the skater list's first
-  entry (the local skater). So the bed's level reads the **camera** distance and the **camera-frame** azimuth —
+  entry (the local skater). So the bed's level reads the **camera** distance and the **camera-frame** azimuth:
   what the port already writes (`ObjPos::write`). The earlier note ("the lookups measure the distance to the local
   skater, which the rows don't give") was wrong for the Player slot; it holds for the ped speech lookups (input 0).
 - **What was wrong was the test.** `npc_bed_follows_the_recomp_rows` placed the NPC dead ahead of the camera for
   every row: always the 4–50 m quadrant. The recomp's NPC passes at the side or behind as often.
 - **The rows now carry their geometry** (local tool `npc_grec_rows.py`): the NPC board (SKATEB, matched by speed,
-  with the local skater's own board — the track that follows the local SkateBoard's GREC speed, median error
-  0.11 m/s — left out, and rows where two boards match within 0.3 m/s dropped), interpolated to the row; the
+  with the local skater's own board (the track that follows the local SkateBoard's GREC speed, median error
+  0.11 m/s) left out, and rows where two boards match within 0.3 m/s dropped), interpolated to the row; the
   camera (WPPOS, interpolated); the camera's view (not logged: the direction from the camera to the local board,
   or the camera's own motion when that board is more than 8 m away). The test rolls our NPC bed through each
   row's own geometry (camera and local skater moving with the local board's velocity).
@@ -737,7 +737,7 @@ checked against all 38 recorded sessions; no new session was run.
 - **The request** (`sub_824AA858`):
   - the event's vault tuning (bank 3, already exported in `speech_tuning["3"]`);
   - the game-state gate the main cast also has (record `+48`, `sub_8279E180`, system `+104` / `+997`; not
-    modelled, as for the main cast);
+    modeled, as for the main cast);
   - word 0 = the announcer's id (from model `+1036`'s `char_ID_Ann`) when the caller left it 0 and a challenge
     names one; word 8 = 5 / 6 (system `+1089`);
   - the manager's timers are kept per announcer (104 → slot 35);
@@ -763,7 +763,7 @@ checked against all 38 recorded sessions; no new session was run.
   - level = out2 × a vault multiplier, truncated to an integer. The multiplier (`sub_824A8250`) depends on the
     console language (English, Italian and Spanish use the `other` arrays: 1.1 / 1.25 / 1.1 for speaker 35 / 36 /
     31; with the challenge byte `+1044`: 0.9 / 1.0 / 1.0);
-  - pitch out1, azimuth out0 (no MixMap term: centre), high pass out4, low pass out3, environment send out5;
+  - pitch out1, azimuth out0 (no MixMap term: center), high pass out4, low pass out3, environment send out5;
   - voice float 1.0, PEAK flat (96 kHz, gain 1, Q 3), no echo send (`sub_824A3C28`'s constants);
   - no level cut (that is the ped / skater owners' rule).
 
@@ -909,8 +909,8 @@ the engine asked for them.
 - The `alt_bus` flag (photo records) and the HOM / moment fields are exported but not played (no caller yet).
 
 ### Follow-up: the static noise on Go To Marker (2026-10-04, investigated, nothing new to port yet)
-User, after listening: "I tried the marker sounds and they sound good. but there is no static noise that plays with
-the transition when you go back to a marker like it does in retail."
+The user, after listening: the marker sounds sound good, but no static noise plays with the transition back to
+a marker as it does in retail.
 
 **What retail does (the recomp, TU3; reference only).** Searched for a sound outside the `fe` record and found none:
 - **Code path.** Go To Marker in `sub_82898FC8` does three things: (1) every UI tick of the hold it sends message
@@ -980,7 +980,7 @@ marker was set.
   destination is stored and the **loading state** is entered (state function `0x82707508`, event 7 pushed to the state
   event queue `[0x830CFE2C]`), i.e. a loading screen. Which returns load is decided by streaming, not by a fixed distance.
 
-**The user's recording `audiox_marker_20261004_123843`** (couch launcher `recomp-marker`, 41 MB, 0 malformed): two
+**The user's recording `audiox_marker_20261004_123843`** (Skate launcher `recomp-marker`, 41 MB, 0 malformed): two
 go-tos.
 - Far return (trace 193149.7 ms): the recomp shows the **Loading… screen** (shot 194914). The go-to record plays as on
   short returns (58 at +110 … 150 ms in the capture, 59 at +270 … 280, each ~ −40 dB total, −43 … −46 dB above 4 kHz), then
@@ -995,13 +995,13 @@ go-tos.
   audio output stalled during the load (the capture got ~0.5 s of frames over 1.5 s of trace time), so what the console
   plays while it streams cannot be read from this capture.
 
-**Hooks for the next recording** (recomp `src/research/hooks_marker.cpp`, category `audiox`, so the couch launcher's
+**Hooks for the next recording** (recomp `src/research/hooks_marker.cpp`, category `audiox`, so the Skate launcher's
 `recomp-marker` entry records them; built 2026-10-04 12:44, not yet seen firing): TPMARK (request: distance, hold time,
 destination), TPDEC / TPSTREAM (load or not), TPFX (the static amount per tick = the hold's real length), FEREQ (every
 front-end sound request, including Lua's), GSTATE / GEVENT (state changes and events), HUBMSG (posted messages, ≤ 2 / s
 per id). Field counts and the analysis: local research tools (not published).
 
-**Change:** none yet. Open: what the console plays for "about a second" on a far return — the static during a 1 s hold
+**Change:** none yet. Open: what the console plays for "about a second" on a far return: the static during a 1 s hold
 (no sound for it in the code or the recomp), the record's bursts followed by the loading silence, or a console-only
 effect of the streaming load. Our engine has no streaming load, so a far return never goes silent after the record.
 
@@ -1121,8 +1121,8 @@ Credits: the recomp (skate3recomp, rexglue, Xenia) as the research build; our ow
 ## The car alarm trigger (2026-10-04, follow-up to the world follow-ups)
 **Problem.** The car alarm sound was ported (`VehicleAlarm { vehicle }` = horn state 6 for 8 s, the mod event
 `alarm`), but nothing set it off the way retail does: a parked car's alarm goes off when the player runs into it.
-The user's words (recomp session 2026-10-04 16:11): "I found a taxi, so yeah, and I skitched on it too." / "it
-ended up parking on the side of the road and when I ran into the car alarm went off".
+The user's account (recomp session 2026-10-04 16:11): the user found a taxi and skitched on it; it
+ended up parked at the side of the road, and when the user ran into it the car alarm went off.
 
 **Root cause.** The trigger is traffic AI, not audio: it lives in the vehicle's collision callback and its
 `StayingParked` state, which the engine does not have (there is no traffic yet).
@@ -1264,7 +1264,7 @@ Same-moment pairs of the riderless board's deck speed (`SKATEB`) and \|v48\|: 0.
   - the `TrafficCarPhysics.in0` writer (|v_car − v_listener| clamped to 35, slewed by 100 /s,
     × 32767 / 35; opens the A11 near boost);
   - the 3DObjPos 4.1 / 4.2 points (front and rear ±1 m along the heading, R+80 / R+96, likely);
-  - retail's frozen record when a held car leaves the 40 m list (recorded behaviour, not ported).
+  - retail's frozen record when a held car leaves the 40 m list (recorded behavior, not ported).
 - The per-model tables from `aud_characteristics` (shoe class, kind, far threshold 20 / 30 m) as a
   setup export, so the engine names a model and gets the rest. The horn kinds per model are open.
 - Moving process / update into `mixmap_frame` (retail's split; the inputs are one console frame

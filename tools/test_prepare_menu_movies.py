@@ -9,10 +9,14 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
-import prepare_menu_movies as menus
+# The repo root, as the production entry has it (prepare_runtime_huds.py): the DLC readers import `tools.owned_game`.
+sys.path.insert(1, str(Path(__file__).resolve().parents[1]))
+
+import prepare_menu_movies as menus  # noqa: E402
 
 
 def main_checkout():
@@ -29,6 +33,33 @@ class MenuMovieRules(unittest.TestCase):
     def test_library_key_matches_the_engine(self):
         self.assertEqual(menus.library_key('data\\fe\\source\\controls\\panel.apt'), 'source/controls/panel')
         self.assertEqual(menus.library_key('source/controls/panel'), 'source/controls/panel')
+
+    def test_named_images_copy_single_texture_bundles_under_the_prefix(self):
+        with tempfile.TemporaryDirectory() as folder:
+            cache, runtime = Path(folder) / 'cache', Path(folder) / 'runtime'
+
+            def bundle(name, textures):
+                manifest = f'assets/{name}/manifest.json'
+                (cache / manifest).parent.mkdir(parents=True, exist_ok=True)
+                (cache / manifest).write_text(json.dumps({'textures': textures}), encoding='utf-8')
+                for t in textures:
+                    (cache / f'assets/{name}' / t['rgba_file']).write_bytes(bytes(16))
+                return {'name': name, 'textures': {'manifest': manifest}}
+
+            one = [{'rgba_file': '0000_test.Texture.rgba', 'width': 2, 'height': 2}]
+            bundles = [bundle('data/fe/source/images/map/test', one), bundle('data/fe/source/other/x', one)]
+            cache.mkdir(parents=True, exist_ok=True)
+            (cache / 'manifest.json').write_text(json.dumps({'bundles': bundles}), encoding='utf-8')
+            images = menus.named_images(cache, runtime, ('data/fe/source/images/map/',))
+            self.assertEqual(list(images), ['fe/source/images/map/test'])
+            image = images['fe/source/images/map/test']
+            self.assertEqual((image['width'], image['height']), (2, 2))
+            self.assertEqual((runtime / image['rgba']).read_bytes(), bytes(16))
+            two = one + [{'rgba_file': '0001_b.Texture.rgba', 'width': 2, 'height': 2}]
+            bundles.append(bundle('data/fe/source/images/map/two', two))
+            (cache / 'manifest.json').write_text(json.dumps({'bundles': bundles}), encoding='utf-8')
+            with self.assertRaises(ValueError):
+                menus.named_images(cache, runtime, ('data/fe/source/images/map/',))
 
     def test_install_verifies_hashes_and_replaces(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -121,6 +152,23 @@ class RetailMenuExport(unittest.TestCase):
             self.assertGreater(textured, 0)
             files = menus.runtime_files(runtime)
             self.assertEqual(len(files), len(manifest['files']) + 1)
+
+
+OWNED_MAP_PACK = Path(os.environ.get('SKATE3_TEST_MAP_PACK', r'F:\Libraries\Downloads\Xbox 360 Skate 3 DLCs (World)'
+                                     r'\Skate 3 DLCs\Maloof Money Cup 2010 NYC'))
+
+
+@unittest.skipUnless(OWNED_MAP_PACK.is_dir(), "the player's Maloof Money Cup 2010 NYC package is not here")
+class OwnedMapPackText(unittest.TestCase):
+    def test_a_map_pack_names_its_location_in_the_menu_text(self):
+        # Laptop session 2026-10-21: the Challenge Map showed ID_WORLD_MALOOFMONEYCUP_NYC; a map pack carries no menu
+        # movie, so its text tables were never read into the menus' language.
+        from asset_pipeline import dlc as packages
+        with tempfile.TemporaryDirectory() as work:
+            text = {}
+            for archive in menus.dlc_text_archives(OWNED_MAP_PACK, Path(work)):
+                text.update(packages.language(archive))
+            self.assertEqual(text.get('ID_WORLD_MALOOFMONEYCUP_NYC'), 'Maloof Money Cup 2010 NYC')
 
 
 if __name__ == '__main__':

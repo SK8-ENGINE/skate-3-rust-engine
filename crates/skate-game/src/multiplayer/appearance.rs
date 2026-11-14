@@ -360,7 +360,7 @@ mod tests {
     #[test]
     #[ignore = "requires an owned imported GLB via SKATE_ONLINE_TEST_GLB"]
     fn online_appearance_accepts_owned_import() {
-        let path = std::env::var("SKATE_ONLINE_TEST_GLB").unwrap();
+        let Some(path) = std::env::var_os("SKATE_ONLINE_TEST_GLB") else { test_skip!("set SKATE_ONLINE_TEST_GLB") };
         validate_glb(&std::fs::read(path).unwrap()).unwrap();
     }
 }

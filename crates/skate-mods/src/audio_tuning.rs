@@ -14,7 +14,7 @@
 use serde_json::Value;
 
 pub const DOMAINS: [&str; 4] = ["player", "world", "bus", "reverb"];
-/// Leaves per patch, nesting depth, serialised size.
+/// Leaves per patch, nesting depth, serialized size.
 pub const MAX_LEAVES: usize = 512;
 pub const MAX_DEPTH: usize = 8;
 pub const MAX_PATCH_BYTES: usize = 64 * 1024;

@@ -16,7 +16,9 @@ reload while the mod runs (the script keeps running), `add.projects` = the mod's
 sound plays at the owner of the game's sound by default, following it; `play.at` = `owner` (with an `offset`),
 `world` (a fixed `position`) or `centre`, `play.falloff` the reach; 3: `play.frame = 'owner'` puts the `offset`
 in the owner's axes (right, up, facing), and a rule sound at a published emitter follows it when it moves),
-`audio_tuning=1` (`sdk.audio.set_tuning / tuning / tuned`: player / world / bus / reverb tuning while the mod runs)
+`audio_tuning=1` (`sdk.audio.set_tuning / tuning / tuned`: player / world / bus / reverb tuning while the mod runs),
+`world_tuning=1` (`sdk.world.set_tuning / tuning`: living world draw distance and NPC / ped fades, dynamic prop
+tuning and collision boxes, prop carry buttons, grab range and held-prop move speeds while the mod runs),
 and `world_audio=4` (publishing cars, peds and skaters to the game's world audio; 2: `emitter` and `reverb_zone`
 objects; a mod emitter has its own emitter instance by default, `settings/audio.json` `"mod_emitter_slots":
 "shared"` makes it share retail's 5 with the map's emitters; 3: `slots = 'own'` gives a car or ped its own
@@ -40,7 +42,7 @@ reads the latest snapshot, without executing a new simulation step:
 | player | Mode, bail, stance, pose, velocity, scoring and transition counters | Existing player teleport, participation, attachment and gesture controls |
 | rig | Native bodies, anatomical joints, solver contacts and joint loads | `sdk.rig`, typed `sdk.bodies` impulses |
 | bodies | This mod's Rapier bodies and contacts | `sdk.physics` creation, geometry, forces, velocities, transforms, joints and motors |
-| input | Raw pad, keys, 18 mapped action values and controller identity | `sdk.input.override_action` |
+| input | Raw pad, keys, 18 mapped action values and controller identity | `sdk.input.override_action`, `sdk.input.rumble` |
 | graphs | Live action/motion controller states, state times and active behavior IDs | `sdk.graphs.set_enabled` |
 | animation | Tick, pose generation and bone count | No arbitrary animation replacement or pose injection |
 | scoring | Current player scoring observations | No arbitrary native score/collector mutation |
@@ -200,6 +202,14 @@ This differs from `sdk.volumes`, which checks observed player root positions.
 
 ## Input and graph control
 
+`sdk.input.rumble{low=, high=, rate=, channel=, pad=}` (capability `input_rumble`) starts controller rumble
+through the engine's port of retail's rumble channels: `low` / `high` are the two motor levels (0..1), `rate`
+the decay per second (0 holds until stopped; retail's settings test uses 5.0), `channel` 0..1023 is the mod's own
+(starting the same channel again replaces it), `pad` the slot 0..3 (default: the active pad). Several channels
+mix like retail's (sum, capped above the strongest). `sdk.input.stop_rumble(pad)` stops this mod's channels on a
+pad, or on every pad with nil. Nothing starts while Game Settings > Control > Vibration is off; a mod's rumble
+stops when the mod stops or reloads.
+
 `sdk.input.override_action(id, value)` overrides mapped gameplay actions 64–81
 with a value in `[-1,1]`; nil releases the slot. It applies at the next input
 publication and lasts until released or cleaned up. It leaves raw pad/key
@@ -255,7 +265,7 @@ returns `{active, slots}`. Fields: `family` (`xbox360`, `xbox_one`,
 `guitar`, `unknown`), `name`, `vendor_id` / `product_id`, `backend` (`sdl` or
 `xinput`), `driver` (SDL device path, e.g. `XInput#0`), `xinput_subtype` and
 `wireless` (XInput only), `paddles` (reported by the driver) and
-`hardware_paddles` (the model has), `touchpad`, `misc_button`, `prompt_style`
+`hardware_paddles` (the paddles the model has), `touchpad`, `misc_button`, `prompt_style`
 (`xbox`, `playstation`, `nintendo`), `face_labels` (printed names of the South,
 East, West and North buttons) and `summary`. It is read-only and does not
 change gameplay input: the button layout is positional for every pad (the

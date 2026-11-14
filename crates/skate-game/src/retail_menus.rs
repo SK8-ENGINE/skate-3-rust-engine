@@ -14,6 +14,33 @@ use std::path::Path;
 
 pub(crate) const TABLES: &str = "private/menu-tables.json";
 
+/// Owner prefix of the engine handlers that open a section of the overlay menu (`graphics_menu`).
+pub(crate) const OVERLAY: &str = "overlay:";
+
+/// Retail pause items backed by engine features until their retail FE screens are ported (doc 31 "Row
+/// handlers"): retail opens FE screen ChallengeMap 17 / skate.Profile / GameSettings 45 / Extras 18; we open the
+/// overlay menu section with the same job. Handlers are what enables a retail row; mods stack their own over these.
+pub(crate) const OVERLAY_ITEMS: [(&str, &str); 3] =
+    [("ChallengeMap", "MAPS"), ("SkateProfileOffline", "SKATER"), ("Extras", "EXTRAS")];
+
+/// Owner prefix of the engine handlers that push a retail FE screen (by its screen id).
+pub(crate) const SCREEN: &str = "screen:";
+
+/// Retail pause items whose retail FE screen is ported: the crossbar pushes it (GameSettings -> FE 45, the Game
+/// Settings screen; TU3 id 56's sibling, screen id = its info record key).
+pub(crate) const SCREEN_ITEMS: [(&str, &str); 1] = [("GameSettings", crate::fe_backdrop::SETTINGS_SCREEN)];
+
+/// The PC overlay's Debug Menus switch (not retail) as the `debug_menus` menu fact, so retail's debug-only entries
+/// show while it is on; a mod's own visibility hooks still stack on top.
+fn sync_debug_menus(menu: Option<Res<crate::graphics_menu::Menu>>, menus: Option<ResMut<RetailMenus>>) {
+    let (Some(menu), Some(mut menus)) = (menu, menus) else { return };
+    let want = if menu.debug_menus() { 1.0 } else { 0.0 };
+    let key = skate_core::menus::facts::DEBUG_MENUS;
+    if menus.context.facts.get(key).copied().unwrap_or(0.0) != want {
+        menus.context.facts.insert(key.into(), want);
+    }
+}
+
 #[derive(Resource)]
 pub(crate) struct RetailMenus {
     pub registry: MenuRegistry,
@@ -33,8 +60,21 @@ pub(crate) struct RetailMenus {
 
 impl RetailMenus {
     pub(crate) fn new(data: MenuData, loaded: bool) -> Self {
+        let mut registry = MenuRegistry::new(data);
+        for (item, section) in OVERLAY_ITEMS {
+            if registry.data().item(item).is_some() {
+                let owner = Owner::Engine(format!("{OVERLAY}{section}"));
+                registry.register_handler(EntryRef::item(item), Handler { owner, select: true, highlight: false, callback: None });
+            }
+        }
+        for (item, screen) in SCREEN_ITEMS {
+            if registry.data().item(item).is_some() {
+                let owner = Owner::Engine(format!("{SCREEN}{screen}"));
+                registry.register_handler(EntryRef::item(item), Handler { owner, select: true, highlight: false, callback: None });
+            }
+        }
         Self {
-            registry: MenuRegistry::new(data),
+            registry,
             context: MenuContext::new("FreePlay"),
             loaded,
             pending: Vec::new(),
@@ -46,7 +86,6 @@ impl RetailMenus {
 
     /// Apply a menu action (from the menu UI, or replayed from another peer) in
     /// the current context; events for mods are queued.
-    #[allow(dead_code)] // The menu UI (a later milestone) is the caller.
     pub(crate) fn act(&mut self, action: MenuAction) -> Outcome {
         let context = self.context.clone();
         let outcome = self.registry.dispatch(action, &context);
@@ -61,7 +100,7 @@ impl RetailMenus {
     }
 }
 
-/// The JSON a mod's on_event receives (also the serialised form of an action).
+/// The JSON a mod's on_event receives (also the serialized form of an action).
 pub(crate) fn event_json(event: &MenuEvent, value: Option<SettingValue>) -> Value {
     let entry = event.action.entry();
     let name = match &event.action {
@@ -135,8 +174,97 @@ pub(crate) fn read(root: &Path) -> (MenuData, bool) {
     }
 }
 
+/// Owner prefix of the engine handlers that teleport to a Challenge Map location (`teleport:<fe_locations key>`).
+pub(crate) const TELEPORT: &str = "teleport:";
+
+/// The Challenge Map data: tree (b244d), pictures, markers (b265) and the teleport keys.
+pub(crate) struct ChallengeMapData {
+    pub nodes: Vec<skate_core::menus::MapNode>,
+    pub pictures: std::collections::BTreeMap<String, String>,
+    pub markers: std::collections::BTreeMap<String, skate_core::menus::MapMarker>,
+    /// (node kind, node id, destination key) of every node with a teleport.
+    pub teleports: Vec<(EntryKind, String, String)>,
+    /// Listings flagged IsDebug (shown only with Debug Menus).
+    pub debug: std::collections::BTreeSet<String>,
+}
+
+fn challenge_map(asset_root: &std::path::Path, world_maps: &std::collections::BTreeMap<String, String>) -> ChallengeMapData {
+    let rows = crate::teleport_menu::load(asset_root).unwrap_or_default();
+    let locators: std::collections::BTreeMap<&str, [f32; 2]> =
+        rows.iter().filter_map(|d| d.matrix.map(|m| (d.id.as_str(), [m[3][0], m[3][2]]))).collect();
+    // The leaves sort by their label's English text, which teleports.json carries per destination.
+    let texts: std::collections::BTreeMap<&str, &str> =
+        rows.iter().filter_map(|d| Some((d.label_key.as_deref()?, d.name.as_str()))).collect();
+    let label_text = |label: &str| texts.get(label).map(|t| (*t).to_owned());
+    let mut debug = std::collections::BTreeSet::new();
+    let (nodes, pictures, markers) = match skate_data::collections::Collections::load(asset_root) {
+        Ok(c) => {
+            debug = skate_data::challenge_map::debug_listings(c.entries());
+            (
+            skate_data::challenge_map::load(c.entries(), "progression", &skate_data::challenge_map::LocationRules::default(),
+                &skate_data::challenge_map::LocationUnlocks::load(asset_root), &label_text),
+            skate_data::challenge_map::location_maps(c.entries(), world_maps),
+            skate_data::challenge_map::location_markers(&c)
+                .into_iter()
+                .filter_map(|(key, m)| {
+                    let at = locators.get(key.as_str())?;
+                    let point = [at[0] + m.offset[0], at[1] + m.offset[1]];
+                    Some((key, skate_core::menus::MapMarker { icon: m.icon, point, bounds: m.bounds }))
+                })
+                .collect(),
+            )
+        }
+        Err(error) => {
+            warn!("RETAIL_MENUS challenge map: {error}");
+            Default::default()
+        }
+    };
+    let mut teleports: Vec<(EntryKind, String, String)> =
+        locators.keys().map(|k| (EntryKind::FeLocation, k.to_string(), k.to_string())).collect();
+    // The skate.Park folder's park worlds (b447): each enters its world through the destination that names it (the
+    // Challenge Map location of that world row, teleports.json `world`; a layout row such as `megapark_full`).
+    for d in rows.iter().filter(|d| d.matrix.is_some()) {
+        if let Some(world) = &d.world {
+            if !teleports.iter().any(|(kind, id, _)| *kind == EntryKind::World && id == world) {
+                teleports.push((EntryKind::World, world.clone(), d.id.clone()));
+            }
+        }
+    }
+    ChallengeMapData { nodes, pictures, markers, teleports, debug }
+}
+
+impl RetailMenus {
+    /// Every Challenge Map location with a teleport matrix, and every skate.Park world a destination names, gets the
+    /// engine's teleport handler (so it is enabled); every other node keeps its hooks and stays grayed until a handler
+    /// exists (user, 2026-10-18). `teleports`: (node kind, node id, destination key).
+    pub(crate) fn register_teleports(&mut self, teleports: &[(EntryKind, String, String)]) -> usize {
+        let locations: Vec<(EntryRef, String)> = self
+            .registry
+            .data()
+            .map_nodes
+            .iter()
+            .filter_map(|n| {
+                let (_, _, key) = teleports.iter().find(|(kind, id, _)| *kind == n.entry.kind && *id == n.entry.id)?;
+                Some((n.entry.clone(), key.clone()))
+            })
+            .collect();
+        for (entry, key) in &locations {
+            let owner = Owner::Engine(format!("{TELEPORT}{key}"));
+            self.registry.register_handler(entry.clone(), Handler { owner, select: true, highlight: false, callback: None });
+        }
+        locations.len()
+    }
+}
+
 fn load(mut commands: Commands, config: Res<crate::config::Config>) {
-    let (data, loaded) = read(&config.asset_root);
+    let (mut data, loaded) = read(&config.asset_root);
+    let world_maps = crate::retail_menu_movies::world_maps(&crate::retail_menu_movies::set_root(&config));
+    let map = challenge_map(&config.asset_root, &world_maps);
+    let teleports = map.teleports;
+    data.map_nodes = map.nodes;
+    data.map_debug = map.debug;
+    data.map_pictures = map.pictures;
+    data.map_markers = map.markers;
     if loaded {
         info!(
             "RETAIL_MENUS: {} categories, {} items, {} settings rows, {} modes",
@@ -146,15 +274,132 @@ fn load(mut commands: Commands, config: Res<crate::config::Config>) {
             data.modes.len()
         );
     }
-    commands.insert_resource(RetailMenus::new(data, loaded));
+    let mut menus = RetailMenus::new(data, loaded);
+    let enabled = menus.register_teleports(&teleports);
+    info!("RETAIL_MENUS challenge map: {} nodes, {enabled} teleport locations", menus.registry.data().map_nodes.len());
+    commands.insert_resource(menus);
 }
 
 pub(crate) struct RetailMenusPlugin;
 
 impl Plugin for RetailMenusPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (load, crate::retail_menu_movies::load))
-            .add_systems(Update, sync_engine_values);
+        app.add_systems(Startup, (load, crate::retail_menu_movies::load, load_stored))
+            .add_systems(Update, (sync_engine_values, sync_stored_values, sync_debug_menus));
+    }
+}
+
+// ---------------------------------------------------------------- stored settings
+
+/// Owner of the stored settings layer.
+const STORED_OWNER: &str = "settings";
+
+/// Rows with a retail rule whose effect the engine does not have yet (user, 2026-10-13: gray them like the other
+/// unported items). They get no stored layer, so they stay grayed and show retail's default; a mod's value layer
+/// still enables them. Remove an id here when its feature lands (doc 31 "Stored settings").
+const NO_EFFECT_YET: [&str; 8] = [
+    "ID_GAMESETTINGS_SUBTITLE_TOGGLE",
+    "ID_GAMESETTINGS_CAM_MAN_TOGGLE",
+    "ID_GAMESETTINGS_HOM_MODE_OPTIONS",
+    "ID_GAMESETTINGS_TRANSPARENCY_TOGGLE",
+    "ID_GAMESETTINGS_SKATEFEED_BOOTFLOW",
+    "ID_GAMESETTINGS_SKATEFEED_CHYRON",
+    "ID_GAMESETTINGS_SKATEFEED_INCOMING_MESSAGE",
+    "ID_GAMESETTINGS_SKATEFEED_OUTGOING_MESSAGE",
+];
+
+/// Settings rows with a retail rule and an engine effect but no binding, stored in `settings/game-settings.json`.
+#[derive(Resource)]
+pub(crate) struct StoredSettings {
+    path: std::path::PathBuf,
+    values: std::collections::BTreeMap<String, SettingValue>,
+}
+
+impl StoredSettings {
+    fn load(path: std::path::PathBuf) -> Self {
+        let values = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Map<String, Value>>(&t).map_err(|e| warn!("Game settings {}: {e}", path.display())).ok())
+            .map(|map| map.into_iter().filter_map(|(id, v)| json_value(&v).map(|v| (id, v))).collect())
+            .unwrap_or_default();
+        Self { path, values }
+    }
+
+    fn save(&self) -> Result<(), String> {
+        let map: serde_json::Map<String, Value> = self.values.iter().map(|(id, v)| (id.clone(), value_json(v))).collect();
+        std::fs::create_dir_all(self.path.parent().unwrap_or(Path::new("."))).map_err(|e| e.to_string())?;
+        std::fs::write(&self.path, serde_json::to_vec_pretty(&map).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+    }
+}
+
+fn json_value(v: &Value) -> Option<SettingValue> {
+    match v {
+        Value::Bool(b) => Some(SettingValue::Bool(*b)),
+        Value::Number(n) => Some(n.as_i64().map_or_else(|| SettingValue::Float(n.as_f64().unwrap_or(0.0)), SettingValue::Int)),
+        _ => None,
+    }
+}
+
+fn load_stored(mut commands: Commands, config: Res<crate::config::Config>) {
+    let root = config.asset_root.parent().unwrap_or(&config.asset_root);
+    commands.insert_resource(StoredSettings::load(root.join("settings/game-settings.json")));
+}
+
+/// The value in force for a settings row (a mod's layer, an engine binding, the stored setting, or retail's
+/// default), for engine features to act on.
+pub(crate) fn setting(menus: &RetailMenus, id: &str) -> Option<SettingValue> {
+    menus.registry.value(&EntryRef::setting(id))
+}
+
+/// Game Settings > Units: imperial (distances in feet).
+pub(crate) fn imperial(menus: &RetailMenus) -> bool {
+    matches!(setting(menus, "ID_GAMESETTINGS_UNITS_TOGGLE"), Some(SettingValue::Int(1) | SettingValue::Bool(true)))
+}
+
+/// Binds every stored row once the tables are in, then saves a row the menu changed (the engine layer's own
+/// value moved; a mod layer on top leaves it alone).
+fn sync_stored_values(menus: Option<ResMut<RetailMenus>>, stored: Option<ResMut<StoredSettings>>) {
+    let (Some(mut menus), Some(mut stored)) = (menus, stored) else { return };
+    if !menus.loaded {
+        return;
+    }
+    let owner = Owner::Engine(STORED_OWNER.into());
+    let ids: Vec<String> = menus
+        .registry
+        .data()
+        .settings
+        .iter()
+        .map(|s| s.id.clone())
+        .filter(|id| {
+            skate_core::menu_values::retail_rule(id).is_some()
+                && !BINDINGS.iter().any(|b| b.row == id)
+                && !NO_EFFECT_YET.contains(&id.as_str())
+        })
+        .collect();
+    let mut changed = false;
+    for id in ids {
+        let entry = EntryRef::setting(&id);
+        match menus.registry.owner_value(&entry, &owner) {
+            None => {
+                let Some(value) = stored.values.get(&id).cloned().or_else(|| skate_core::menu_values::retail_default(&id)) else {
+                    continue;
+                };
+                menus.registry.bind_value(entry, owner.clone(), ValueHook::Stored(value));
+            }
+            Some(value) => {
+                let saved = stored.values.get(&id).cloned().or_else(|| skate_core::menu_values::retail_default(&id));
+                if saved.as_ref() != Some(&value) {
+                    info!("RETAIL_MENUS: {id} = {:?} (saved)", value);
+                    stored.values.insert(id, value);
+                    changed = true;
+                }
+            }
+        }
+    }
+    if changed {
+        if let Err(e) = stored.save() {
+            warn!("RETAIL_MENUS: game settings not saved: {e}");
+        }
     }
 }
 
@@ -498,7 +743,32 @@ fn handle(registry: &mut MenuRegistry, entry: EntryRef, owner: Owner, options: &
 }
 
 /// Everything mod `id` did is removed (disable, reload, failure).
+impl RetailMenus {
+    /// An event for one mod's `on_event` (sent at the next mod update).
+    pub(crate) fn send_event(&mut self, owner: &str, event: Value) {
+        self.pending.push((owner.to_owned(), event));
+    }
+}
+
 pub(crate) fn clear_owner(world: &mut World, id: &str) {
+    if let Some(mut guide) = world.get_resource_mut::<crate::trick_guide_host::TrickGuideMods>() {
+        guide.clear_owner(id);
+    }
+    if let Some(mut profile) = world.get_resource_mut::<crate::offline_profile_host::ProfileMods>() {
+        profile.clear_owner(id);
+    }
+    if let Some(mut credits) = world.get_resource_mut::<crate::extras_host::CreditsMods>() {
+        credits.clear_owner(Some(id));
+    }
+    if let Some(mut loading) = world.get_resource_mut::<crate::tips_loader_host::LoadingMods>() {
+        loading.clear_owner(Some(id));
+    }
+    if let Some(mut popups) = world.get_resource_mut::<crate::popup_host::PopupMods>() {
+        popups.clear_owner(Some(id));
+    }
+    if let Some(mut backdrop) = world.get_resource_mut::<crate::fe_backdrop::FeBackdrop>() {
+        backdrop.clear_owner(id);
+    }
     if let Some(mut movies) = world.get_resource_mut::<crate::retail_menu_movies::RetailMenuMovies>() {
         movies.clear_owner(id);
     }
@@ -510,6 +780,24 @@ pub(crate) fn clear_owner(world: &mut World, id: &str) {
 }
 
 pub(crate) fn clear_mods(world: &mut World) {
+    if let Some(mut guide) = world.get_resource_mut::<crate::trick_guide_host::TrickGuideMods>() {
+        guide.clear();
+    }
+    if let Some(mut profile) = world.get_resource_mut::<crate::offline_profile_host::ProfileMods>() {
+        profile.clear();
+    }
+    if let Some(mut credits) = world.get_resource_mut::<crate::extras_host::CreditsMods>() {
+        credits.clear_owner(None);
+    }
+    if let Some(mut loading) = world.get_resource_mut::<crate::tips_loader_host::LoadingMods>() {
+        loading.clear_owner(None);
+    }
+    if let Some(mut popups) = world.get_resource_mut::<crate::popup_host::PopupMods>() {
+        popups.clear_owner(None);
+    }
+    if let Some(mut backdrop) = world.get_resource_mut::<crate::fe_backdrop::FeBackdrop>() {
+        backdrop.clear_mods();
+    }
     if let Some(mut movies) = world.get_resource_mut::<crate::retail_menu_movies::RetailMenuMovies>() {
         movies.clear_mods();
     }
@@ -535,7 +823,8 @@ pub(crate) fn snapshot(world: &World) -> Value {
     let movies = world
         .get_resource::<crate::retail_menu_movies::RetailMenuMovies>()
         .map_or(Value::Null, |m| m.snapshot());
-    json!({"mode": menus.context.mode, "loaded": menus.loaded, "values": values, "movies": movies})
+    let screens = world.get_resource::<crate::fe_backdrop::FeBackdrop>().map_or(Value::Null, |b| b.snapshot());
+    json!({"mode": menus.context.mode, "loaded": menus.loaded, "values": values, "movies": movies, "screens": screens})
 }
 
 #[cfg(test)]
@@ -544,7 +833,7 @@ mod tests {
     use skate_core::menus::{Category, Mode, Tab};
 
     fn data() -> MenuData {
-        MenuData {
+        MenuData { map_nodes: Vec::new(), map_pictures: Default::default(), map_markers: Default::default(), map_debug: Default::default(),
             categories: vec![Category { id: "SinglePlayer".into(), label: "L".into(), icon: Icon::Retail("singleplayer".into()) }],
             items: vec![skate_core::menus::Item { id: "ChallengeMap".into(), label: "L".into(), icon: Icon::Retail("map".into()), help: String::new(), sub_option_kind: -1 }],
             settings: Vec::new(),
@@ -568,7 +857,10 @@ mod tests {
         apply_command(&mut menus, "m", command(json!({"kind":"menu_handle","entry":"item","id":"m.Races"}))).unwrap();
         let ctx = menus.context.clone();
         let rows = menus.registry.tab_rows("SinglePlayer", &ctx);
-        assert_eq!((rows[0].id.as_str(), rows[0].enabled, rows[1].enabled), ("m.Races", true, false));
+        // ChallengeMap is enabled by the engine's overlay handler (OVERLAY_ITEMS).
+        assert_eq!((rows[0].id.as_str(), rows[0].enabled, rows[1].enabled), ("m.Races", true, true));
+        assert!(matches!(menus.act(MenuAction::Select { entry: EntryRef::item("ChallengeMap") }),
+            Outcome::Forward(Owner::Engine(name), _) if name == "overlay:MAPS"));
 
         apply_command(&mut menus, "m", command(json!({"kind":"menu_set_value","id":"m.Bass","value":0.8}))).unwrap();
         assert!(matches!(menus.act(MenuAction::Select { entry: EntryRef::item("m.Races") }), Outcome::Forward(..)));
@@ -670,6 +962,77 @@ mod tests {
 
     /// `sdk.menus.set_value` on Engine-bound rows: the mod's value is shown and applied at runtime
     /// from its own layer, never saved; each mod's removal reverts only its own layer.
+    #[test]
+    fn stored_rows_are_enabled_step_save_and_reload_and_mod_values_are_not_saved() {
+        use skate_core::menus::{Direction, Setting};
+        let hud = "ID_GAMESETTINGS_HUD_TOGGLE";
+        let mut d = data();
+        for id in [hud, "ID_GAMESETTINGS_SFXVOLUME"] {
+            d.settings.push(Setting { id: id.into(), label: id.into(), widget: Widget::Selector, link: None });
+        }
+        d.screens[6].push(hud.into());
+        let dir = std::env::temp_dir().join(format!("skate3rust-menus-stored-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("game-settings.json");
+        let mut app = App::new();
+        app.insert_resource(RetailMenus::new(d.clone(), true))
+            .insert_resource(StoredSettings::load(path.clone()))
+            .add_systems(Update, sync_stored_values);
+        app.update();
+        let entry = EntryRef::setting(hud);
+        {
+            let menus = app.world().resource::<RetailMenus>();
+            let ctx = menus.context.clone();
+            assert!(menus.registry.enabled(&entry, &ctx), "a stored row is enabled");
+            assert_eq!(setting(menus, hud), Some(SettingValue::Int(1)), "retail's default: On");
+            assert!(menus.registry.owner_value(&EntryRef::setting("ID_GAMESETTINGS_SFXVOLUME"), &Owner::Engine(STORED_OWNER.into())).is_none(),
+                "rows with an engine binding are not stored");
+        }
+        assert!(!path.exists(), "nothing saved until the player changes a row");
+        app.world_mut().resource_mut::<RetailMenus>().act(MenuAction::Step { entry: entry.clone(), direction: Direction::Right });
+        app.update();
+        let saved: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved, json!({hud: 0}), "Off is saved");
+        // A mod's value is shown but not saved.
+        apply_command(&mut app.world_mut().resource_mut::<RetailMenus>(), "m", command(json!({"kind":"menu_set_value","id":hud,"value":1}))).unwrap();
+        app.update();
+        assert_eq!(setting(app.world().resource::<RetailMenus>(), hud), Some(SettingValue::Int(1)));
+        assert_eq!(serde_json::from_slice::<Value>(&std::fs::read(&path).unwrap()).unwrap(), json!({hud: 0}));
+        // A new session loads the saved value.
+        let mut again = App::new();
+        again.insert_resource(RetailMenus::new(d, true)).insert_resource(StoredSettings::load(path)).add_systems(Update, sync_stored_values);
+        again.update();
+        assert_eq!(setting(again.world().resource::<RetailMenus>(), hud), Some(SettingValue::Int(0)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Rows whose effect is not ported stay grayed (no stored layer) until a mod binds a value.
+    #[test]
+    fn rows_without_an_effect_stay_greyed_until_a_mod_binds_them() {
+        use skate_core::menus::Setting;
+        let row = "ID_GAMESETTINGS_SUBTITLE_TOGGLE";
+        let mut d = data();
+        d.settings.push(Setting { id: row.into(), label: row.into(), widget: Widget::Selector, link: None });
+        d.screens[6].push(row.into());
+        let dir = std::env::temp_dir().join(format!("skate3rust-menus-noeffect-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut app = App::new();
+        app.insert_resource(RetailMenus::new(d, true))
+            .insert_resource(StoredSettings::load(dir.join("game-settings.json")))
+            .add_systems(Update, sync_stored_values);
+        app.update();
+        let entry = EntryRef::setting(row);
+        let menus = app.world().resource::<RetailMenus>();
+        assert!(!menus.registry.enabled(&entry, &menus.context.clone()), "greyed");
+        assert!(menus.registry.owner_value(&entry, &Owner::Engine(STORED_OWNER.into())).is_none(), "not stored");
+        apply_command(&mut app.world_mut().resource_mut::<RetailMenus>(), "m", command(json!({"kind":"menu_handle","entry":"setting","id":row,"options":{"select":false,"value":0}}))).unwrap();
+        app.update();
+        let menus = app.world().resource::<RetailMenus>();
+        assert!(menus.registry.enabled(&entry, &menus.context.clone()), "a mod's value enables it");
+        assert!(!dir.join("game-settings.json").exists(), "nothing saved");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn mod_set_value_layers_over_engine_rows_and_reverts() {
         use crate::camera::{CameraAngle, CameraAngleSettings};

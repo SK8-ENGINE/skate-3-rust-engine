@@ -1,4 +1,4 @@
-# Pedestrian audio — retail spec, port state, hook points (2026-10-03)
+# Pedestrian audio: retail spec, port state, hook points (2026-10-03)
 
 Port: `crates/skate-audio/src/world/peds.rs`. Host: `game_audio/world_sources.rs`. Harness: `tests/world_sources.rs`
 (`a_ped_walks_past_and_steps_on_each_plant`). Speech is in `world-speech.md`.
@@ -52,7 +52,7 @@ Every B lookup reads Ctl 5.1, the ped's 3DObjPos.
 
   - `sub_824D84D0`: the Splice steps follow block = [level(4 if kind 64 else 3)/32767, pitch 5/4096, raw 0·360/65535,
     dt, 0, 1], and a step that has ended is freed.
-- **Bank behaviour** (harness and `program_trace` sweeps):
+- **Bank behavior** (harness and `program_trace` sweeps):
   - The program plays a step on w8's rising edge.
   - **w14 = 1 is silent.** Classes 2..5 each have their own shoe sample set: 2 → 0–4 / 19–24 / 112–116, 3 → 5–9 / 25–30 /
     43–50 / 118–133, 4 → 10–14 / 31–36 / 66–69, 5 → 15–18 / 37–42 / 70–74. Surface layers are 51–60.

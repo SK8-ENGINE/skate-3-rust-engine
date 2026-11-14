@@ -12,7 +12,7 @@ pub type Route = (usize, usize, f32);
 /// bus). Unlisted gains are 1. Counts 3, 5 and 7 have no routes (retail executes garbage there).
 pub fn to_six(src: usize) -> &'static [Route] {
     match src {
-        1 => &[(0, 1, 1.0)],                                  // centre only
+        1 => &[(0, 1, 1.0)],                                  // center only
         2 => &[(0, 0, 1.0), (1, 2, 1.0)],                     // L→L, R→R
         4 => &[(0, 0, 1.0), (1, 2, 1.0), (2, 3, 1.0), (3, 4, 1.0)], // FL, FR, SL, SR
         6 => &[(0, 0, 1.0), (1, 1, 1.0), (2, 2, 1.0), (3, 3, 1.0), (4, 4, 1.0), (5, 5, 1.0)],
@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn stereo_fold_and_clamp() {
         let mut six = [[0.0f32; crate::BLOCK]; 6];
-        six[1][0] = 1.0; // centre
+        six[1][0] = 1.0; // center
         six[0][1] = 1.0; // left
         six[3][2] = 1.0; // left surround
         six[5][3] = 1.0; // LFE dropped

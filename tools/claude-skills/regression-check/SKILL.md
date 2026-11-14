@@ -13,8 +13,8 @@ underground, making the map look invisible. It passed unit tests and `--check-as
 spawn against a baseline would have caught it.
 
 The check scripts named below (`check_spawns.py`, `check_maps.py`, `check_customiser.py`, `smoke_maps.sh`) are in
-`tools/regression-checks/` of upstream PR #37 ("Tools: published research and regression helpers"); fetch that
-branch if it is not merged yet. Their baselines are made from YOUR install on the first run (`--update`), so they
+`tools/regression-checks/` (in the repo since upstream PR #37, "Tools: published research and regression helpers",
+merged). Their baselines are made from YOUR install on the first run (`--update`), so they
 never ship game data.
 
 ## 1. Converter / asset-pipeline changes (anything under `tools/`)
@@ -47,6 +47,20 @@ never ship game data.
    - Input: expect `Controller input: SDL <version>`, `Controller 0: SDL gamepad "<name>" ...`, then
      `Controller 0: ready`.
    - Rendering: `SKATE_RENDER_READY draws=... triangles=...` should match the map's `render_triangles`.
+4. Close the game with a normal window close (for example PowerShell `CloseMainWindow()`), not a hard kill: after a
+   kill, controller rumble can stay on.
+
+### 2a. Frame time before merging game code
+Run the staged release exe on a fixed spot and compare with the previous build: `--assets <install>\assets --map
+<install>\maps\DownTown.skate --mute` for about 60 s with `SKATE_TRACE_ALL=1` (living world branch and later); the
+frame log path is in the stderr `TRACE_ACTIVE` line (`frames.tsv` in the run's trace-all folder; elsewhere use
+`SKATE_FRAME_LOG=<file>`). Compare median / p90 / p99 `frame_ms` of frames 100 and later with
+`optimization/tools/frame_log_summary.py`. `SYSTEM_TIMING` (on under trace-all) gives a per-system breakdown.
+A Chrome trace: `--trace <file.json> --trace-seconds 30` (capture starts at launch: `--trace-delay` is accepted but
+ignored; a 30 s trace is several GB, so write it to a large drive). Tracing slows every frame and hides steady-state
+stalls of 30-70 ms: use it for costs, not for finding those stalls.
+Before calling a slow play session a regression, check whether a build or other heavy job ran on the machine at the
+same time (build output timestamps): one overlapping link turned a 3.6 ms median into 14 ms.
 
 ### 2b. Water (physics/water.rs, camera/water.rs, water_splash.rs, board_world water code)
 - Headless traces (ignored test, prints per-tick body/board/camera):
@@ -62,14 +76,14 @@ never ship game data.
   behind with a vignette; splash only in deep water.
 - Judge penetration by skeleton parts 1..23: part 0 ("root") does not collide.
 
-### 2c. Audio (game_audio/, skate-audio, audio_*.py; audio branches)
+### 2c. Audio (game_audio/, skate-audio, audio_*.py)
 - `cargo test -p skate-audio --release --locked` and `cargo test -p skate-game --release --bin skate3rust --
   game_audio` (plus `graphics_menu`, `modding::audio` if settings/listener changed).
 - `py -3.13 -m unittest tools.asset_pipeline.test_audio_formats tools.asset_pipeline.test_versions
   tools.test_setup_assets`.
 - Muted smoke run (`bin\skate3rust.exe --assets assets --mute`): the `Game audio: native ...` start lines, no
   `panic`, `ERROR` or missing-file warnings.
-- Fingerprints (section 3d): an audio change must change only the `audio` group; never the customiser.
+- Fingerprints (section 3d): an audio change must change only the `audio` group; never the customizer.
 - Physics must be untouched: audio observation code is observation-only; when in doubt run `check_maps.py`
   (identical results).
 - Sound quality itself is judged by people listening in game (skill `audio-tuning`), never by an agent.
@@ -81,9 +95,9 @@ never ship game data.
 - `llvm-readobj --coff-imports` on the static exe: no `vcruntime140.dll` / `api-ms-win-crt-*`.
 - `--locked` must work (lockfile updated after `[patch]` edits).
 
-## 3b. Performance changes must be behaviour-preserving
-Optimisations that silently change behaviour are regressions. For any speed-up (details: skill `optimisation`):
-1. Capture a behavioural baseline BEFORE the change, for example full `--validate-maps` results per map (collision
+## 3b. Performance changes must be behavior-preserving
+Optimizations that silently change behavior are regressions. For any speed-up (details: skill `optimization`):
+1. Capture a behavioral baseline BEFORE the change, for example full `--validate-maps` results per map (collision
    triangles, support_drop, grounded_ticks, warnings; drop `seconds`/`timings`) to JSON.
 2. Keep the old implementation as a test-only reference and compare old vs new on synthetic edge cases AND on the
    real private data (ignored test with `SKATE3_ASSET_ROOT`).
@@ -91,17 +105,17 @@ Optimisations that silently change behaviour are regressions. For any speed-up (
 4. Watch for hidden state: caches keyed by path go stale (custom difficulty overlays collections at runtime); reset
    caches on every mutation.
 
-Ready-made behavioural comparisons:
+Ready-made behavioral comparisons:
 - Maps: `check_maps.py` (validator results + collision baseline) and `check_spawns.py`.
-- Character customiser: `check_customiser.py --save` BEFORE the change (snapshots receipts of all output files +
+- Character customizer: `check_customiser.py --save` BEFORE the change (snapshots receipts of all output files +
   JSON), then `check_customiser.py` after a fresh setup; set-id-aware, must print IDENTICAL. Needed because a fresh
   setup deletes the previous installation.
-- Parallel customiser stages fall back to serial when a worker fails, so the output still matches but the speed-up
+- Parallel customizer stages fall back to serial when a worker fails, so the output still matches but the speed-up
   is gone. Check the setup log for `Customiser worker N failed`; there should be none.
 - Map conversion: convert all districts with `main`'s tools (`git archive main tools` into a temp folder) and with
   the new tree into the same scratch stage, hash every output (map, irradiance, props) and require IDENTICAL per
   district.
-- Stream decoding: `tools/setup-equivalence/compare_streams.py <reference skate3_streams.py>` (PR #37): every asset
+- Stream decoding: `tools/setup-equivalence/compare_streams.py <reference skate3_streams.py>`: every asset
   of every district/stream vs a reference copy of the loader (`git show HEAD:...skate3_streams.py > .local/ref.py`).
 
 ## 3d. Fingerprint impact (do this for EVERY tools/ change)
@@ -110,7 +124,7 @@ Ready-made behavioural comparisons:
   and `customiser_cache.versions(old_tools)` with the working tree.
 - Asset groups: equivalence pairs `[committed, final]` in `pipeline-equivalence.json` only for groups whose outputs
   are proven identical.
-- Customiser: has NO equivalence mechanism; its fingerprint/stage versions must not change unless outputs really
+- Customizer: has NO equivalence mechanism; its fingerprint/stage versions must not change unless outputs really
   change. `optional_content.py`, `setup_state.py`, `vlt.py`, `environment.py`, `owned_game/**`, `vendor/utt/**`,
   `customis*.py`, `native_roster.py`, `character_glb.py`, `mixamo_to_skate/*.py` are in it: wrap instead of editing
   where possible.
@@ -135,3 +149,16 @@ Latest log: `logs\game-*.stderr.log` (strip ANSI: `sed 's/\x1b\[[0-9;]*m//g'`).
 - Physics blow-ups: `physics_failed:true`, `NONFINITE`, `Non-finite`.
 
 Record new facts and baseline updates in your notes file.
+
+
+## 5. Getting to a spot: teleport there
+Use coordinate teleports in tests and research runs to reach an issue spot, instead of menu teleports, scripted
+skating or asking a player to drive there.
+- Retail (recomp): `SKATE3_TP_OVERRIDE="x y z yaw[; ...]"` (skill `recomp-scripted-runs`, "Teleport to any
+  coordinate"). Add about 4 m to an estimated ground y and read the settled height from the trace; points outside the
+  playable area put retail into its out-of-bounds re-place loop (skater near invisible, frozen).
+- Engine: `sdk.player.teleport(...)` / `sdk.camera.set(pos, look_at)` from a tiny test mod with `--verify` captures
+  (skill `build-and-run`), or `--teleport <id>`.
+- Use the same pose in both for matched retail vs engine shots, and save the poses next to the evidence.
+- Upstream's original spawns, for reference: DownTown `[0.6737, 45.8373, 0.9177]`, University
+  `[330.0, 133.005, -710.0]` (all maps: `docs/hails-additions/04-map-spawns.md`).

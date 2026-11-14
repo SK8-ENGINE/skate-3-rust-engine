@@ -2,6 +2,12 @@ from __future__ import annotations
 
 from .binary import FormatError
 
+try:
+    # The setup's native RefPack (asset_pipeline/fast_refpack.py: refpack.dll when built), as tools/owned_game/refpack.py.
+    from tools.asset_pipeline.fast_refpack import decode as _fast_decode
+except ImportError:
+    _fast_decode = None
+
 
 def _copy_backref(output: bytearray, distance: int, count: int) -> None:
     if distance <= 0 or distance > len(output):
@@ -38,6 +44,14 @@ def decompress(data: bytes, expected_size: int | None = None) -> bytes:
             f"RefPack header size {header_size} differs from archive size "
             f"{expected_size}"
         )
+
+    if expected_size is not None and _fast_decode is not None:
+        try:
+            decoded = _fast_decode(data, expected_size, pos)
+        except ValueError as error:
+            raise FormatError(str(error)) from error
+        if decoded is not None:
+            return decoded
 
     output = bytearray()
 

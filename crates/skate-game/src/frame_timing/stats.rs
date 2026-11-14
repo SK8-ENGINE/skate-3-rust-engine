@@ -7,10 +7,9 @@
 //!   frame times. Reported in ms (and as fps = 1000 / ms where a rate is shown).
 //!   An average FPS hides a hitch; these do not.
 //! - **worst**: the longest frame in the window.
-//! - **hitch**: a frame longer than [`HITCH_FACTOR`] × the median of the
-//!   previous [`HITCH_HISTORY`] frames (needs [`HITCH_MIN_HISTORY`] of them).
+//! - **hitch**: docs/hails-additions/25-perf-diagnostics.md#code-reference-apprs-performancers-frame_timingstatsrs
 
-/// A frame is a hitch when it is longer than this many medians.
+/// A frame is a hitch when it is longer than this many expected frame times.
 pub(crate) const HITCH_FACTOR: f32 = 2.0;
 /// Frames before the current one used for the hitch median.
 pub(crate) const HITCH_HISTORY: usize = 120;
@@ -44,7 +43,7 @@ pub(crate) fn percentile(sorted: &[f32], p: f64) -> f32 {
     sorted[rank.clamp(1, sorted.len()) - 1]
 }
 
-/// Summarises frame times. `scratch` is reused to avoid an allocation per call.
+/// Summarizes frame times. `scratch` is reused to avoid an allocation per call.
 pub(crate) fn summarise(frames: impl Iterator<Item = f32>, scratch: &mut Vec<f32>) -> Summary {
     scratch.clear();
     scratch.extend(frames.filter(|ms| ms.is_finite() && *ms >= 0.0));
@@ -75,7 +74,18 @@ pub(crate) fn history_median(history: impl Iterator<Item = f32>, scratch: &mut V
     Some(*median)
 }
 
-/// The hitch rule: longer than [`HITCH_FACTOR`] × the median of the history.
+/// The time a frame running `steps` fixed steps is expected to take: the median frame without its physics loop
+/// plus `steps` × the median cost of one step. `None` until both medians have history (the step median only matters
+/// when `steps > 0`).
+pub(crate) fn expected_ms(rest_median_ms: Option<f32>, step_median_ms: Option<f32>, steps: u32) -> Option<f32> {
+    let rest = rest_median_ms?;
+    if steps == 0 {
+        return Some(rest);
+    }
+    Some(rest + steps as f32 * step_median_ms?)
+}
+
+/// The hitch rule: longer than [`HITCH_FACTOR`] × the expected frame time ([`expected_ms`]).
 pub(crate) fn is_hitch(frame_ms: f32, median_ms: Option<f32>) -> bool {
     median_ms.is_some_and(|median| median > 0.0 && frame_ms > HITCH_FACTOR * median)
 }
@@ -172,6 +182,23 @@ mod tests {
         // Even history length: lower middle (nearest rank).
         let even: Vec<f32> = (1..=40).map(|i| i as f32).collect();
         assert_eq!(history_median(even.iter().copied(), &mut scratch), Some(20.0));
+    }
+
+    /// The laptop's 2026-10-19 pattern: ~5 ms frames, every other one running a ~6 ms fixed step (~11 ms). The step
+    /// frames are expected, a real spike in either kind of frame still is a hitch.
+    #[test]
+    fn fixed_step_frames_are_expected_not_hitches() {
+        let (rest, step) = (Some(5.1), Some(5.9));
+        assert_eq!(expected_ms(rest, step, 0), Some(5.1));
+        let one = expected_ms(rest, step, 1);
+        assert!(!is_hitch(11.9, one), "a normal one-step frame");
+        assert!(!is_hitch(13.1, one), "the session's p99 one-step frame");
+        assert!(is_hitch(25.0, one));
+        assert!(is_hitch(10.5, expected_ms(rest, step, 0)), "a step-less frame twice as long");
+        assert_eq!(expected_ms(rest, None, 1), None, "no step history yet");
+        assert_eq!(expected_ms(None, step, 0), None);
+        // The old rule (2 x the median of all frames, ~5.6 ms) flagged the normal one-step frame.
+        assert!(is_hitch(11.9, Some(5.6)));
     }
 
     #[test]

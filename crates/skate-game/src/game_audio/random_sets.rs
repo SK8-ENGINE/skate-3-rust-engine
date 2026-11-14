@@ -72,6 +72,10 @@ enum Slot {
 
 struct Post {
     entry: usize,
+    /// The entry's bank (the post can outlive its set).
+    bank: String,
+    /// From the previous set: it plays on and holds a bank (sub_828EA4E0 / 828EA708), its entry index is stale.
+    stale: bool,
     started: f64,
     until: f64,
     /// Direction in degrees, and per layer: (start time, voice once started, layer).
@@ -108,11 +112,13 @@ fn interval(min: f32, max: f32, rng: &mut u32) -> f32 {
     min + (max - min) * (next(rng) % 1000) as f32 * 0.001
 }
 
-/// Level factor in 0.1 steps from min, max excluded (sub_824A1A20).
-fn level(min: f32, max: f32, rng: &mut u32) -> f32 {
-    let steps = ((max - min) * 10.0).round().max(0.0) as u32;
-    let offset = if steps == 0 { 0 } else { next(rng) % steps };
-    ((min * 10.0).round() + offset as f32) / 10.0
+/// Level factor on the set's grid (sub_824A1A20): lo = trunc(steps * min), hi = trunc(steps * max), then
+/// (lo + rand % (hi - lo)) / steps, max excluded; lo alone when they are equal.
+fn level(min: f32, max: f32, steps: u32, rng: &mut u32) -> f32 {
+    let steps = steps.max(1);
+    let (lo, hi) = ((steps as f32 * min) as u32, (max * steps as f32) as u32);
+    let value = if hi == lo { lo } else { lo.wrapping_add(next(rng) % hi.wrapping_sub(lo)) };
+    value as f32 / steps as f32
 }
 
 /// Weighted pick among unloaded entries (`rand() % Σweights`).
@@ -166,6 +172,7 @@ pub(super) fn update(
     content: Res<super::AudioContent>,
     audio: Res<super::map_audio::MapAudio>,
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::RANDOM_SETS);
     let Some(mut library) = library else { return };
     let state = &mut *state;
     let Ok(ear) = listener.single() else { return };
@@ -179,6 +186,7 @@ pub(super) fn update(
                 }
             }
         }
+        cool_slots(&library, state);
         state.key = None;
         state.slots.clear();
         state.bags.clear();
@@ -190,13 +198,23 @@ pub(super) fn update(
     // Location change (or silenced: no set): rebuild the entries.
     let key = if super::silenced(menu.as_deref(), &replay) { None } else { selected(&library, &audio, cues.riding.board) };
     if key != state.key {
-        for post in state.posts.drain(..) {
-            for (_, voice, ..) in post.layers {
-                if let Some((id, _)) = voice {
-                    voices.stop(id, 0.3);
+        if key.is_none() {
+            // Silenced (menus, replays; ours): everything stops.
+            for post in state.posts.drain(..) {
+                for (_, voice, ..) in post.layers {
+                    if let Some((id, _)) = voice {
+                        voices.stop(id, 0.3);
+                    }
                 }
+                library.cool_bank(&post.bank);
+            }
+        } else {
+            // A set change lets playing posts finish (sub_828EA4E0 / 828EA708); their banks still count.
+            for post in state.posts.iter_mut() {
+                post.stale = true;
             }
         }
+        cool_slots(&library, state);
         state.key = key;
         state.slots = key.and_then(|k| library.random_set(k)).map_or(Vec::new(), |s| vec![Slot::Unloaded; s.sounds.len()]);
         state.timer = 0.0;
@@ -213,9 +231,11 @@ pub(super) fn update(
 
     // Keep LOADED banks loaded.
     let weights: Vec<i32> = set.sounds.iter().map(|s| s.weight).collect();
-    while state.slots.iter().filter(|s| **s != Slot::Unloaded).count() < LOADED {
+    while state.slots.iter().filter(|s| **s != Slot::Unloaded).count() + state.posts.iter().filter(|p| p.stale).count() < LOADED {
         let Some(pick) = weighted(&weights, &state.slots, &mut rng) else { break };
         state.slots[pick] = Slot::Loaded(now);
+        // Retail loads the bank at the pick: read its files now, off the game thread.
+        library.warm_bank(&set.sounds[pick].bank);
     }
 
     // Timer: past the interval the oldest loaded idle entry plays.
@@ -230,8 +250,9 @@ pub(super) fn update(
             if layers.is_empty() {
                 // The bank's program does not answer this sound's selector: retail is silent too.
                 state.slots[entry] = Slot::Unloaded;
+                library.cool_bank(&sound.bank);
             } else {
-                let gain = sound.volume * level(set.min_level, set.max_level, &mut rng);
+                let gain = sound.volume * level(set.min_level, set.max_level, set.level_steps, &mut rng);
                 let samples = library.bank_len(&sound.bank);
                 let shuffle = if samples > 0 {
                     draw(state.bags.entry(sound.bank.clone()).or_default(), samples, &mut rng)
@@ -241,7 +262,7 @@ pub(super) fn update(
                 let angle = (next(&mut rng) & 0xFFFF) as f32 * 360.0 / 65536.0;
                 info!("AUDIO_RANDOM fire {} level {:.2} angle {:.0}", sound.bank, gain, angle);
                 state.posts.push(Post {
-                    entry, started: now, until: now + f64::from(sound.seconds), angle,
+                    entry, bank: sound.bank.clone(), stale: false, started: now, until: now + f64::from(sound.seconds), angle,
                     layers: layers.iter().map(|l| {
                         let sample = if l.sample == SHUFFLE { shuffle } else { l.sample };
                         (now + f64::from(l.delay), None, Layer { level: l.level * gain, ..*l }, sample)
@@ -257,11 +278,10 @@ pub(super) fn update(
     // Run the posts: start due layers, turn their direction, end on timeout or when all finished.
     let (forward, right) = (ear.forward().as_vec3(), ear.right().as_vec3());
     let origin = ear.translation();
-    let bank_of = |entry: usize| set.sounds[entry].bank.clone();
     let mut finished = Vec::new();
     for (index, post) in state.posts.iter_mut().enumerate() {
         let elapsed = (now - post.started) as f32;
-        let bank = bank_of(post.entry);
+        let bank = post.bank.clone();
         let mut alive = false;
         for (start, voice, layer, sample) in post.layers.iter_mut() {
             let angle = (post.angle + layer.pan_sweep * elapsed).to_radians();
@@ -297,11 +317,25 @@ pub(super) fn update(
                 voices.stop(id, 0.3);
             }
         }
-        if let Some(slot) = state.slots.get_mut(post.entry) {
-            *slot = Slot::Unloaded;
+        if !post.stale {
+            if let Some(slot) = state.slots.get_mut(post.entry) {
+                *slot = Slot::Unloaded;
+            }
         }
+        library.cool_bank(&post.bank);
     }
     state.rng = rng;
+}
+
+/// Drop the read-ahead bytes of the current set's entries (the set is rebuilt).
+fn cool_slots(library: &Library, state: &State) {
+    let Some(set) = state.key.and_then(|k| library.random_set(k)) else { return };
+    for (sound, slot) in set.sounds.iter().zip(&state.slots) {
+        // A playing entry's bank stays until its post ends.
+        if *slot != Slot::Unloaded && *slot != Slot::Playing {
+            library.cool_bank(&sound.bank);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -323,10 +357,14 @@ mod tests {
         let mut rng = 3;
         let mut seen = std::collections::BTreeSet::new();
         for _ in 0..1000 {
-            seen.insert((level(0.2, 1.0, &mut rng) * 10.0).round() as i32);
+            seen.insert((level(0.2, 1.0, 10, &mut rng) * 10.0).round() as i32);
         }
         assert_eq!(seen.into_iter().collect::<Vec<_>>(), (2..10).collect::<Vec<_>>());
-        assert_eq!(level(0.5, 0.5, &mut rng), 0.5);
+        assert_eq!(level(0.5, 0.5, 10, &mut rng), 0.5);
+        // sub_824A1A20 truncates both ends (0.85 x 10 -> 8, 0.95 x 10 -> 9): only 0.8; a 4-step grid draws quarters.
+        assert_eq!(level(0.85, 0.95, 10, &mut rng), 0.8);
+        let quarters: std::collections::BTreeSet<i32> = (0..200).map(|_| (level(0.0, 1.0, 4, &mut rng) * 4.0) as i32).collect();
+        assert_eq!(quarters.into_iter().collect::<Vec<_>>(), vec![0, 1, 2, 3]);
     }
 
     #[test]

@@ -8,7 +8,7 @@
 //!   foot-down copies (`+52` = state `+724`, `+236` = `+725`); on the footplant's falling edge
 //!   (state `+768`) the countdown of the foot that was down (A first) is set to 10; both count down;
 //!   then the poster, the walking voices (on foot), the jump voices, (remote players only:
-//!   `sub_824EBA08`, not modelled) and the water splash ([`Splash`], `sub_824EBB58`);
+//!   `sub_824EBA08`, not modeled) and the water splash ([`Splash`], `sub_824EBB58`);
 //! - poster `sub_824E9FD8`: two `playercharacter_footstep` packets (25 words, constructor
 //!   `sub_824B73E0`), B (`+220`) then A (`+36`), posted once and held; for the local player, on a
 //!   foot-down edge: the foot's four Splice sounds stop (`sub_82494B80`) and up to four start, each
@@ -113,7 +113,7 @@ impl Curve {
 }
 
 /// The FootStep SubMix's EQ of a sound (class `370AF2704BFA6866` record: `+20` HI20 cutoff,
-/// `+16` LI20 cutoff, `+12` / `+8` / `+4` PI20 centre / linear gain / Q, `+0` the slot gain).
+/// `+16` LI20 cutoff, `+12` / `+8` / `+4` PI20 center / linear gain / Q, `+0` the slot gain).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SubmixEq {
     pub high_pass: f32,

@@ -43,6 +43,8 @@ pub(crate) struct Riding {
     /// `audio.wheel_position` the pair the rendered board interpolates between, which Class_Seams
     /// reads (`PlayerAudio::step_wheels`).
     pub wheels_before: [[f32; 3]; 4],
+    /// Off the board or wiping out (`board_unridden`): the music zones' DJ control drops to its override value.
+    pub unridden: bool,
 }
 
 /// What `observe` publishes for the audio host (`native::mixmap_frame`).
@@ -58,11 +60,14 @@ pub(crate) struct Cues {
     pub riding: Riding,
     /// Physics steps published since the host last took them.
     pub steps: u32,
+    /// The last published step as it was, before latching (what the replay records).
+    pub raw: Riding,
 }
 
 impl Cues {
     /// One physics step's sample: latched onto the pending one while the host has not taken it.
     pub(super) fn publish(&mut self, mut next: Riding) {
+        self.raw = next;
         if self.steps > 0 {
             latch_pulses(&self.riding, &mut next);
         }
@@ -100,6 +105,68 @@ pub(crate) struct Seen {
     trace: Option<bool>,
     /// Rows written to the audio state log.
     log_frame: u64,
+    /// Sudden ground speed changes while rolling (`SKATE_SPEED_DROP` / `SKATE_SPEED_GAIN`, USER-ASKS 237).
+    speed_watch: SpeedWatch,
+    /// The last surface tag the `SURFACE` line reported and when (ms).
+    surface_logged: u32,
+    surface_at: f64,
+}
+
+/// Recent ground speeds while rolling, for the sudden-change log lines (diagnostics only: nothing reads them back).
+#[derive(Default)]
+struct SpeedWatch {
+    /// (ms, |ground speed|) over the last [`SpeedWatch::WINDOW_MS`]; cleared off the ground.
+    recent: std::collections::VecDeque<(f64, f32)>,
+    last_log_ms: Option<f64>,
+    /// The last push plant (a one-frame pulse; the speed-up it starts lasts several hundred ms).
+    last_push_ms: Option<f64>,
+}
+
+impl SpeedWatch {
+    const WINDOW_MS: f64 = 150.0;
+    /// A drop of at least this much (m/s) inside the window from at least `FROM` m/s is logged.
+    const DROP: f32 = 2.0;
+    const FROM: f32 = 3.0;
+    /// A gain of at least this much (m/s) inside the window, more than `AFTER_PUSH_MS` after a push, is logged.
+    const GAIN: f32 = 3.0;
+    const AFTER_PUSH_MS: f64 = 800.0;
+    const QUIET_MS: f64 = 500.0;
+
+    /// The change to log this frame: (from, to, ms over which it happened); `to < from` is a drop. `rolling` =
+    /// riding, not bailing, braking or grinding; any other frame resets the window.
+    fn observe(&mut self, now: f64, speed: f32, rolling: bool, push: bool) -> Option<(f32, f32, f64)> {
+        if push {
+            self.last_push_ms = Some(now);
+        }
+        let pushing = self.last_push_ms.is_some_and(|t| now - t <= Self::AFTER_PUSH_MS);
+        if !rolling {
+            self.recent.clear();
+            return None;
+        }
+        while self.recent.front().is_some_and(|&(t, _)| now - t > Self::WINDOW_MS) {
+            self.recent.pop_front();
+        }
+        self.recent.push_back((now, speed));
+        if self.last_log_ms.is_some_and(|t| now - t < Self::QUIET_MS) {
+            return None;
+        }
+        let (&(t_max, max), &(t_min, min)) = (
+            self.recent.iter().max_by(|a, b| a.1.total_cmp(&b.1))?,
+            self.recent.iter().min_by(|a, b| a.1.total_cmp(&b.1))?,
+        );
+        let change = if max >= Self::FROM && max - speed >= Self::DROP {
+            Some((max, speed, now - t_max))
+        } else if !pushing && speed - min >= Self::GAIN {
+            Some((min, speed, now - t_min))
+        } else {
+            None
+        };
+        if change.is_some() {
+            self.last_log_ms = Some(now);
+            self.recent.clear();
+        }
+        change
+    }
 }
 
 /// The per-skater memory the audio-state builder ([`skater_audio_state`]) keeps between physics
@@ -151,7 +218,7 @@ fn grinding(state: u32) -> bool {
 /// material 143 for whole stretches, never flickering — while our riding ground state keeps
 /// reporting the riderless board's touches (the 19:29 listening test: a bed and skid burst when
 /// the dropped board touched down after a trick). UNCERTAIN: the record writer itself (+152 bits
-/// 20–22) is not located; this is the measured behaviour.
+/// 20–22) is not located; this is the measured behavior.
 pub(super) fn board_unridden(state: u32) -> bool {
     matches!(state, 300 | 500..=502)
 }
@@ -188,7 +255,7 @@ struct Built {
 /// skaters with the player's physics calls it once per physics step per skater (only for skaters
 /// near the camera, see `crate::world_audio`), each with its own `memory`. `dt` = the step's
 /// seconds. Reads the animation's latched push contact without taking it.
-#[cfg_attr(not(test), allow(dead_code))] // the hook for a future AI-skater system (doc 11)
+/// The simulated NPC skaters call it after each step (`living_world::npc_sim::run_steps`).
 pub(crate) fn skater_audio_state(physics: &GamePhysics, skater: &SkaterRuntime, memory: &mut SkaterAudioMemory, dt: f32) -> skate_audio::player::AudioState {
     build(physics, skater, memory, dt, skater.animation_input.audio.push).state
 }
@@ -264,7 +331,13 @@ pub(crate) fn observe(
     mut cues: ResMut<Cues>,
     mut seen: Local<Seen>,
     time: Res<Time>,
+    replay: Option<Res<crate::replay::Replay>>,
 ) {
+    // During a replay the recorded steps are published instead (`replay_audio::feed`), as retail's audio runs on
+    // the recorded presentation state (b375); the live state is frozen.
+    if replay.is_some_and(|r| r.active) {
+        return;
+    }
     let _timing = super::timing::scope(&super::timing::OBSERVE);
     // Animation events latched during the tick (physics never reads these).
     let audio = std::mem::take(&mut skater.animation_input.audio);
@@ -309,6 +382,37 @@ pub(crate) fn observe(
     debug_assert_eq!((built.state_id, built.on_rail, built.board), (state, on_rail, board));
     let Built { state: audio_state, wheels, surface, plant_edge, push_edge, state55, unridden, .. } = built;
     let com_speed_212 = seen.skater.com_speed_212;
+    // The ground surface under the wheels on every change while a wheel is down (at most 4 a second), so a sound or
+    // grip report can be placed from the play log alone (todo play-log-surface-line).
+    let down = (0..4).filter(|&i| audio_state.wheel_contact[i]).count();
+    let now_surface_ms = time.elapsed_secs_f64() * 1000.0;
+    if down > 0 && surface != seen.surface_logged && now_surface_ms - seen.surface_at >= 250.0 {
+        let m = audio_state.wheel_material;
+        info!("SURFACE tag={surface} materials=[{}, {}, {}, {}] wheels={down} at=({:.2}, {:.2}, {:.2}) state={state}",
+            m[0], m[1], m[2], m[3], board.x, board.y, board.z);
+        seen.surface_logged = surface;
+        seen.surface_at = now_surface_ms;
+    }
+    // Log sudden speed changes while rolling (riding states, rate-limited) so a catch can be placed in the log.
+    let rolling = matches!(state, 100 | 101) && !audio_state.bail && !braking && !on_rail;
+    let now_ms = time.elapsed_secs_f64() * 1000.0;
+    if let Some((from, to, over)) = seen.speed_watch.observe(now_ms, audio_state.ground_speed.abs(), rolling, push_edge) {
+        let at = physics.board.part_transforms()[BodyId::Deck.index()].basis.columns[2];
+        info!(
+            "{} actor=player from={from:.2} to={to:.2} over_ms={over:.0} at=({:.2}, {:.2}, {:.2}) heading={:.3} wheels={} surface={surface} state={state}",
+            if to < from { "SKATE_SPEED_DROP" } else { "SKATE_SPEED_GAIN" },
+            board.x, board.y, board.z, at[0].atan2(at[2]),
+            (0..4).filter(|&i| audio_state.wheel_contact[i]).count(),
+        );
+        // USER-ASKS 236: which contact took the speed (body, normal, point).
+        for c in physics.world_contacts().iter().take(8) {
+            let (n, p) = (c.contact.normal, c.contact.position_on_b);
+            info!(
+                "SKATE_SPEED_CONTACT body={:?} normal=({:.3}, {:.3}, {:.3}) at=({:.3}, {:.3}, {:.3}) tag={}",
+                c.body_a, n.x, n.y, n.z, p.x, p.y, p.z, c.contact.tag
+            );
+        }
+    }
     if super::state_log::enabled() {
         let p = &skater.player_input.physical;
         let s = &audio_state;
@@ -402,6 +506,7 @@ pub(crate) fn observe(
         deck_contact: skater.player_input.physical.collision.flag_3475 != 0,
         deck_material: skate_audio::player::state::material_of_tag(physics.riding.ground.part_audio_surfaces[2]),
         wheels_before,
+        unridden: board_unridden(state),
     });
     seen.braking = braking;
     seen.brake_time = brake_time;
@@ -661,6 +766,7 @@ fn audio_state(physics: &GamePhysics, skater: &SkaterRuntime, f: AudioFrame) -> 
         bail: flag(59),
         bail_end: p.skeleton.over_599 != 0,
         on_foot: f.state == 500,
+        skitching: f.state == 104,
         soft_wheels: skater.player_input.processed.scalar_2764 < 0.5,
         push_planted: f.push,
         push_trigger: f.push_trigger,
@@ -719,6 +825,10 @@ fn audio_state(physics: &GamePhysics, skater: &SkaterRuntime, f: AudioFrame) -> 
         body_tag: std::array::from_fn(|i| if fb.regions[i].part.is_some() { fb.regions[i].material_flags } else { 0 }),
         body_slide_flag: fb.specific[1].current,
         body_impact,
+        collide_vehicle: fb.maximum_group_8_force,
+        collide_skater: fb.maximum_skater_force,
+        collide_other: fb.maximum_group_11_force,
+        collide_skater_local: fb.other_skater == Some(crate::living_world::npc_skaters::PLAYER_PEER),
         // `+216`: set by `observe` (last tick's `+212`).
         com_speed_216: 0.0,
         hands_on_deck: skate_audio::player::step_on::hands_on_deck(hands, f.state == 500, p.off_board.flag_311 != 0),
@@ -731,6 +841,38 @@ fn audio_state(physics: &GamePhysics, skater: &SkaterRuntime, f: AudioFrame) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// USER-ASKS 237: a catch (8.5 -> 4.1 m/s in two frames, the 2026-10-22 MegaPark kicker toe) logs one drop with
+    /// its size and timing; a slow roll-off, a push's speed-up, a bail and a brake do not; the line is rate-limited.
+    #[test]
+    fn speed_watch_logs_catches_not_pushes_or_slowdowns() {
+        let frame = 1000.0 / 60.0;
+        let mut watch = SpeedWatch::default();
+        let feed = |watch: &mut SpeedWatch, speeds: &[f32], start: f64, rolling: bool, push_at: Option<usize>| {
+            speeds.iter().enumerate().filter_map(|(i, &v)| {
+                watch.observe(start + i as f64 * frame, v, rolling, push_at == Some(i))
+            }).collect::<Vec<_>>()
+        };
+        let caught = feed(&mut watch, &[8.5, 8.5, 8.5, 6.2, 4.1, 4.0], 0.0, true, None);
+        assert_eq!(caught.len(), 1);
+        let (from, to, over) = caught[0];
+        assert_eq!((from, to), (8.5, 6.2));
+        assert!(over <= 2.0 * frame && to < from);
+        // Rate-limited: a second drop right after is quiet.
+        assert!(feed(&mut watch, &[6.5, 3.0], 120.0, true, None).is_empty());
+        // Rolling uphill: ~1 m/s lost per 150 ms.
+        let slow: Vec<f32> = (0..60).map(|i| 8.0 - i as f32 * 0.11).collect();
+        assert!(feed(&mut SpeedWatch::default(), &slow, 0.0, true, None).is_empty());
+        // A push's speed-up (3.5 m/s over a few frames right after the plant pulse) is not a gain.
+        assert!(feed(&mut SpeedWatch::default(), &[2.0, 2.0, 3.0, 4.5, 5.5], 0.0, true, Some(0)).is_empty());
+        // The same speed-up with no push is.
+        let gained = feed(&mut SpeedWatch::default(), &[2.0, 2.0, 3.0, 4.5, 5.5], 0.0, true, None);
+        assert!(gained.len() == 1 && gained[0].1 > gained[0].0);
+        // Not rolling (bail, brake, grind): nothing, and the window restarts.
+        let mut off = SpeedWatch::default();
+        assert!(feed(&mut off, &[8.5, 8.5, 1.0], 0.0, false, None).is_empty());
+        assert!(feed(&mut off, &[1.0, 1.0], 50.0, true, None).is_empty());
+    }
 
     /// `+236` across an ollie as the recomp's TREAT capture has it (session all_20261002_223306,
     /// 60 Hz ticks): 0 on the ground, 1/60 on the first air tick, still counting on the landing
@@ -797,7 +939,7 @@ mod tests {
     fn region_impacts_match_the_recomps_bail_lines() {
         use skate_core::physics::skeleton_body::ContactRegion;
         let Some(root) = std::env::var_os("SKATE_RECOMP_SESSIONS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from) else {
-            panic!("missing private data: SKATE_RECOMP_SESSIONS (the recomp session folders) is not set");
+            test_skip!("set SKATE_RECOMP_SESSIONS (the recomp session folders)");
         };
         let mut lines = Vec::new();
         for run in ["bailrun_t2_20261003_100040", "bailrun_ok_20261003_100226", "bailrun_ok2_20261003_100514", "bailrun_ok3_20261003_101354"] {

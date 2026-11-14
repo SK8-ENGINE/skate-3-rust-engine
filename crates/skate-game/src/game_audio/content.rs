@@ -36,6 +36,8 @@ enum Runtime {
     /// Waiting for the first mod scan.
     #[default]
     NotStarted,
+    /// The first start is being built on its own thread (`native::begin_launch`).
+    Starting,
     Started,
     /// The start failed (no AEMS data): retried only when the content changes.
     Failed,
@@ -59,6 +61,8 @@ pub(crate) struct AudioContent {
     /// The mod manager scanned at least once (set by the mod system).
     pub(crate) scanned: bool,
     runtime: Runtime,
+    /// The first start's thread while [`Runtime::Starting`].
+    launching: Option<super::native::Launching>,
     /// Restarts done.
     pub(crate) restarts: u64,
     /// Bumped when a running overlay with `rules` comes or goes (`mod_rules` recompiles; rules
@@ -138,6 +142,11 @@ impl AudioContent {
     fn refuse(&mut self, id: &str, e: String) {
         warn!("Game audio: mod {id}: {e}");
         self.load_errors.insert(id.to_owned(), e);
+    }
+
+    /// The first start of the runtime has not finished yet (the startup loading screen waits for it).
+    pub(crate) fn starting(&self) -> bool {
+        matches!(self.runtime, Runtime::NotStarted | Runtime::Starting)
     }
 
     /// Tests: whether the content changed (a restart at the next pass).
@@ -231,6 +240,7 @@ fn reset_hosts(world: &mut World) {
 /// The first system of the audio pass: the native runtime's first start (after the first mod
 /// scan, or at once without the mod system) and the restart after an overlay change.
 pub(super) fn frame(world: &mut World) {
+    let _span = super::hitch_parts::span(super::hitch_parts::CONTENT);
     let mods = world.contains_resource::<crate::modding::Mods>();
     let Some(content) = world.get_resource::<AudioContent>() else { return };
     let (runtime, pending, scanned, overlays) = (content.runtime, content.pending, content.scanned, !content.overlays.is_empty());
@@ -246,8 +256,19 @@ pub(super) fn frame(world: &mut World) {
             if mods && !scanned {
                 return;
             }
-            // Overlays found by the first scan are merged before the first start; without any the
-            // startup library is used untouched.
+            // Without overlays the startup library is used untouched, and the start is built on its
+            // own thread so frames keep coming (`native::begin_launch`).
+            if !overlays {
+                if let Some(launching) = super::native::begin_launch(world) {
+                    let mut content = world.resource_mut::<AudioContent>();
+                    content.launching = Some(launching);
+                    content.pending = false;
+                    content.runtime = Runtime::Starting;
+                    return;
+                }
+            }
+            // Overlays found by the first scan are merged before the first start.
+            super::native::drop_early();
             let report = if overlays { rebuild(world) } else { None };
             let started = super::native::launch(world, None);
             super::seed::from_env(world);
@@ -259,6 +280,16 @@ pub(super) fn frame(world: &mut World) {
             }
             content.pending = false;
             content.runtime = if started { Runtime::Started } else { Runtime::Failed };
+        }
+        Runtime::Starting => {
+            let mut content = world.resource_mut::<AudioContent>();
+            if !content.launching.as_ref().is_some_and(super::native::Launching::is_finished) {
+                return;
+            }
+            let launching = content.launching.take().expect("checked above");
+            let started = super::native::finish_launch(world, launching);
+            super::seed::from_env(world);
+            world.resource_mut::<AudioContent>().runtime = if started { Runtime::Started } else { Runtime::Failed };
         }
         Runtime::Started if pending => swap_or_restart(world),
         Runtime::Failed if pending => restart(world),
@@ -429,8 +460,20 @@ mod tests {
         reset_hosts(&mut world);
         world.resource_mut::<AudioContent>().scanned = true;
         frame(&mut world);
-        assert!(world.contains_resource::<super::super::native::Native>(), "the runtime starts at the first pass after the scan");
+        assert_eq!(world.resource::<AudioContent>().runtime, Runtime::Starting, "the first start begins at the first pass after the scan, on its own thread");
+        finish_start(&mut world);
+        assert!(world.contains_resource::<super::super::native::Native>(), "the runtime is in place once its thread is done");
         world
+    }
+
+    /// Run passes until the first start's thread is done and its runtime in place (bounded).
+    fn finish_start(world: &mut World) {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(300);
+        while world.resource::<AudioContent>().starting() {
+            assert!(std::time::Instant::now() < until, "the audio start thread did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+            frame(world);
+        }
     }
 
     /// A first emitter bank of DownTown's `.ems` that the install has, and its patch.

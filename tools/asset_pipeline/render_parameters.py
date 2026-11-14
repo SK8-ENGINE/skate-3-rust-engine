@@ -17,9 +17,13 @@ def convert(assets, converted):
     collections = Collections(converted)
     result = {}
     aliases = ('default', 'reflection', 'backlituvscroll', 'transparent',
-               'flowing', 'flowingalpha', 'alpha', 'skatepark', 'videoscreen')
+               'flowing', 'flowingalpha', 'alpha', 'skatepark', 'videoscreen', 'alphatest', 'flag', 'diffuse', 'decal')
     for (cls, key), row in collections.rows.items():
-        for family in ('water', 'ocean', 'incandescent'):
+        # dynamicobject: the props' m_params (dynamicobject_defaultPS c14..c15).
+        # advertisement: m_params.y = 0.35 scales billboards (advertisement_defaultPS slot 34).
+        # animated.flag: the cloth sway amplitudes, frequencies and phases (vertexanimate_defaultVS c8..c10).
+        # environmentpark: the skate.Park pieces' c18 (.y the fog scale; alphatest row 1 its ambient, research b443).
+        for family in ('water', 'ocean', 'incandescent', 'dynamicobject', 'advertisement', 'animated', 'environmentpark'):
             if cls != key_hash('material_' + family):
                 continue
             fields, _ = collections.resolve(cls, key)
@@ -28,6 +32,20 @@ def convert(assets, converted):
                 continue
             name = next((n for n in aliases if key_hash(n) == key), row['key'])
             result[family + '.' + name] = [struct.unpack('>4f', bytes.fromhex(r)) for r in raw]
+    # g_ViewDotLight inputs (sub_828012D0): light direction, (bias, scale), (tree floor, light floor). Every disc has
+    # the record; without it (partial or synthetic data) the game keeps the retail values (`ViewDotLightParams`).
+    try:
+        fields, _ = collections.resolve('rendering', 'default')
+    except KeyError:
+        fields = {}
+    rows = []
+    for name, count in (('Hash_D900AEF7EA4D75A2', 4), ('Hash_222CBA2D46EA6839', 4),
+                        ('Hash_9CDB53D164E5DA30', 1), ('Hash_0279CCE002B46BC4', 1)):
+        field = fields.get(key_hash(name), {})
+        data = (field.get('array', {}).get('items') or [field.get('data', '')])[0]
+        rows.append(list(struct.unpack('>%df' % count, bytes.fromhex(data[:8 * count]))) if data else None)
+    if all(rows):
+        result['rendering.default'] = [rows[0], rows[1], rows[2] + rows[3] + [0.0, 0.0]]
     path = assets / 'private/render-parameters.json'
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result), encoding='utf-8')

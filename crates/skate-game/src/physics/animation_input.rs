@@ -44,10 +44,16 @@ pub(crate) struct AnimationInput {
     right_toe: usize,
     settings: FinalizationInput,
     height_overrides: [bool; 5],
+    /// Push contacts since the challenges last took them (`take_pushes`), and whether the contact is held now.
+    pushes: u32,
+    push_held: bool,
 }
 
 impl AnimationInput {
     pub(crate) fn adopt_mode_settings(&mut self, other: Self) { self.height_overrides = other.height_overrides; }
+    pub(crate) fn take_pushes(&mut self) -> u32 {
+        std::mem::take(&mut self.pushes)
+    }
     pub fn load(data: &Collections, frames: &AnimationFrames, mode: &str) -> Result<Self, String> {
         let right_toe = frames
             .bone_names
@@ -55,6 +61,8 @@ impl AnimationInput {
             .position(|n| n.eq_ignore_ascii_case("RightToeBase"))
             .ok_or("Stock skeleton is missing RightToeBase")?;
         Ok(Self {
+            pushes: 0,
+            push_held: false,
             audio: AudioEvents::default(),
             height_overrides: crate::difficulty::NATIVE_MODES.map(|key|
                 data.boolean("physics_mode", key, "JumpHeightOverrideEnabled"))
@@ -162,7 +170,13 @@ impl AnimationInput {
             Some(map),
         );
         // Observation only: nothing in physics reads `audio`.
-        self.audio.push |= self.fields.flags2468 & (1 << 27) != 0;
+        let push = self.fields.flags2468 & (1 << 27) != 0;
+        // A new push contact counts once for the challenge objectives (GetNumPushes), apart from the audio latch.
+        if push && !self.push_held {
+            self.pushes = self.pushes.saturating_add(1);
+        }
+        self.push_held = push;
+        self.audio.push |= push;
         // contact_events: brake_contact sets bit 28, plus 30 for strength +1 and 23 for -1.
         let brake = self.fields.flags2468 & (1 << 28) != 0;
         self.audio.brake_down |= brake && self.fields.flags2468 & (1 << 30) != 0;

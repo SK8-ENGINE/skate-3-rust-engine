@@ -6,7 +6,7 @@
 //!
 //! The slot's Splice voices play into Sub0 (their 6-channel final Send sums L, C, R, Ls, Rs into
 //! the mono input, LFE dropped, as the Collision SubMix's). At each start of the slot's sound
-//! `sub_82494550` posts HI20 = slot +4, LI20 = slot +8, PI20 centre / gain / Q = slot +12 / +16 /
+//! `sub_82494550` posts HI20 = slot +4, LI20 = slot +8, PI20 center / gain / Q = slot +12 / +16 /
 //! +20, Sen0 #1 = the holder's env level (OffBoard level(8) / 32767 as of the last update) and Pn21
 //! p0 = the holder's azimuth × 360/65536: the graph keeps those values (and its filter history,
 //! send ramps and panner matrix) until the slot's next start.
@@ -19,7 +19,7 @@
 //!   build, then the holder's posted level, e.g. 0.059). The graphs are built when the holder is
 //!   created and process from then on, so the first posted level ramps from 1.0 over 64 samples.
 //! - Pn21's constructor arguments are the class defaults (front 30°, side 110°, rear 150°) except
-//!   argument 2, the normalisation (law), which the build overwrites with 0.0 (class default 2):
+//!   argument 2, the normalization (law), which the build overwrites with 0.0 (class default 2):
 //!   law gain 1.0, as for voices. Its parameters keep their class defaults except the azimuth
 //!   (distance 1, on the speaker circle).
 use super::env::Level;
@@ -39,7 +39,7 @@ pub struct SubmixParams {
     /// HI20 / LI20 cutoffs (Hz).
     pub high_pass: f32,
     pub low_pass: f32,
-    /// PI20 centre (Hz), linear gain and Q.
+    /// PI20 center (Hz), linear gain and Q.
     pub peak_freq: f32,
     pub peak_gain: f32,
     pub peak_q: f32,
@@ -52,7 +52,7 @@ pub struct SubmixParams {
 /// One built graph.
 #[derive(Clone, Debug)]
 pub struct FootSubmix {
-    /// Sub0: the voices' Send adds into channel 1 (centre) of this 6-channel buffer (the mono
+    /// Sub0: the voices' Send adds into channel 1 (center) of this 6-channel buffer (the mono
     /// route of [`super::Route::mono`]); the other channels stay 0.
     pub input: Box<[[f32; BLOCK]; 6]>,
     hpf: Iir2,

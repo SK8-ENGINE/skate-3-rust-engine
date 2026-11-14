@@ -99,7 +99,7 @@ pub struct Bank {
     /// Bank offset of the `S10A` tag.
     pub sample_bank: u32,
     /// Per used S10A slot: the bank offset of its sample and the parsed header (None if the slot
-    /// does not hold a recognisable RAM sample).
+    /// does not hold a recognizable RAM sample).
     pub samples: Vec<(u32, Option<SampleHeader>)>,
 }
 

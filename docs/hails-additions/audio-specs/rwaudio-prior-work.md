@@ -1,37 +1,37 @@
-# RenderWare Audio (rwaudiocore) + Snd9 AEMS — prior work for the native evaluator / voice-graph / mixer port
+# RenderWare Audio (rwaudiocore) + Snd9 AEMS: prior work for the native evaluator / voice-graph / mixer port
 
 Research 2026-10-02. Knowledge only: everything below is written in our own words. Never paste code from these
-repos into ours, whatever their licence (project rule "no copied game content": they transcribe EA code; we
+repos into ours, whatever their license (project rule "no copied game content": they transcribe EA code; we
 re-implement). Companion to `aems-reference.md` (our ABKC/csi/opcode notes from PR #4 / sk8audio).
 
 ## Local copies (small sparse clones; delete freely, re-create with the commands below)
-- BP-Decomp (4 MB) — BurnoutDecomp/BP-Decomp_Workflow, sparse: `progress/audio_faithfulness/`,
+- BP-Decomp (4 MB): BurnoutDecomp/BP-Decomp_Workflow, sparse: `progress/audio_faithfulness/`,
   `progress/scratch_dossiers/*aems*|*sndplayer*`, `references/DecFIGS/dwarfdump/SDKs/{EATech,Packages}/…audio/csis…`,
   `references/DecFIGS/dwarfdump/GameShared/GameClasses/Sound/`, `tools/assets/bundles/aems_x360_port.py`.
-- b5-decomp (5 MB) — BurnoutDecomp/b5-decomp (branch `dev`), sparse:
+- b5-decomp (5 MB): BurnoutDecomp/b5-decomp (branch `dev`), sparse:
   `vendor/renderware/{include,src}/rw/audio/`, `src/SDKs/EATech/include/{snd,NFSMix}/`,
   `src/GameShared/GameClasses/Sound/Playback/{AEMS,RWAC,Plugins}/`.
-- nfsmw Snd9 (117 KB) — 6 files fetched with `gh api … -H "Accept: application/vnd.github.raw"`
+- nfsmw Snd9 (117 KB): 6 files fetched with `gh api … -H "Accept: application/vnd.github.raw"`
   from dbalatoni13/nfsmw `src/Speed/Indep/Libs/snd/9/` (aemsdef.h, saems.c, saemsi.h, saemsmbf.c, saemstimupdt.c, sndo.h).
 - Sparse-checkout gotcha under Git Bash: leading-slash patterns get rewritten to the Git install folder; prefix
   the command with `MSYS_NO_PATHCONV=1`.
 - The plug-in descriptor layout dossier in BurnoutDecomp/BP-Decomp_Workflow `progress/scratch_dossiers/` read via gh api only (not cloned).
 
-## Sources, licence, applicability
+## Sources, license, applicability
 
-| Source | What it is | Licence | Applies to Skate 3? |
+| Source | What it is | License | Applies to Skate 3? |
 |---|---|---|---|
-| BP-Decomp_Workflow `references/DecFIGS/dwarfdump/SDKs/...` | DWARF outlines (no bodies) from an internal Burnout PS3 ELF: rwaudiocore **3.03.00**, csis **2.12.00**, Snd9 AEMS (`aemsdef.h`, `sndcmn.h`, `saemsi.h`). Enums, consts, struct field lists, GUIDs. | MIT (repo) — but the content is EA's | High: same rwaudiocore line; FourCCs identical to ours |
+| BP-Decomp_Workflow `references/DecFIGS/dwarfdump/SDKs/...` | DWARF outlines (no bodies) from an internal Burnout PS3 ELF: rwaudiocore **3.03.00**, csis **2.12.00**, Snd9 AEMS (`aemsdef.h`, `sndcmn.h`, `saemsi.h`). Enums, consts, struct field lists, GUIDs. | MIT (repo), but the content is EA's | High: same rwaudiocore line; FourCCs identical to ours |
 | BP-Decomp_Workflow `progress/scratch_dossiers/*` | Machine-assisted decode dossiers of Burnout X360 ARTIST XEX: SndPlayer1 bodies (350 KB), AEMS/RWAC factory, plug-in descriptor rodata dumps | MIT | High for SndPlayer1/descriptors |
 | BP-Decomp_Workflow `tools/assets/bundles/aems_x360_port.py` | X360→x64 ABKC bank porter; per-opcode block sizes + op-27 layout validation | MIT | High (same ABKC bytecode banks) |
-| BP-Decomp_Workflow `IDA Files/ProStreet08Milestone.pdb` (referenced; 62 MB, not fetched) | Full PDB of NFS ProStreet X360 Oct-2007 (EA Black Box) — authoritative rwaudiocore types | in repo, EA content | High (Black Box, same era) — fetch only if a layout question is unanswerable otherwise |
+| BP-Decomp_Workflow `IDA Files/ProStreet08Milestone.pdb` (referenced; 62 MB, not fetched) | Full PDB of NFS ProStreet X360 Oct-2007 (EA Black Box): authoritative rwaudiocore types | in repo, EA content | High (Black Box, same era); fetch only if a layout question is unanswerable otherwise |
 | b5-decomp `vendor/renderware/src/rw/audio/core/*` | Reconstructed C++ of rwaudiocore: Iir2 + LowPass/HighPass/BandPass/Shelf/PeakingIir2, Gain, GainFader, Resample, Rechannel, Pan2D1, Pan2D, Send, SubMix, Mixer, MixKernels, Voice, SndPlayer1, Dac, Limiter1, ReverbModel1, Butterworth | **none** → reference only | High; but "PowerPC asm authoritative" claims are unverified, partially stubbed (Pan2D1 ComputeInteriorTerm = 0) |
-| b5-decomp `src/SDKs/EATech/include/snd/sndaems.cpp` + `sndaemssampleplayer.cpp` | Full AEMS bytecode interpreter (all 40 opcodes) + AemsStandardSamplePlayer (player input → plug-in attributes) | none | Very high — same 40-op bytecode as Skate's ABKC |
+| b5-decomp `src/SDKs/EATech/include/snd/sndaems.cpp` + `sndaemssampleplayer.cpp` | Full AEMS bytecode interpreter (all 40 opcodes) + AemsStandardSamplePlayer (player input → plug-in attributes) | none | Very high: same 40-op bytecode as Skate's ABKC |
 | b5-decomp `src/SDKs/EATech/include/NFSMix/*` | NFSMixMap/NFSMixShape (EA "NFS mix" dynamic mixer; record layouts from the ProStreet PDB) | none | Medium: related lineage of Skate's MixMap (PR #1 already ports MixMapSK8.mxb at 99.999 %) |
-| dbalatoni13/nfsmw `src/Speed/Indep/Libs/snd/9/` | **Matching** (1:1) decomp of NFS Most Wanted 2005 Snd9 incl. `saems.c` (AEMS interpreter) and DWARF-named `aemsdef.h` (every opcode's SETTINGS/STATE struct with offsets) | CC0 | High for names/semantics; older (2005, GC/PS2 gen) — Skate's op-27 sample selection format differs |
+| dbalatoni13/nfsmw `src/Speed/Indep/Libs/snd/9/` | **Matching** (1:1) decomp of NFS Most Wanted 2005 Snd9 incl. `saems.c` (AEMS interpreter) and DWARF-named `aemsdef.h` (every opcode's SETTINGS/STATE struct with offsets) | CC0 | High for names/semantics; older (2005, GC/PS2 gen); Skate's op-27 sample selection format differs |
 | mitsevox/tw2004 `docs/reference-builds/tw07-ps3/cu/*.txt` | Per-CU DWARF function listings from Tiger Woods 07 PS3 (rwaudiocore **2.08.01**): function names, source line, PS3 address, size, locals, inlines. No bodies. Covers gain, gainfader, highpassiir2, lowpassiir2, iir2, resample, rechannelgainwrite, pan2d1, matrixpanner, send, smixer, sndplayer1, plugin, pluginregistry, voice, snd9, sndi_sin/cos | CC0 | Medium: names/local-variable hints only, older version |
-| Kxboo/EA-Playground `_bevy/src/aems.rs`, `_bevy/docs/*` | Rust/Bevy reimplementation of EA Playground (Wii). ABKC there = **native PowerPC code** per class + fixups (not bytecode) | none | Low: confirms ABKC header field meanings; different flavour |
-| Frostbite `LowPassIir2NodeData` hits (VU-Docs etc.) | Frostbite engine audio nodes — unrelated | — | No |
+| Kxboo/EA-Playground `_bevy/src/aems.rs`, `_bevy/docs/*` | Rust/Bevy reimplementation of EA Playground (Wii). ABKC there = **native PowerPC code** per class + fixups (not bytecode) | none | Low: confirms ABKC header field meanings; different flavor |
+| Frostbite `LowPassIir2NodeData` hits (VU-Docs etc.) | Frostbite engine audio nodes: unrelated | n/a | No |
 
 Version evidence: Skate 3 graph FourCCs (`SnP1 → Rch0 → Rsp0 → Gai0 → LI20 → Sen0`, `ems-emitters-re.md`)
 are byte-identical to Burnout X360's registered descriptors (the plug-in descriptor layout dossier: AiW0 BI20 Dac0 Gai0 GaF0
@@ -44,7 +44,7 @@ AEMS timer formula reproduces our measured 6-block tick exactly (see 1 below) �
 ### AEMS evaluator (b5 sndaems.cpp; names from nfsmw aemsdef.h)
 1. Tick: timer callback per mixer frame (period δ = 256/48000 s default). Interval = max(1, ceil((1/rate)/δ) − 1)
    frames; step ms = interval·δ·1000. Burnout rate = 41.6 Hz → 4 frames; Skate's rate 30 → ceil(6.25)−1 = **6**
-   frames = 32.0 ms — exactly our measured value. All instances on the update list run their program each tick.
+   frames = 32.0 ms: exactly our measured value. All instances on the update list run their program each tick.
 2. Program record: u8 op, u8 assignment count, 2 pad, N × {s32 src, s32 dst}, s32 data advance; op 0xFF ends;
    op ≥ 40 aborts. src −1 = "the op result". Matches our grammar note.
 3. Opcode names 0–39: ClassDestructor, ClassData, ClassDataTail / GlobalVariable (MW), Create, Destroy,
@@ -60,10 +60,10 @@ AEMS timer formula reproduces our measured 6-block tick exactly (see 1 below) �
    zero after last point; Table clamps, nearest when scale == 1.0 else linear between entries; DelayLine length =
    round(delay_ms/step) capped to capacity−1; Ramp delta = (target−cur)·step/duration/4096 × per-tick scale input.
 5. Random: one global 6-word add-with-carry generator, fixed seeds F22D0E56 883126E9 C624DD2F 0702C49C 9E353F7D
-   6FDF3B64 (same in Burnout X360 and XB1). Deterministic from boot — our "not reproducible run to run" is because
+   6FDF3B64 (same in Burnout X360 and XB1). Deterministic from boot; our "not reproducible run to run" is because
    other banks consume draws first, not because it's seeded from time (worth re-checking in Skate).
 6. Rounding: b5 uses round-half-away; nfsmw (1:1 matching) uses SNDI_ftoifast and a 1024-step sine table
-   (iSNDsin) for the oscillator — b5's std::sin is a host approximation. Prefer the table (our note: Skate table
+   (iSNDsin) for the oscillator; b5's std::sin is a host approximation. Prefer the table (our note: Skate table
    0x82FD36B8).
 7. Player (op 27) block = nfsmw PLAYERSETTINGS: +0 bank, +4 sample group, +8 handle, +0xC prev control[2], +0xE input
    count, +0xF update-outputs flag, +0x10 sample type; state +0x14 sample select, +0x18 play control (0 stop, 1 play,
@@ -98,17 +98,17 @@ AEMS timer formula reproduces our measured 6-block tick exactly (see 1 below) �
 13. Resample: 2-tap linear interpolation, 16.16 fixed-point phase, increment = round(ratio·65536), ratio =
     (sourceRate/outputRate)·pitch clamped to 4× (MAX_RESAMPLE_RATIO). Fraction scale constant is 1.5258e-5
     (0x377FFC9C), not exactly 1/65536. 6 floats history per channel. PreProcess multiplies a context
-    "pitch/rate" accumulator by the clamped ratio (b5 calls it a gain; DWARF Mixer has mTotalPitch/ScalePitch —
+    "pitch/rate" accumulator by the clamped ratio (b5 calls it a gain; DWARF Mixer has mTotalPitch/ScalePitch,
     probably that). On a source-rate change, the frame passes through unprocessed once.
-14. Rechannel: only acts when in ≠ out channels. Kernel table: mono→5.1 = centre only; stereo→5.1 = FL/FR;
+14. Rechannel: only acts when in ≠ out channels. Kernel table: mono→5.1 = center only; stereo→5.1 = FL/FR;
     5.1→stereo L = 0.707·C + FL + BL (LFE dropped); quad→stereo L = FL+BL. rwaudio 5.1 order:
     **0 FL, 1 C, 2 FR, 3 BL, 4 BR, 5 LFE** (DecFIGS channel.h). MAX_CHANNELS 6.
-15. Pan2D1 (GUID 'Pn21', 7 attributes: azimuth°, radius, width, spread°, focus, level, centre level; ctor params
-    front angle 45°, rear 135°, normalisation mode 2 = 1/sqrt(N emitters)). Speakers: dir0 +45 (FL), dir1 0° (C),
+15. Pan2D1 (GUID 'Pn21', 7 attributes: azimuth°, radius, width, spread°, focus, level, center level; ctor params
+    front angle 45°, rear 135°, normalization mode 2 = 1/sqrt(N emitters)). Speakers: dir0 +45 (FL), dir1 0° (C),
     dir2 −45 (FR), dir3 +135 (BL), dir4 −135 (BR); azimuth is negated (positive degrees pans right). Pairwise
-    inverse 2×2 matrices (VBAP style), per-source 5-vector normalised to unit power × norm × level; stereo
-    out = constant-power pair from target y. 6-ch input → 5 emitters + LFE copy at centre-level gain.
-    **b5's ComputeInteriorTerm is a stub** — the radius<1/spread interior term is still unknown.
+    inverse 2×2 matrices (VBAP style), per-source 5-vector normalized to unit power × norm × level; stereo
+    out = constant-power pair from target y. 6-ch input → 5 emitters + LFE copy at center-level gain.
+    **b5's ComputeInteriorTerm is a stub**: the radius<1/spread interior term is still unknown.
 16. Send: accumulates (MixWithGainRamp) into a SubMix; gain attr 0, de-click ramp; connect by pointer or by SubMix
     name. Gain: attr 0 linear, init 1.0.
 17. Plug-in types: 0 INPUT_SOURCE (SndPlayer1), 1 INPUT_RECHANNEL, 2 INPUT_RESAMPLE, 3 INPUT_PROCESS, 4 STANDARD.
@@ -120,7 +120,7 @@ AEMS timer formula reproduces our measured 6-block tick exactly (see 1 below) �
 19. SndPlayer1: header bitfields version 4, codec 4, channels 6, sample rate 18, play type 2, loop flag 1,
     num samples 29, loop start 32; chunk header {bytes, samples}; PlayParams {startTime f64, streamFileOffset f64,
     path, pRamData, streamPoolGuid, expelMode, requestHandle}; MAX_DECODERFEEDS 20; declick on start/stop.
-    350 KB of decoded bodies in `sndplayer1_bodies_decode.md` if we need exact start/loop/stream behaviour.
+    350 KB of decoded bodies in `sndplayer1_bodies_decode.md` if we need exact start/loop/stream behavior.
 20. Util constants exist for dB/cents conversion (DECIBEL_MIN, CENTS_MIN, PITCHLINEARTOCENTSCONST) but values are
     not in the DWARF; NFSMixShape gives 2^(cents/1200) pitch and Q15↔hundredths-dB tables (MixMap side).
 
@@ -141,5 +141,5 @@ AEMS timer formula reproduces our measured 6-block tick exactly (see 1 below) �
   RBJ Q=1 biquads with the exact bypass thresholds; 16.16 linear resampler with the 0x377FFC9C fraction constant
   and 4× clamp; rwaudio 5.1 channel order internally, reorder only at the device.
 - Pan2D1: port SpeakerConfig/EmitterConfig/ComputeLevels/Ramp as described; measure the interior term from the
-  Skate XEX (b5 lacks it) — for mono point sources at radius 1 the perimeter path alone may suffice.
+  Skate XEX (b5 lacks it); for mono point sources at radius 1 the perimeter path alone may suffice.
 - Validate each stage with short scripted recomp runs, comparing per-block output.

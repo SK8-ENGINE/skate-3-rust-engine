@@ -57,6 +57,17 @@ pub struct SelectorInput {
     pub flags_2476: u32,
     pub offboard_flags_1776: u32,
     pub grind_lock_distance: f32, //active physics_mode80 metres
+    ///AI skaters only (F+2472 0x20000000 with record bit 26): the recorded jump's arc
+    ///(record +80 start position, +96 start velocity, +112 gravity). None for the player.
+    pub recorded_arc: Option<RecordedArc>,
+}
+///A recorded AI jump (`sub_8246DA18`), cast instead of the computed arcs when the board
+///takes off near it (`sub_82D67B50` / `sub_82D67A00`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecordedArc {
+    pub position: Vector,
+    pub velocity: Vector,
+    pub acceleration: Vector,
 }
 ///Stock skater collection values; offsets refer to physics_trajectory unless stated.
 #[derive(Clone, Debug)]
@@ -98,6 +109,10 @@ pub struct SelectorSettings {
     pub trajectory_radius: f32,                     //physics_reckoning C6710942E297D587 metres
     pub trajectory_displacement: f32,               //physics_reckoning runtime attribute
     pub minimum_trajectory_frames: i32,             //physics_reckoning runtime attribute
+    pub recorded_arc_radius_squared: f32,           //0x82257308 (4.0) m^2, AI accept
+    pub recorded_arc_speed_ratio_min: f32,          //0x82093DA0 (0.333)
+    pub recorded_arc_speed_ratio_max: f32,          //0x82063B08 (3.0)
+    pub recorded_arc_error: f32,                    //0x8231A844 (1.0) start and end error
     pub vert_jump_align_factor: f32,                //0B42DFBB7F7756A0
     pub vert_jump_align_max_ground_normal_y: f32,   //94923D136EA2DA37
     pub vert_jump_align_min_direction_y: f32,       //58BFC8D41216C7EE

@@ -6,7 +6,7 @@ fn indices(r:&Record)->impl Iterator<Item=usize> {
     let reverse=r.byte(200)&0x20!=0;
     (0..count).map(move |i| if reverse {count-1-i} else {i})
 }
-pub(super) fn nearest_distance(r:&Record,world:Vector)->f32 {
+pub fn nearest_distance(r:&Record,world:Vector)->f32 {
     if r.points().len()<=1 {return 0.;}
     let local=inverse_point(frame(r),world);
     let mut indices=indices(r);
@@ -29,7 +29,30 @@ pub(super) fn nearest_distance(r:&Record,world:Vector)->f32 {
     }
     distance
 }
-pub(super) fn at_distance(r:&Record,distance:f32)->Vector {
+/// 82D2D550: spline point at signed position `t` from the middle (b148); projected lengths, never reversed: docs/hails-additions/27-dynamic-props.md#spline-point-at-along
+pub fn at_along(r:&Record,t:f32)->Vector {
+    let half=r.scalar(180);
+    let [first_end,last_end]=r.endpoints();
+    let points=r.points();
+    if t<= -half || points.len()<=1 {return first_end;}
+    if t>=half {return last_end;}
+    let u=if r.byte(200)&0x20!=0 {half-t} else {t+half};
+    let axis=normalize(sub(points[points.len()-1],points[0]));
+    let mut total=0.;
+    for pair in points.windows(2) {
+        let (a,b)=(pair[0],pair[1]);
+        let segment=sub(b,a);
+        let projected=dot(segment,axis).max(1e-4);
+        total+=projected;
+        if total>u {
+            let back=(total-u)/projected;
+            let local=std::array::from_fn(|i| b[i]-segment[i]*back);
+            return transform(frame(r),local);
+        }
+    }
+    last_end
+}
+pub fn at_distance(r:&Record,distance:f32)->Vector {
     let endpoints=r.endpoints();
     if r.points().len()<=1 || 0.>=distance {return endpoints[0];}
     let mut indices=indices(r);

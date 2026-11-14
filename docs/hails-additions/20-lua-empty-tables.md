@@ -33,9 +33,9 @@ Found in a muted in-game log check of a mod that sent empty lists: the commands 
 - `lua_list` unit tests: Lua tables (empty, ordered, out-of-order integer keys, gaps / zero / named / fractional / negative keys refused) and JSON (arrays, `{}`, `{"1":…}`, leading-zero keys refused).
 - `vm::empty_table_lists::every_list_field_takes_an_empty_table_and_a_list`: every list field through the real `_submit` path (`Vm` + `api.lua`), with `{}` and a list. Fields that need entries read `{}` and are then refused by validation, never by serde. A table with named keys is still refused.
 - `vm::empty_table_lists::map_fields_keep_empty_tables_as_maps`: map / free-value fields still read `{}` as an object.
-- `graphics_mesh_buffer_tests`: the `uvs = {}` case now fails validation instead of deserialisation (it is refused either way).
+- `graphics_mesh_buffer_tests`: the `uvs = {}` case now fails validation instead of deserialization (it is refused either way).
 - `cargo test --locked -p skate-mods`: all pass except `skyline_every_component_is_real_and_drives_through_ground_contact`, which needs the Skyline GLB (not in a checkout) and fails on `main` too. `cargo build --locked` is clean.
 
 ## Open questions
 
-None. The audio moddability PR (#36) carries the same helper for its audio commands. Whichever merges second keeps one copy of `lua_list.rs` (identical file).
+None. The audio moddability work (#36, folded into #32, merged) uses the same helper for its audio commands; the repository keeps one copy, `crates/skate-mods/src/lua_list.rs`.

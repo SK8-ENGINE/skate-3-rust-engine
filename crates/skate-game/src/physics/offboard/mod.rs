@@ -4,6 +4,28 @@
 //! owner. The coordinator calls them through the selected physical state.
 #![allow(dead_code)]
 pub(crate) mod air_feet;
+
+/// The on-foot query world: the map plus the DMO prop world as pool bit 2 (82764AB0; b218 / b221).
+#[derive(Clone, Copy)]
+pub(crate) struct BipedWorld<'a> {
+    pub map: &'a skate_core::physics::board_world::BoardWorld,
+    pub props: Option<&'a skate_core::physics::board_world::BoardWorld>,
+    /// The traffic cars as moving solids (Ground pool, after the map's own; b648).
+    pub vehicles: Option<&'a crate::modding::bridge::MovingQueries>,
+}
+
+impl<'a> From<&'a skate_core::physics::board_world::BoardWorld> for BipedWorld<'a> {
+    fn from(map: &'a skate_core::physics::board_world::BoardWorld) -> Self {
+        Self { map, props: None, vehicles: None }
+    }
+}
+
+impl std::ops::Deref for BipedWorld<'_> {
+    type Target = skate_core::physics::board_world::BoardWorld;
+    fn deref(&self) -> &Self::Target {
+        self.map
+    }
+}
 pub(crate) mod air_selector;
 pub(crate) mod board_manager;
 pub(crate) mod board_possession;

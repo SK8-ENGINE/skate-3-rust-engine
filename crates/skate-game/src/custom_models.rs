@@ -4,7 +4,6 @@ use bevy::{
         LoadState,
         io::{AssetSourceBuilder, file::FileAssetReader},
     },
-    gltf::Gltf,
     input::mouse::{MouseScrollUnit, MouseWheel},
     mesh::skinning::SkinnedMesh,
     prelude::*,
@@ -61,7 +60,8 @@ struct Selection {
 struct Pending {
     id: String,
     root: Entity,
-    asset: Handle<Gltf>,
+    path: String,
+    scene: Handle<Scene>,
     started: Instant,
 }
 struct Import {
@@ -90,6 +90,8 @@ pub(crate) struct CustomModels {
     native_directory: PathBuf,
     native_prefix: String,
     request: Option<Option<String>>,
+    /// The requested swap is a preview (FE 62's MarqueeViewer): it does not become the saved selection.
+    transient: bool,
     pending: Option<Pending>,
     active_root: Option<Entity>,
     stock_visibility: Vec<(Entity, Visibility)>,
@@ -132,8 +134,40 @@ impl CustomModels {
         self.just_opened = true;
         self.dirty = true;
     }
+    /// The selectable characters: (entry id, display name, roster key and category for retail pros / IP).
+    pub(crate) fn roster(&self) -> impl Iterator<Item = (&str, &str, Option<(&str, &str)>)> {
+        self.entries.iter().map(|e| (e.id.as_str(), e.name.as_str(), e.native.as_ref().map(|n| (n.key.as_str(), n.category.as_str()))))
+    }
+    /// Swap the player to an entry (by id or roster key); false when there is none.
+    pub(crate) fn request_character(&mut self, id_or_key: &str) -> bool {
+        let Some(e) = self.entries.iter().find(|e| e.id == id_or_key || e.native.as_ref().is_some_and(|n| n.key == id_or_key)) else { return false };
+        self.request = Some(Some(e.id.clone()));
+        self.transient = false;
+        true
+    }
     pub fn request_stock(&mut self) {
         self.request = Some(None);
+        self.transient = false;
+    }
+    /// [`CustomModels::request_character`] (`Some`) or the stock skater (`None`) without saving it as the selection.
+    pub(crate) fn request_preview(&mut self, id_or_key: Option<&str>) -> bool {
+        let ok = match id_or_key {
+            Some(id) => self.request_character(id),
+            None => {
+                self.request_stock();
+                true
+            }
+        };
+        self.transient = ok;
+        ok
+    }
+    /// The last swap request was a preview ([`CustomModels::request_preview`]).
+    pub(crate) fn previewing(&self) -> bool {
+        self.transient
+    }
+    /// A requested swap has not finished (loaded, failed or timed out) yet.
+    pub(crate) fn swapping(&self) -> bool {
+        self.request.is_some() || self.pending.is_some()
     }
 }
 pub(crate) fn library_path() -> PathBuf {
@@ -244,6 +278,7 @@ impl Plugin for CustomModelsPlugin {
             native_directory,
             native_prefix,
             request: saved.map(Some),
+            transient: false,
             pending: None,
             active_root: None,
             stock_visibility: vec![],
@@ -257,7 +292,7 @@ impl Plugin for CustomModelsPlugin {
         .add_systems(PreUpdate, interact.after(crate::graphics_menu::MenuInput))
         .add_systems(
             Update,
-            (poll_import, publish, draw)
+            (scripted_swap, poll_import, publish, draw)
                 .chain()
                 .before(crate::customiser_parts::update)
                 .before(crate::app::FrameSet::Animation),
@@ -516,23 +551,27 @@ fn publish(
                 // Visibility was owned by the alternate character while active.
                 // Reapply the current outfit even if its saved JSON is unchanged.
                 restore_stock(&mut state, &mut parts, &mut animation, &mut scenes);
-                state.status = match save_selection(&state.directory, None) {
+                state.status = match if state.transient { Ok(()) } else { save_selection(&state.directory, None) } {
                     Ok(()) => "Stock skater restored.".into(),
                     Err(e) => format!("Restored; selection could not be saved: {e}"),
                 };
+            }
+            Some(id) if state.active.as_ref() == Some(&id) => {
+                bevy::log::info!("CUSTOM_MODEL {id} already active");
             }
             Some(id)
                 if state.active.as_ref() != Some(&id)
                     && state.entries.iter().any(|e| e.id == id) =>
             {
                 let path = state.entries.iter().find(|e| e.id == id).unwrap().asset_path("character.glb");
-                let asset = server.load(path.clone());
+                // Only the scene, never the bare GLB: see docs/hails-additions/31-retail-menus.md#runtime-pro-swap-t-pose
+                let scene = server.load(GltfAssetLabel::Scene(0).from_asset(path.clone()));
                 let root = commands
                     .spawn((
                         CustomModelRoot,
                         Transform::default(),
                         Visibility::Hidden,
-                        SceneRoot(server.load(GltfAssetLabel::Scene(0).from_asset(path))),
+                        SceneRoot(scene.clone()),
                     ))
                     .id();
                 commands.entity(player).add_child(root);
@@ -542,7 +581,8 @@ fn publish(
                 state.pending = Some(Pending {
                     id,
                     root,
-                    asset,
+                    path,
+                    scene,
                     started: Instant::now(),
                 });
                 state.status = "Loading model; your current skater stays active.".into();
@@ -554,14 +594,15 @@ fn publish(
     let Some(p) = state.pending.as_ref() else {
         return;
     };
-    let error = match server.get_load_state(p.asset.id()) {
+    let root_state = server.get_path_id(p.path.clone()).and_then(|id| server.get_load_state(id));
+    let error = match server.get_load_state(p.scene.id()).filter(LoadState::is_failed).or(root_state) {
         Some(LoadState::Failed(e)) => Some(format!("Could not load model: {e}")),
         _ if p.started.elapsed().as_secs() > 120 => Some("Character loading timed out.".into()),
         _ => None,
     };
     let prepared = if let Some(error) = error {
         Some(Err(error))
-    } else if server.is_loaded_with_dependencies(p.asset.id())
+    } else if server.is_loaded_with_dependencies(p.scene.id())
         && instances
             .get(p.root)
             .is_ok_and(|i| spawner.instance_is_ready(**i))
@@ -583,6 +624,7 @@ fn publish(
     match prepared {
         Err(error) => {
             commands.entity(pending.root).despawn();
+            bevy::log::warn!("CUSTOM_MODEL {} failed: {error}", pending.id);
             state.status = format!("{error} Previous character retained.");
         }
         Ok(bindings) => {
@@ -603,15 +645,43 @@ fn publish(
             // Seed the new rig before publishing visibility, even when paused.
             let pose:Vec<_>=skater.render_pose.iter().copied().map(crate::animation::native_matrix).collect();
             for (joint,transform) in bindings.pose_transforms(&pose) {commands.entity(joint).insert(transform);}
+            bevy::log::info!("CUSTOM_MODEL {} ready bones={} native={}", pending.id, bindings.joints().len(),
+                state.entries.iter().find(|e| e.id == pending.id).and_then(|e| e.native.as_ref()).map_or("-", |n| n.key.as_str()));
             *animation = bindings;
             state.active = Some(pending.id.clone());
-            state.status = match save_selection(&state.directory, Some(pending.id)) {
+            state.status = match if state.transient { Ok(()) } else { save_selection(&state.directory, Some(pending.id)) } {
                 Ok(()) => "Character equipped. Resume whenever you're ready.".into(),
                 Err(e) => format!("Equipped; could not save selection: {e}"),
             };
         }
     }
     state.dirty = true;
+}
+/// Test runs: `SKATE_CUSTOM_MODEL_SWAP=<id or roster key>@<seconds>` (or `stock@<seconds>`) asks for the same swap as
+/// the menus after that many seconds with no swap in flight (so the saved model loads first).
+fn scripted_swap(mut state: ResMut<CustomModels>, time: Res<Time<Real>>, mut plan: Local<Option<Option<(String, f32)>>>,
+    roots: Query<(), With<crate::world::PlayerRoot>>) {
+    let plan = plan.get_or_insert_with(|| {
+        std::env::var("SKATE_CUSTOM_MODEL_SWAP").ok().and_then(|v| {
+            let (id, at) = v.rsplit_once('@')?;
+            Some((id.to_owned(), at.parse().ok()?))
+        })
+    });
+    if roots.is_empty() || state.swapping() {
+        return;
+    }
+    if let Some((_, at)) = plan.as_mut() {
+        *at -= time.delta_secs();
+    }
+    if let Some((id, at)) = plan.as_ref().filter(|(_, at)| *at <= 0.0) {
+        bevy::log::info!("CUSTOM_MODEL scripted swap to {id} ({at:.1} s)");
+        if id == "stock" {
+            state.request_stock();
+        } else if !state.request_character(id) {
+            bevy::log::warn!("CUSTOM_MODEL scripted swap: no character {id}");
+        }
+        *plan = None;
+    }
 }
 fn stop_import(mut state: ResMut<CustomModels>, mut exit: MessageReader<AppExit>) {
     if exit.read().next().is_some() {
@@ -707,6 +777,7 @@ fn button(parent: &mut ChildSpawnerCommands, action: usize, text: &str, selected
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::gltf::Gltf;
     #[test]
     fn customiser_fresh_roster_combines_with_personal_imports_without_duplicates() {
         let root = std::env::temp_dir().join(format!("skate-roster-sources-{}", std::process::id()));
@@ -752,6 +823,46 @@ mod tests {
         assert!(parts.applied.is_null());
         assert!(!animation.ready);
     }
+    /// The runtime pro swap T-pose: a preload holding only `#Scene0` lets the bare GLB drop, and loading the bare GLB
+    /// again re-inserts the scene, so Bevy respawns every instance and the bound joints die. `publish` loads the scene.
+    #[test]
+    fn swap_loads_the_scene_so_a_preloaded_instance_keeps_its_joints() {
+        use bevy::{asset::AssetPlugin, gltf::GltfPlugin, image::ImagePlugin, mesh::MeshPlugin, scene::ScenePlugin};
+        let root = std::env::temp_dir().join(format!("skate-swap-scene-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("character.gltf"),
+            r#"{"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"name":"Skate3_RX2_Rig"}]}"#).unwrap();
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin { file_path: root.to_string_lossy().into_owned(), ..default() },
+            ImagePlugin::default(), MeshPlugin, ScenePlugin, GltfPlugin::default()));
+        app.init_asset::<StandardMaterial>().init_asset::<AnimationClip>();
+        app.finish();
+        app.cleanup();
+        let run = |app: &mut App, done: &dyn Fn(&World) -> bool| {
+            let started = Instant::now();
+            while !done(app.world()) {
+                app.update();
+                assert!(started.elapsed().as_secs() < 30, "timed out");
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            for _ in 0..5 { app.update(); }
+        };
+        let label = || GltfAssetLabel::Scene(0).from_asset("character.gltf");
+        let preload: Handle<Scene> = app.world().resource::<AssetServer>().load(label());
+        let instance = app.world_mut().spawn(SceneRoot(preload.clone())).id();
+        run(&mut app, &|w| w.get::<SceneInstance>(instance).is_some_and(|i| w.resource::<SceneSpawner>().instance_is_ready(**i)));
+        let joint = |w: &World| w.get::<Children>(instance).map(|c| c[0]);
+        let bound = joint(app.world()).unwrap();
+        assert!(app.world().resource::<AssetServer>().get_path_id("character.gltf").is_none(), "the bare GLB dropped");
+        let swap: Handle<Scene> = app.world().resource::<AssetServer>().load(label());
+        run(&mut app, &|w| w.resource::<AssetServer>().is_loaded_with_dependencies(swap.id()));
+        assert_eq!(joint(app.world()), Some(bound), "loading the scene keeps the bound joints");
+        let bare: Handle<Gltf> = app.world().resource::<AssetServer>().load("character.gltf");
+        run(&mut app, &|w| w.resource::<AssetServer>().is_loaded_with_dependencies(bare.id()));
+        assert_ne!(joint(app.world()), Some(bound), "loading the bare GLB respawns the instance");
+        drop((preload, swap, bare));
+        std::fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     #[ignore = "Requires private retail roster and animation banks; asset loading only"]
     fn native_roster_assets_bind_to_the_retail_animation_skeleton() {
@@ -759,7 +870,8 @@ mod tests {
             asset::AssetPlugin, ecs::system::SystemState, gltf::GltfPlugin, image::ImagePlugin,
             mesh::MeshPlugin, scene::ScenePlugin,
         };
-        let directory = PathBuf::from(std::env::var("SKATE_TEST_LIBRARY").unwrap());
+        let Some(directory) = std::env::var_os("SKATE_TEST_LIBRARY") else { test_skip!("set SKATE_TEST_LIBRARY") };
+        let directory = PathBuf::from(directory);
         let banks = skate_data::animation_banks::AnimationBanks::load(Path::new(
             &std::env::var("SKATE_TEST_ASSETS").unwrap(),
         ))
@@ -916,7 +1028,8 @@ mod tests {
             asset::AssetPlugin, gltf::GltfPlugin, image::ImagePlugin, mesh::MeshPlugin,
             scene::ScenePlugin,
         };
-        let source = PathBuf::from(std::env::var("SKATE_TEST_CHARACTER").unwrap());
+        let Some(source) = std::env::var_os("SKATE_TEST_CHARACTER") else { test_skip!("set SKATE_TEST_CHARACTER") };
+        let source = PathBuf::from(source);
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,

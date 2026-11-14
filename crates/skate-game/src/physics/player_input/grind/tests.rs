@@ -28,6 +28,8 @@ fn state() -> GrindInputState {
         engagement: entry::Engagement::default(),
         control: control::Control::default(),
         jumper: manager::Jumper::default(),
+        rail_owner: None,
+        near_logged: None,
         investigation: GrindInvestigationFields::default(),
         settings: settings::Settings {
             friction: constant(0.8),
@@ -178,7 +180,7 @@ fn empty_authored_world_completes_active_grind_without_error_stub() {
     let world = BoardWorld::new(vec![]);
     let mut host = TestHost::default();
     let pending = s
-        .pre_update(&p, &provider, &world, context(), &mut host)
+        .pre_update(&p, crate::grind_world::RailView::statics(&provider), &world, context(), &mut host)
         .unwrap();
     let c = context();
     let post = PostContext {
@@ -211,7 +213,7 @@ fn producer_failure_is_not_a_query_miss() {
         ..TestHost::default()
     };
     assert!(
-        s.pre_update(&p, &provider, &world, context(), &mut host)
+        s.pre_update(&p, crate::grind_world::RailView::statics(&provider), &world, context(), &mut host)
             .is_err()
     );
     assert_eq!(s.grounded_frames, 0);

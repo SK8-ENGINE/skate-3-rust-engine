@@ -102,6 +102,11 @@ fn announcer_speaker(voice: u32) -> u64 {
     u64::MAX - 1024 + u64::from(voice)
 }
 
+/// The speaker id of a cast character with no body in the world (a presentation's line, 824AC050).
+fn cast_speaker(voice: u32) -> u64 {
+    u64::MAX - 2048 + u64::from(voice)
+}
+
 /// An announcer request from an engine system or a mod ([`crate::world_audio::AnnouncerSpeechEvent`]).
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct AnnouncerRequest {
@@ -155,6 +160,8 @@ pub(crate) struct WorldSpeech {
     /// This frame's requests (the hosts append).
     pub(crate) peds: Vec<PedRequest>,
     pub(crate) grunts: Vec<u64>,
+    /// The NPC skaters' collide lines (skater id, one per poster call).
+    pub(crate) collides: Vec<(u64, skate_audio::player::contacts::CollideCall)>,
     /// The published NPC skaters with a voice (the NPC host rewrites it).
     pub(crate) skaters: Vec<SkaterSpeaker>,
     tried: bool,
@@ -167,6 +174,9 @@ pub(crate) struct WorldSpeech {
     voices: HashMap<u64, u32>,
     /// SFXObj_Speech's inputs as last written (in0..in4).
     speech_inputs: [bool; 5],
+    /// A presentation speech line plays (`nis_speech`): Obj:Speech input 2, the speech system's scripted-dialogue
+    /// state (+0x1BD28 == 2, ids from 5000).
+    pub(crate) scripted: bool,
     /// The speaking peds' positions (`world_sources` fills it; the echo delay reads it).
     pub(crate) ped_positions: HashMap<u64, [f32; 3]>,
     /// Each speaker's echo delay countdown and value (`sub_824D9370`: recomputed when the count
@@ -180,6 +190,8 @@ pub(crate) struct WorldSpeech {
     announcer: Option<MainCast>,
     /// This frame's announcer requests (engine systems and mods).
     pub(crate) announces: Vec<AnnouncerRequest>,
+    /// Presentation Speech events' cast lines this frame (voice, main-cast event).
+    pub(crate) presented: Vec<(u32, u16)>,
     /// The running challenge's announcer character (None: free skate) and the MixMap tick it was
     /// named at (the gate's challenge timer, retail system `+908`).
     pub(crate) announcer_character: Option<u32>,
@@ -261,6 +273,7 @@ impl Default for WorldSpeech {
         Self {
             peds: Vec::new(),
             grunts: Vec::new(),
+            collides: Vec::new(),
             skaters: Vec::new(),
             tried: false,
             data: None,
@@ -270,12 +283,14 @@ impl Default for WorldSpeech {
             voice: Default::default(),
             voices: HashMap::new(),
             speech_inputs: [false; 5],
+            scripted: false,
             ped_positions: HashMap::new(),
             delay_clock: HashMap::new(),
             echo_delay: [None; skate_audio::bus::speech_echo::SLOTS],
             cast: None,
             announcer: None,
             announces: Vec::new(),
+            presented: Vec::new(),
             announcer_character: None,
             focus_speech: false,
             announcer_since: 0,
@@ -452,13 +467,84 @@ struct Voices<'a> {
     echo_delay: &'a mut [Option<f32>; skate_audio::bus::speech_echo::SLOTS],
 }
 
-impl Voices<'_> {
-    fn ensure(&mut self, line: Line) -> Option<u16> {
-        let slot = self.data.slots.slot(line)?;
-        if self.loaded.contains(&slot) {
-            return Some(slot);
+/// Speech takes read and decoded on a worker thread, keyed by path; uncollected takes drop after [`TAKES_KEPT`].
+#[derive(Default)]
+struct TakeLoader {
+    jobs: std::sync::Mutex<Option<std::sync::mpsc::Sender<PathBuf>>>,
+    state: Arc<std::sync::Mutex<TakeState>>,
+}
+
+#[derive(Default)]
+struct TakeState {
+    asked: std::collections::HashSet<PathBuf>,
+    /// Read: the PCM, or None when the file could not be read or decoded.
+    done: HashMap<PathBuf, Option<skate_audio::mixer::Pcm>>,
+    order: VecDeque<PathBuf>,
+}
+
+const TAKES_KEPT: usize = 16;
+
+enum TakeStatus {
+    Ready(skate_audio::mixer::Pcm),
+    Loading,
+    Failed,
+}
+
+impl TakeLoader {
+    fn global() -> &'static TakeLoader {
+        static TAKES: std::sync::OnceLock<TakeLoader> = std::sync::OnceLock::new();
+        TAKES.get_or_init(TakeLoader::default)
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, TakeState> {
+        self.state.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The take's data if the worker has it (it leaves the store); otherwise queue it.
+    fn status(&self, path: &std::path::Path) -> TakeStatus {
+        {
+            let mut state = self.state();
+            if let Some(done) = state.done.remove(path) {
+                state.order.retain(|p| p != path);
+                return done.map_or(TakeStatus::Failed, TakeStatus::Ready);
+            }
+            if !state.asked.insert(path.to_owned()) {
+                return TakeStatus::Loading;
+            }
         }
-        let path = match self.data.mod_takes.get(&(line.clip, line.take)) {
+        let mut jobs = self.jobs.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let tx = jobs.get_or_insert_with(|| {
+            let (tx, rx) = std::sync::mpsc::channel::<PathBuf>();
+            let state = self.state.clone();
+            if std::thread::Builder::new().name("speech-takes".into()).spawn(move || {
+                for path in rx {
+                    let pcm = std::fs::read(&path).ok().and_then(|b| super::library::wav_pcm(&b));
+                    let mut s = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                    s.asked.remove(&path);
+                    s.order.push_back(path.clone());
+                    s.done.insert(path, pcm);
+                    while s.done.len() > TAKES_KEPT {
+                        let Some(old) = s.order.pop_front() else { break };
+                        s.done.remove(&old);
+                    }
+                }
+            }).is_err() {
+                warn!("AUDIO_WORLD speech: no take loader thread; takes load at their start");
+            }
+            tx
+        });
+        if tx.send(path.to_owned()).is_err() {
+            self.state().asked.remove(path);
+            return TakeStatus::Failed;
+        }
+        TakeStatus::Loading
+    }
+}
+
+impl Voices<'_> {
+    /// The take's file (a mod's replacement, else the install's decode).
+    fn take_path(&self, line: Line) -> Option<PathBuf> {
+        Some(match self.data.mod_takes.get(&(line.clip, line.take)) {
             Some(p) => p.clone(),
             None => {
                 let audio = self.data.audio.as_ref()?;
@@ -466,17 +552,11 @@ impl Voices<'_> {
                 let stem = clip.name.strip_suffix(".dat").unwrap_or(&clip.name);
                 audio.join(stem).join(format!("{:02}.wav", line.take))
             }
-        };
-        let pcm = match std::fs::read(&path).ok().and_then(|b| super::library::wav_pcm(&b)) {
-            Some(p) => p,
-            None => {
-                if !*self.missing {
-                    *self.missing = true;
-                    warn!("AUDIO_WORLD speech: {} is not decoded (the speech decode covers the free-roam events: SKATE_SETUP_SPEECH=1)", path.display());
-                }
-                return None;
-            }
-        };
+        })
+    }
+
+    /// Put a decoded take into its mixer slot (the oldest beyond `KEEP_TAKES` leaves).
+    fn install(&mut self, slot: u16, pcm: skate_audio::mixer::Pcm) {
         let frames = pcm.channels.first().map_or(0, Vec::len) as u32;
         let header = SampleHeader { codec: 0, channels: pcm.channels.len().clamp(1, 8) as u8, rate: pcm.rate, frames, loop_start: None };
         self.mixer.set_bank_sample(self.bank, slot, header, Arc::new(pcm));
@@ -487,6 +567,29 @@ impl Voices<'_> {
                 self.mixer.clear_bank_sample(self.bank, old);
             }
         }
+    }
+
+    fn ensure(&mut self, line: Line) -> Option<u16> {
+        let slot = self.data.slots.slot(line)?;
+        if self.loaded.contains(&slot) {
+            return Some(slot);
+        }
+        let path = self.take_path(line)?;
+        let read = {
+            let _span = super::hitch_parts::span(super::hitch_parts::FILE_READ);
+            std::fs::read(&path).ok().and_then(|b| super::library::wav_pcm(&b))
+        };
+        let pcm = match read {
+            Some(p) => p,
+            None => {
+                if !*self.missing {
+                    *self.missing = true;
+                    warn!("AUDIO_WORLD speech: {} is not decoded (the speech decode covers the free-roam events: SKATE_SETUP_SPEECH=1)", path.display());
+                }
+                return None;
+            }
+        };
+        self.install(slot, pcm);
         Some(slot)
     }
 
@@ -505,6 +608,29 @@ impl Voices<'_> {
 }
 
 impl SpeechVoices for Voices<'_> {
+    /// Loading while the worker reads the take ([`TakeLoader`]). A take the worker could not read
+    /// answers Ready: `open` then reads it here as before (it fails fast and reports it once), so a
+    /// missing decode behaves as it did. Headless tests read at the start, as before.
+    fn prepare(&mut self, line: Line) -> speech_player::Prepare {
+        use speech_player::Prepare;
+        if cfg!(test) {
+            return Prepare::Ready;
+        }
+        let Some(slot) = self.data.slots.slot(line) else { return Prepare::Ready };
+        if self.loaded.contains(&slot) {
+            return Prepare::Ready;
+        }
+        let Some(path) = self.take_path(line) else { return Prepare::Ready };
+        match TakeLoader::global().status(&path) {
+            TakeStatus::Ready(pcm) => {
+                self.install(slot, pcm);
+                Prepare::Ready
+            }
+            TakeStatus::Loading => Prepare::Loading,
+            TakeStatus::Failed => Prepare::Ready,
+        }
+    }
+
     fn open(&mut self, line: Line, p: &VoiceParams) -> Option<u32> {
         let slot = self.ensure(line)?;
         let v = self.mixer.open_direct(self.bank, slot, 0.0, p.pitch, p.gain, Some(p.azimuth))?;
@@ -566,8 +692,9 @@ pub(super) fn frame(
     library: Option<Res<super::Library>>,
     cues: Res<super::skate_events::Cues>,
     listener: Query<&GlobalTransform, With<super::GameAudioListener>>,
-    (living, mut announce): (Option<Res<crate::world_audio::LivingWorldAudio>>, MessageReader<crate::world_audio::AnnouncerSpeechEvent>),
+    (living, mut announce, presenter): (Option<Res<crate::world_audio::LivingWorldAudio>>, MessageReader<crate::world_audio::AnnouncerSpeechEvent>, Option<Res<crate::presentation_run::Presenter>>),
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::SPEECH);
     let speech = &mut *speech;
     // The announcer: the running challenge's character, and this frame's requests.
     speech.focus_speech = living.as_deref().is_some_and(|l| l.focus_speech);
@@ -579,15 +706,19 @@ pub(super) fn frame(
     for e in announce.read() {
         speech.announces.push(AnnouncerRequest { event: e.event.clone(), pro: e.pro, words: e.words.clone() });
     }
+    if let Some(mut out) = presenter.as_deref().and_then(|p| p.cast_out.lock().ok()) {
+        speech.presented.extend(out.drain(..).map(|c| (c.character, c.event)));
+    }
     let announcer_idle = speech.announces.is_empty() && !speech.announcer_input && speech.announcer.as_ref().is_none_or(|c| c.player.busy() == 0 && c.player.queued() == 0);
     let cast_idle = speech.cast.as_ref().is_none_or(|c| c.player.busy() == 0 && c.player.queued() == 0) && announcer_idle;
     let reacting = !speech.skater_speech.is_empty() || speech.skaters.iter().any(|s| s.reactions != Reactions::default());
-    if speech.peds.is_empty() && speech.grunts.is_empty() && speech.player.busy() == 0 && speech.player.queued() == 0 && cast_idle && !reacting && speech.skater_slots.holders().next().is_none() && !speech.speech_inputs.contains(&true) {
+    if speech.peds.is_empty() && speech.grunts.is_empty() && speech.collides.is_empty() && speech.player.busy() == 0 && speech.player.queued() == 0 && cast_idle && !reacting && speech.skater_slots.holders().next().is_none() && !speech.speech_inputs.contains(&true) {
         return;
     }
     let (Some(mut native), Some(library)) = (native, library) else {
         speech.peds.clear();
         speech.grunts.clear();
+        speech.collides.clear();
         speech.announces.clear();
         return;
     };
@@ -669,6 +800,7 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
     let Some(data) = speech.data.as_mut() else {
         speech.peds.clear();
         speech.grunts.clear();
+        speech.collides.clear();
         speech.announces.clear();
         return;
     };
@@ -719,11 +851,39 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
         let (lw, mc) = main_cast::message::BAIL_GRUNT;
         says.push((sk, Some(lw), Some(mc), None, None));
     }
+    // `sub_824BDA90`: a bumped NPC skater's collide line (free skate: game mode 0).
+    for (id, call) in std::mem::take(&mut speech.collides) {
+        let Some(sk) = speech.skaters.iter().find(|s| s.id == id).copied() else { continue };
+        if let Say::Message(lw, mc) = skate_audio::world::skater_speech::collide(0, &mut speech.rng) {
+            says.push((sk, Some(lw), Some(mc), None, None));
+        }
+        let tuning = library.contacts_tuning();
+        // A skater contact mutes this skater's crash line (retail finds the record by model; ours by id).
+        if call.skater {
+            speech.skater_speech.entry(id).or_default().mute_crash(tuning.collide_crash_mute);
+        }
+        // Hit by the local player: the team line on the skater's own voice when it has an AI voice slot
+        // (retail `+28` record `+80 > 0`, slots map to the living-world models; ours: no main-cast words).
+        if call.team && cast_of(library, sk.voice).is_none() {
+            says.push((sk, Some(tuning.coll_team.0), None, None, None));
+        }
+    }
+    // A presentation's cast line (824AC050): the active skater with the speaker's character says it (its distance
+    // sets near / far, as any of its lines); with none in the world the character still says it, below.
+    let mut bodiless: Vec<(u32, u16)> = Vec::new();
+    for (voice, event) in std::mem::take(&mut speech.presented) {
+        match speech.skaters.iter().find(|s| s.voice == voice).copied() {
+            Some(sk) => says.push((sk, None, Some(event), None, None)),
+            None => bodiless.push((voice, event)),
+        }
+    }
     // `SFXObj_PlayerSpeech`'s non-local process, once per console frame (free skate: game mode 0).
     if m.ticks != speech.last_tick {
+        let dt = m.ticks.saturating_sub(speech.last_tick) as f32 * super::world_sources::evaluation_dt();
         for sk in speech.skaters.clone() {
             let main = speech.cast.is_some() && cast_of(library, sk.voice).is_some();
             let process = speech.skater_speech.entry(sk.id).or_default();
+            process.tick(dt);
             for say in process.process(main, &sk.reactions, 0, &mut speech.rng) {
                 says.push(match say {
                     Say::Living(e) => (sk, Some(e), None, None, None),
@@ -778,6 +938,22 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
             new.push((sk.id, Who::Skater(sk.voice), res, -1, Chan::Living));
         }
     }
+    // 824AC050 with no active skater of the character: the request carries the character's own cast words and
+    // flag 2 (far) and plays on a PlayerSpeech instance with no world position (a speaker id of its own per voice).
+    // OURS: the block's word order is the pros' (`cast_block`); 824AC050's own order is not cross-checked.
+    for (voice, event) in bodiless {
+        match (speech.cast.as_mut(), cast_of(library, voice)) {
+            (Some(c), Some(words)) => {
+                let id = cast_speaker(voice);
+                speech.voices.insert(id, voice);
+                let block = cast_block(words, true, None);
+                let res = c.manager.request_main_cast(&mut c.data.library, &c.data.table, event, voice, &block, &inputs, &mut speech.rng);
+                info!("AUDIO_WORLD presentation cast line {event}: voice {voice} has no skater in the world, said far");
+                new.push((id, Who::Skater(voice), res, -1, Chan::Cast));
+            }
+            _ => info!("AUDIO_WORLD presentation cast line {event}: voice {voice} has no main-cast words (or no main cast)"),
+        }
+    }
     // Engine systems' and mods' announcer requests.
     for r in std::mem::take(&mut speech.announces) {
         let Some(a) = speech.announcer.as_mut() else { continue };
@@ -819,7 +995,9 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
                 let tuning = manager.tuning.get(&line.event).cloned().unwrap_or_default();
                 let timeout = d.table.event(line.event).map_or(60, |e| u32::from(e.queue_timeout));
                 let names: Vec<&str> = lines.iter().filter_map(|l| d.index.clips.get(l.clip).map(|c| c.name.as_str())).collect();
-                let req = Request { speaker, event: line.event, priority: tuning.priority, queue_priority: d.table.event(line.event).map_or(0, |e| e.priority), retain_queued: d.table.event(line.event).is_some_and(|e| e.flags2 & 4 != 0), interrupt: tuning.interrupt, interrupt_when_full: tuning.interrupt_when_full, lines, timeout };
+                // Console frames of the event's start delay and stream gap (seconds in the tuning).
+                let frames = |s: f32| (s.max(0.0) / super::world_sources::evaluation_dt()).round() as u32;
+                let req = Request { speaker, event: line.event, priority: tuning.priority, queue_priority: d.table.event(line.event).map_or(0, |e| e.priority), retain_queued: d.table.event(line.event).is_some_and(|e| e.flags2 & 4 != 0), interrupt: tuning.interrupt, interrupt_when_full: tuning.interrupt_when_full, lines, timeout, start_delay: frames(tuning.start_delay), gap: frames(tuning.stream_gap) };
                 let mut v = Voices { mixer: &mut rt.mixer, bank, data: d, loaded, missing: &mut missing, echo_delay: &mut speech.echo_delay };
                 let (outcome, external_stop) = player.request_controlled(req, &mut v, control_available);
                 let channel = chan.name();
@@ -929,7 +1107,7 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
                     speech.lines += 1;
                     // Observe-only row for mods: class "speech" (living world) or "maincast".
                     let class = if bank == MAIN_CAST_BANK { "maincast" } else { "speech" };
-                    super::mod_audio::record(&mut speech.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Speech, source: super::mod_audio::Source::Speech, class, slot: "", id: line.event as i32, owner: speaker });
+                    super::mod_audio::record(&mut speech.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Speech, source: super::mod_audio::Source::Speech, class, slot: "", id: line.event as i32, owner: speaker, hit: None });
                     debug!("AUDIO_WORLD speech start owner={speaker} {} take {}", d.index.clips.get(line.clip).map_or("?", |c| c.name.as_str()), line.take);
                 }
                 Event::Cut { speaker, .. } => debug!("AUDIO_WORLD speech cut owner={speaker} (level at or below 200 for 2 s)"),
@@ -946,7 +1124,7 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
     // F18 / F19 / F23 / F42 / F43 (→ the music, Global C3) and F45 (+200 mB on ped speech) read
     // them. Input 2 is the speech system's scripted-dialogue state (`+0x1BD28` == 2; requests
     // with ids ≥ 5000, `sub_824A4EE8`), input 3 a main-cast stream whose block has `+60` == 0 and
-    // `+93` set: neither happens in free roam (left 0).
+    // `+93` set: input 2 comes from the presentation speech (`nis_speech`, `scripted`), input 3 is left 0.
     let mut active: Vec<u64> = speech.player.speakers().collect();
     let cast_speakers: Vec<u64> = speech.cast.as_ref().map(|c| c.player.speakers().collect()).unwrap_or_default();
     active.extend(cast_speakers.iter().copied());
@@ -964,6 +1142,7 @@ pub(crate) fn run(speech: &mut WorldSpeech, peds: &[(u64, u32)], native: &mut Na
         inputs[1] |= (75..=77).contains(v);
         inputs[4] |= (1..=29).contains(v);
     }
+    inputs[2] = speech.scripted;
     if inputs != speech.speech_inputs {
         for (i, on) in inputs.iter().enumerate() {
             m.set_input(skate_audio::mixmap::keys::SPEECH, i, if *on { 32767 } else { 0 });
@@ -1153,7 +1332,7 @@ mod tests {
     /// out3, else out2, × the voice float; the echo send out21, the env send out15; filters out13 / out14; the PEAK from the
     /// azimuth curves) are compared with the recomp's first GAIN / SEND (per send module: `+0x570`
     /// before the gain, `+0x7D0` after the filters) / LPF / HPF / PEAK targets of the voice. The
-    /// PEAK is also checked without our geometry: the recomp's (centre, gain) must lie on the two
+    /// PEAK is also checked without our geometry: the recomp's (center, gain) must lie on the two
     /// curves at one azimuth. Prints every row and the agreement.
     #[test]
     #[ignore = "needs the private install data and the recomp level export"]
@@ -1162,6 +1341,9 @@ mod tests {
         let Ok(bytes) = std::fs::read(base.join("assets/private/audio/aems/MixMapSK8.mxb")) else { panic!("missing private data: no MixMap") };
         let mut rows = Vec::new();
         let levels = std::env::var_os("SKATE_SPEECH_LEVELS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+        if levels.is_none() {
+            test_skip!("set SKATE_SPEECH_LEVELS (speech_levels.py --json)");
+        }
         for s in ["163809", "164620", "180430"] {
             let Some(Ok(text)) = levels.as_ref().map(|d| std::fs::read_to_string(d.join(format!("levels_{s}.json")))) else { continue };
             let list: Vec<LevelRow> = serde_json::from_str(&text).unwrap();
@@ -1221,7 +1403,7 @@ mod tests {
             if let Some([freq, gain, _]) = r.first.peak {
                 peak_n += 1;
                 // The azimuth the recomp's gain says (the gain curve falls from 0.4 to 0.1), then
-                // the centre the other curve gives there.
+                // the center the other curve gives there.
                 let (mut lo, mut hi) = (0.0f32, 32767.0f32);
                 for _ in 0..40 {
                     let mid = 0.5 * (lo + hi);
@@ -1285,6 +1467,9 @@ mod tests {
         let Ok(library) = crate::game_audio::Library::load(root) else { panic!("missing private data: no audio install") };
         let Some((index_path, _)) = library.speech("maincast") else { panic!("missing private data: no main-cast index (stage_world_audio.py --maincast)") };
         let dir = std::env::var_os("SKATE_MAINCAST_LINES").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+        if dir.is_none() {
+            test_skip!("set SKATE_MAINCAST_LINES (maincast_reads.py --json)");
+        }
         let Some(Ok(text)) = dir.map(|d| std::fs::read_to_string(d.join("maincast_lines.json"))) else { panic!("missing private data: SKATE_MAINCAST_LINES (maincast_reads.py --json)") };
         let rows: Vec<CastRow> = serde_json::from_str(&text).unwrap();
         let json: IndexJson = serde_json::from_str(&std::fs::read_to_string(&index_path).unwrap()).unwrap();
@@ -1477,5 +1662,38 @@ mod tests {
         speech.announces.push(AnnouncerRequest { event: crate::world_audio::AnnouncerLine::Name("475".into()), pro: None, words: Vec::new() });
         crash(&mut speech, &mut native, 20.0, 2);
         assert_eq!(speech.announcer_asked, 3);
+    }
+}
+
+#[cfg(test)]
+mod take_loader_tests {
+    use super::*;
+
+    /// The worker's decode is the game thread's decode; a file that cannot be read answers Failed
+    /// once read (the caller then reads it itself and reports it).
+    #[test]
+    fn the_take_loader_decodes_like_the_game_thread() {
+        let dir = std::env::temp_dir().join(format!("skate-speech-takes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x80\xbb\x00\x00\x00\x77\x01\x00\x02\x00\x10\x00data\x04\x00\x00\x00\x00\x40\x00\xc0";
+        let good = dir.join("00.wav");
+        std::fs::write(&good, wav).unwrap();
+        let missing = dir.join("01.wav");
+        let loader = TakeLoader::default();
+        let wait = |path: &std::path::Path| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            loop {
+                match loader.status(path) {
+                    TakeStatus::Loading if std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(5)),
+                    other => return other,
+                }
+            }
+        };
+        let TakeStatus::Ready(pcm) = wait(&good) else { panic!("the take should load") };
+        let direct = super::super::library::wav_pcm(wav).unwrap();
+        assert_eq!((pcm.rate, &pcm.channels), (direct.rate, &direct.channels));
+        assert!(loader.state().done.is_empty() && loader.state().asked.is_empty(), "collected takes leave the store");
+        assert!(matches!(wait(&missing), TakeStatus::Failed));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

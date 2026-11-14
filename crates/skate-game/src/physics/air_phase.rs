@@ -118,7 +118,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
         }
         info.player_jumped = false;
         let input = input::selector_input(physics, skater)?;
-        skater.trajectory.launch(info, input, &physics.world)?;
+        skater.trajectory.launch(info, input, &physics.world, physics.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world))?;
         skater.air_state.trajectory_query_countdown = 7;
     }
     let input = input::selector_input(physics, skater)?;
@@ -133,7 +133,7 @@ pub(super) fn advance(physics: &mut GamePhysics, skater: &mut SkaterRuntime) -> 
     );
     skater
         .trajectory
-        .update(input, &physics.world, grind_context)?;
+        .update(input, &physics.world, physics.prop_layer.as_ref().map(crate::skate_world::PropCollisionLayer::world), grind_context)?;
     let current = skater
         .air_reckoning
         .fields(&physics.riding)

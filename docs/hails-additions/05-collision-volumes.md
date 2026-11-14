@@ -20,13 +20,13 @@ SkateSchool has seven, all in its global stream (`cSim_Global.xsf`). Names
 are those of the matching retail trigger-volume records (see "What the boxes
 are" below):
 
-| Box (X / Y / Z, metres) | Name | Effect in game |
+| Box (X / Y / Z, meters) | Name | Effect in game |
 |---|---|---|
 | −79.1…16.5 / −1.53…6.65 / −43.3…52.3 | `tut_sksc_inthehub_vol_02` | covers the whole school area; the authored start (y 0.11) is inside it |
 | −62.1…−0.5 / −1.53…6.65 / −3.6…12.7 | `tut_sksc_inthehub_vol_01` | the invisible wall in the spawn area |
 | −11.0…2.5 / 0…4.17 / −2.6…1.6 (three identical) | `coach_frank_sksc` / `ws_sksc_coachfrank_instance_01` | invisible block near the origin |
 | −212…578 / −73…79 / −483…492 | `tut_sksc_reset_vol01` | level bounds: floor under the whole map |
-| 104.1…199.7 / −4.1…4.1 / 151.5…247.1 | `tut_sksc_wrongway_vol_01` | — |
+| 104.1…199.7 / −4.1…4.1 / 151.5…247.1 | `tut_sksc_wrongway_vol_01` | n/a |
 
 Evidence that these are not solid in the original game: every authored
 SkateSchool locator (Coach Frank, the hub, all tutorial stations) is at
@@ -87,7 +87,7 @@ Further evidence the volumes are triggers: MegaPark's only box
 (`tele_stadium_to_world_volume_a`, X 61.4–73.2, Y −4.1…4.1,
 Z −140.8…−132.6) surrounds the stadium's arrival
 point from the world (`tele_world_to_stadium_dest_locator_01`, 2 m from its
-centre), and one of Maloof's two boxes lies 14 m from its arrival point from
+center), and one of Maloof's two boxes lies 14 m from its arrival point from
 DownTown (`tele_dwtn_to_mmcp_dest_locator_01`). The other Maloof box
 (2.8 × 3.4 × 2.0 m) is 17 m from a street challenge start.
 
@@ -105,7 +105,7 @@ DownTown (`tele_dwtn_to_mmcp_dest_locator_01`). The other Maloof box
 
 Every surfaceless box is the shape of a named **trigger volume**: a volume-set
 record (type `0x00EB0019`: matrix, bounding box, link, instance id, name) in the
-same stream, whose bounding box matches the box to the millimetre. Retail
+same stream, whose bounding box matches the box to the millimeter. Retail
 registers them as triggers when the stream loads and posts enter/exit events;
 they are never solid. All 12 boxes:
 

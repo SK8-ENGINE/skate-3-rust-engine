@@ -1,0 +1,28 @@
+[package]
+name = "skate-launcher"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+description = "The Skate launcher on every OS (docs/hails-additions/44-every-os.md, spec 44a)."
+
+[[bin]]
+name = "skate-launcher"
+path = "src/main.rs"
+
+[dependencies]
+jiff = { version = "=0.2.42", default-features = false, features = ["std", "tz-system", "tzdb-bundle-platform", "tzdb-zoneinfo"] }
+serde_json.workspace = true
+serde.workspace = true
+sha2 = "=0.10.9"
+zip = { version = "=6.0.0", default-features = false, features = ["deflate"] }
+zstd = "=0.13.3"
+sysinfo = { version = "=0.37.2", default-features = false, features = ["system"] }
+eframe = { version = "=0.33.3", default-features = false, features = ["default_fonts", "wgpu", "wayland", "x11"] }
+gilrs = "=0.11.2"
+wgpu = { version = "=27.0.1", default-features = false, features = ["dx12", "metal", "vulkan", "wgsl"] }
+image = { version = "=0.25.10", default-features = false, features = ["png"] }
+tiny-skia = { version = "=0.11.4", default-features = false, features = ["std", "simd"] }
+ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"] }

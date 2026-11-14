@@ -37,6 +37,10 @@ pub(crate) struct PlayerState {
     initialized: bool,
 }
 impl PlayerState {
+    /// A new actor on a pooled body (b299): the post-input counters a fresh body starts with.
+    pub(crate) fn reset_for_new_actor(&mut self) {
+        self.post = post_input::PostInputState::new();
+    }
     pub fn load(data: &Collections, _mode: &str) -> Result<Self, String> {
         let thresholds = |class| -> Result<TwoStageThresholds, String> {
             Ok(TwoStageThresholds {
@@ -134,10 +138,11 @@ pub(crate) fn enter_after_teleport(
     physics: &mut GamePhysics,
     skater: &mut SkaterRuntime,
 ) -> Result<(), String> {
-    let target = if skater.teleport_state.take_manual_on_board() == Some(false) {
-        PhysicalStateId::BipedGround
-    } else { PhysicalStateId::PhysicsGround };
-    transition::set(physics, skater, target)
+    // 82DB8E40 always enters state 100 after the reset; an on-foot arrival reaches BipedGround through the reply's
+    // byte 64 and the ordinary selection, as a bail checkpoint does. Entering BipedGround directly here (ours, since
+    // the session marker) flung the skater once fdab6dd7 made the reply the only reset (laptop 2026-10-21 21:38).
+    skater.teleport_state.take_manual_on_board();
+    transition::set(physics, skater, PhysicalStateId::PhysicsGround)
 }
 
 ///Original82DB6050 prefix; coordinator calls the selected state pre-update next.
@@ -169,7 +174,7 @@ pub(crate) fn resume_after_climb(physics: &mut GamePhysics, skater: &mut SkaterR
             animation_right: frame[0], animation_up: frame[1], velocity: [0.; 4],
         },
         skater.player_input.processed.actor_query_2952 as i32,
-        &super::offboard::contact_toolkit::StaticScene::new(&physics.world)?,
+        &super::offboard::contact_toolkit::StaticScene::new(physics.biped_world())?,
     )?;
 
     Ok(())

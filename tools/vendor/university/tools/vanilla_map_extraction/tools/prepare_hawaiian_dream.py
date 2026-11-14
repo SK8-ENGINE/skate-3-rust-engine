@@ -19,6 +19,7 @@ from retail_lightmap_uv import (
     decode_decal_uvs,
     decode_lightmap_uvs,
     decode_retail_world_frame,
+    decode_secondary_texcoord_zw,
 )
 from retail_texture_decode import (
     B5G6R5_DECODER_NAME,
@@ -653,6 +654,20 @@ def prepare(
                 )
                 if decal_uv is not None:
                     arrays[f"decal_uvs_{mesh_index}"] = decal_uv.values
+                elif shader_name == "animated.flag":
+                    # The flag has no decal set; its cloth motion weights
+                    # (TEXCOORD1 zw) ride in that slot instead.
+                    weights = decode_secondary_texcoord_zw(
+                        asset.data,
+                        vertex_buffer_offset=mesh.source_offsets[
+                            "vertex_buffer"
+                        ],
+                        vertex_count=mesh.vertex_count,
+                        vertex_stride=mesh.vertex_stride,
+                        attributes=mesh.attributes,
+                    )
+                    if weights is not None:
+                        arrays[f"decal_uvs_{mesh_index}"] = weights
                 if mesh.normals is not None:
                     arrays[f"normals_{mesh_index}"] = numpy.asarray(
                         mesh.normals,

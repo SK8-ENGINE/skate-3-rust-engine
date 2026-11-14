@@ -1,9 +1,9 @@
-# NPC (AI) skaters' board sounds — spec and port status
+# NPC (AI) skaters' board sounds: spec and port status
 
 2026-10-03, overnight step 4 (headless). Code: `skate_audio::world::skaters` (runner), host
 `crates/skate-game/src/game_audio/npc_skaters.rs` (inert until an AI-skater system publishes). Doc 11 "NPC
 skaters' board sounds". Plan: the world / NPC audio inventory (row "NPC skaters' boards"; see doc 15).
-Source: the TU3 recompilation (reference only, addresses are facts); "the recomp" = its traces, which run
+Source: the TU3 (title update 3) recompilation (reference only, addresses are facts); "the recomp" = its traces, which run
 uncapped and stall.
 
 ## 1. Which skaters get sound (retail mechanism)
@@ -26,7 +26,7 @@ Ported: `skaters::Slots::assign` (unit tests in the module).
 (`0x40C710A0`, the CONTACT hook on `sub_824B86E0`) fires in bursts whose impact speeds match a nearby AI board's
 SKATEB speed and landing (e.g. 164620: 326.4 s and 329.1–329.5 s = board `468B18F0`, 25 m from the player,
 10.4–11.3 m/s, landing 0000000 → 1111000; 394.3 s = `468B1500`, 14 m) while the local player stands still or is
-in the air — the earlier note "both contact objects are the player's" was wrong.
+in the air; the earlier note "both contact objects are the player's" was wrong.
 
 ## 2. What runs for the NPC instance
 
@@ -34,15 +34,15 @@ Every player SFX object of instance 1 runs; the audio-state bridge `sub_824B0DA8
 the skater entry at the record's index (+68), so the components see the NPC's physics. Local tests
 (`[record+72]`) select the non-local branches:
 
-| component | non-local behaviour | ported here |
+| component | non-local behavior | ported here |
 |---|---|---|
-| PlayerPhysics inputs (`sub_824B19C8`) | in9 = 32767; in12 = `sub_824B23C8` (below); in13 = \|state+96 − `[G+0x2F078]`+32\| (the NPC's COM velocity against the local player's), capped at 35, slewed ±100/s (state +784), × 32767 / 35 — vault class `0xC1831BDB6CB1B1EA`: `204DCC9296DC9400` = 35, `0395642CA6FC543A` = 100 | `Physics::write_against` |
+| PlayerPhysics inputs (`sub_824B19C8`) | in9 = 32767; in12 = `sub_824B23C8` (below); in13 = \|state+96 − `[G+0x2F078]`+32\| (the NPC's COM velocity against the local player's), capped at 35, slewed ±100/s (state +784), × 32767 / 35; vault class `0xC1831BDB6CB1B1EA`: `204DCC9296DC9400` = 35, `0395642CA6FC543A` = 100 | `Physics::write_against` |
 | 3DObjPos 1.1 / 1.2 (g) | the NPC's COM / board; distances against the local skater and the camera | `ObjPos` at `obj_pos(g)` / `obj_pos2(g)` |
 | Contacts / Rail / OffBoard inputs | landing pulse and bucket; landing-material flag local only; OffBoard local only | `inputs::Contacts { instance }`, `write_rail_at`, `write_off_board_at` |
 | SkateBoard routing / Class_rolling (`sub_824C5CA8`) | one pass, no held layers 0 / 3 | `Rolling` (already ported non-local); grain binds collected in `NpcSkater::routed` |
 | grain bed (SkateBoard update `sub_824C6BD8`) | runs per instance; soft member via `sub_824B23C8`; local only: seam envelope `sub_824CA448`, graph-3 send / level ramp `sub_824CAEC0`, wobbles `sub_824CB180`, graph 3 (`sub_824C8878`), FlangeSub sends 21 / 22, rocket | yes (2026-10-03): `Runtime::npc_grains`, `grain_bed::Bed::for_instance`, shared pick generator (doc 11 "NPC skaters' second grain bed") |
 | Rattle | as the local | yes |
-| Class_Seams (`sub_824C14C8` / `sub_824C1F18`) | gate = record active byte (+52), not +72: runs for NPCs | yes (the port's `!local` early returns were removed — they were never retail) |
+| Class_Seams (`sub_824C14C8` / `sub_824C1F18`) | gate = record active byte (+52), not +72: runs for NPCs | yes (the port's `!local` early returns were removed; they were never retail) |
 | Class_grind + on / off sounds | w13–w15 = 0 (local-only words); on/off bus `create` = false | yes |
 | Class_wheels_skid, Class_Squeaks, Class_foot_drag | soft word via `sub_824B23C8`; w14–w16 local only | yes |
 | SenseOfSpeed wind / rattle (`sub_824E7980`) | returns at once for non-local | yes (posts nothing) |
@@ -60,7 +60,7 @@ over the session; their GAIN × SEND levels p50 / p90: `concrete_smooth_soft` 0.
 `asphalt_rough_soft` 0.002 / 0.106, `concrete_aggregate_soft` 0.012 / 0.090, `asphalt_smooth_soft` 0.000 / 0.000
 (the local's hard `concrete_smooth_hard` 0.238 / 0.737). Implemented as `skaters::component_state`, and the
 components now post `s.soft_wheels` where they called `sub_824B23C8` (seams w11, skid w8, contacts tier,
-PlayerPhysics in12) — identical for the local player (`local` is always true there).
+PlayerPhysics in12): identical for the local player (`local` is always true there).
 
 ## 3. MixMap slots, keys, attenuation
 Instance g = 1 of the Player slot: SkateBoard `0x40010800`, Contacts `0x40010810`, Wheels `…820`, Rail `…830`,
@@ -68,7 +68,7 @@ Cracks `…840`, SenseOfSpeed `…880`; PlayerPhysics `0x60010800`, 3DObjPos `0x
 (`mixmap::keys::*(1)`). Distance roll-off and azimuth come from the slot's own B lookups on those 3-D blocks
 (no Collision / Whoosh / Dynamic slot is involved: the earlier guess is withdrawn). Cross-slot sums that read
 `A[Player.n]` expand to both instances (mixmap-spec §4.2), so an active NPC instance also feeds e.g. the
-Ambience sum — handled by the MixMap itself.
+Ambience sum: handled by the MixMap itself.
 
 ## 4. What the engine must publish (`NpcSkaterAudioState`)
 Per NPC skater and frame, in the skater list's order (spawn order is fine; retail iterates its list):
@@ -113,7 +113,7 @@ remove despawned skaters. Off switch `SKATE_AEMS_NPC_SKATERS=0`.
   already right; the "distance to the local skater" reading above was wrong (it holds for the ped speech lookups,
   slot 5, input 0).
 - **The test placed the NPC dead ahead** (always the 4–50 m quadrant). Rows now carry their geometry (the NPC board
-  interpolated, the local skater's own board — the track that follows the local SkateBoard's GREC speed — excluded,
+  interpolated, the local skater's own board (the track that follows the local SkateBoard's GREC speed) excluded,
   ambiguous speed matches dropped; camera interpolated; view = camera → local board, or the camera's motion when
   the board is > 8 m away) and `npc_bed_follows_the_recomp_rows` rolls each row at its own geometry. 176 rows:
   0–10 m 0.101 / 0.123, 10–20 m 0.050 / 0.054, 20–30 m 0.0091 / 0.0111 (recomp / ours A gain); row median ratio

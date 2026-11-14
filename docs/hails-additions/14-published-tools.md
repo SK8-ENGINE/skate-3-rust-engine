@@ -14,7 +14,7 @@ does, inputs, usage, example output, requirements). An index is in [`tools/READM
 
 | Folder | Contents |
 |---|---|
-| `tools/regression-checks/` | `check_maps.py` (`--validate-maps` + collision triangle counts), `check_spawns.py` (baked spawns), `check_customiser.py` (customiser output snapshot), `smoke_maps.sh` (muted crash smoke test per map). |
+| `tools/regression-checks/` | `check_maps.py` (`--validate-maps` + collision triangle counts), `check_spawns.py` (baked spawns), `check_customiser.py` (customizer output snapshot), `smoke_maps.sh` (muted crash smoke test per map). |
 | `tools/setup-equivalence/` | `compare_streams.py` (stream loader byte equivalence), `compare_refpack.py` (native RefPack DLL against the Python decoder). |
 | `tools/collision-inspect/` | `map_collision.py`, `analyse_spawn.py`, `collision_attrs.py`, `scan_surfaceless.py`, `unsigned_collision.py`. |
 | `tools/world-stream-inspect/` | `big_list.py`, `sim_types.py`, `volumes_dump.py`, `arenas.py` (shared arena reader). |
@@ -70,9 +70,7 @@ timing and threading), so its traces are evidence for values and logic, not for 
 
 ## Open questions
 
-- `crates/skate-game/src/game_audio/e2e.rs` still names the old local script paths in its header
-  comment; it could point to `tools/audio-e2e/` instead.
-- None of this is offered upstream yet; it would make a tooling PR of its own (see the PR plan).
+- None. The `e2e.rs` header now points to `tools/audio-e2e/`, and the tools landed upstream in #37.
 
 ## Credits
 

@@ -22,9 +22,9 @@ const MAX_VOICES: usize = 32;
 const MAX_PER_CLIP: usize = 3;
 const MIN_REPEAT: f64 = 0.04;
 const MIN_FADE: f32 = 0.01;
-/// World metres are scaled by this before Bevy's distance attenuation, which
+/// World meters are scaled by this before Bevy's distance attenuation, which
 /// never amplifies (gain = min(1, 1 / distance^2)). 0.1 keeps a skater a few
-/// metres from the camera at full level, like the mod adapter's default.
+/// meters from the camera at full level, like the mod adapter's default.
 const SPATIAL_SCALE: f32 = 0.1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -138,7 +138,7 @@ fn fold_row(row: &[f32; 6]) -> (f32, f32) {
 /// same per-voice gain gets through Pan2D1 and the output stage's stereo fold (aems-voice-graph-spec
 /// §4.9, §6.3; `examples/pan_fold_probe.rs`).
 ///
-/// - Non-positional: a mono native voice opens at azimuth 0 → centre → 0.5 per ear; a stereo one
+/// - Non-positional: a mono native voice opens at azimuth 0 → center → 0.5 per ear; a stereo one
 ///   (the bed graph has no panner) routes L→L, R→R → 0.707 per ear. Bevy plays both at 1 per ear.
 /// - Positional (`local` = the source in listener space, Bevy axes: −Z ahead, +X right): native =
 ///   a mono Pan2D1 at the azimuth, folded; Bevy = rodio 0.20's spatial ear factors (each ear
@@ -325,7 +325,7 @@ pub(super) fn sync(
         ears: (l.left_ear_offset, l.right_ear_offset),
     });
     let dt = time.delta_secs().clamp(0.0, 0.25);
-    let silenced = super::silenced(menu.as_deref(), &replay);
+    let silenced = super::speech_silenced(menu.as_deref(), &replay);
     let master = settings.master().clamp(0.0, 1.0);
     for category in [Category::Ambience, Category::Effects] {
         voices.mix[category as usize] = settings.category(category).clamp(0.0, 1.0) * master;
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     fn interim_voices_fold_like_native_ones() {
         let ears = (Vec3::new(-0.1, 0.0, 0.0), Vec3::new(0.1, 0.0, 0.0));
-        // Non-positional: mono → centre (0.5 per ear vs Bevy's 1), stereo → 0.707.
+        // Non-positional: mono → center (0.5 per ear vs Bevy's 1), stereo → 0.707.
         assert!((native_fold_gain(1, None, ears) - 0.5).abs() < 1e-4);
         assert!((native_fold_gain(2, None, ears) - 0.707).abs() < 1e-3);
         // Ahead: native 0.5 / 0.5, rodio 0.75 / 0.75 → 2/3.

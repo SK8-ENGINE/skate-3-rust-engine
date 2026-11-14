@@ -20,6 +20,17 @@ class SetupRefresh(unittest.TestCase):
             self.assertEqual(setup_ui.saved_source({'source': str(xex)}), xex)
             self.assertEqual(setup_ui.saved_source({'source': str(disc)}), disc)
 
+    def test_the_window_bar_never_hides_the_progress_writer(self):
+        # The worker hands `progress` (the ProgressWriter) to the conversion as its report; a Tk bar of the same name
+        # made a refresh crash with "'Progressbar' object is not callable" and then hang (laptop 2026-11-13).
+        import ast
+        tree = ast.parse(Path(setup_ui.__file__).read_text(encoding='utf-8'))
+        named = [t.id for node in ast.walk(tree) if isinstance(node, ast.Assign)
+                 and isinstance(node.value, ast.Call) and getattr(node.value.func, 'attr', '') == 'Progressbar'
+                 for t in node.targets if isinstance(t, ast.Name)]
+        self.assertTrue(named, 'the window still has its bar')
+        self.assertNotIn('progress', named)
+
 
 if __name__ == '__main__':
     unittest.main()

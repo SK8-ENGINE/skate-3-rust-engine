@@ -112,7 +112,7 @@ class CustomiserOverlapTests(unittest.TestCase):
     def test_overlap_needs_one_more_slot_than_the_map_workers(self):
         original = install.available_memory
         try:
-            install.available_memory = lambda: (2 + 4 * 3) * install.GIB      # 3 workers + customiser fit
+            install.available_memory = lambda: (2 + 4 * 3) * install.GIB      # 3 workers + customizer fit
             self.assertTrue(install.overlap_customiser(3))
             install.available_memory = lambda: (2 + 4 * 3) * install.GIB - 1  # one byte short
             self.assertFalse(install.overlap_customiser(3))

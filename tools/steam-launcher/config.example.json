@@ -1,5 +1,11 @@
 {
   "remote": "origin",
+  "fork_url": "https://github.com/Hailey-Ross/rusty-trucks.git",
+  "upstream_url": "https://github.com/SK8-ENGINE/skate-3-rust-engine.git",
+  "target_root": "",
+  "build_cap_gb": 0,
+  "build_reserve_gb": 30,
+  "after_session": "",
   "recomp": {
     "exe": "C:\\path\\to\\skate3recomp\\out\\build\\clang-relwithdebinfo\\skate3.exe",
     "working_dir": "C:\\path\\to\\the\\folder\\your\\recomp\\runs\\from",
@@ -8,16 +14,59 @@
     "trace_check": ""
   },
   "recomp_entries": [
-    { "id": "recomp-play",   "name": "Recomp: play (no tracing)", "hint": "The recomp with no hooks logging." },
-    { "id": "recomp-audio",  "name": "Recomp: audio trace", "trace": "audio", "capture": true,
-      "hint": "Sounds posted / played, the rolling bed, seams; records the mixed game sound." },
-    { "id": "recomp-audiox", "name": "Recomp: audio + extra detail", "trace": "audio,audiox,dsp", "capture": true, "ask_label": true,
-      "hint": "Board state, skids, bails, collision posts, voice levels. Asks for a label for the session folder." },
-    { "id": "recomp-marker", "name": "Recomp: marker / teleport trace", "trace": "audio,audiox,dsp", "capture": true, "label": "marker", "folder": "audiox",
-      "hint": "Session marker and teleport hooks with the sound recording." },
-    { "id": "recomp-npc",    "name": "Recomp: NPCs, traffic and world", "trace": "npc,world,traffic",
-      "hint": "Peds, traffic, trigger volumes." },
-    { "id": "recomp-all",    "name": "Recomp: everything", "trace": "audio,dsp,npc,world,traffic,aiskater", "capture": true,
-      "hint": "Audio, voice levels, NPCs, traffic, world, NPC skaters. Heavy." }
+    {
+      "id": "recomp-play",
+      "name": "Recomp: play (no tracing)",
+      "hint": "The recomp with no hooks logging."
+    },
+    {
+      "id": "recomp-audio",
+      "name": "Recomp: audio trace",
+      "trace": "audio",
+      "capture": true,
+      "hint": "Sounds posted / played, the rolling bed, seams; records the mixed game sound."
+    },
+    {
+      "id": "recomp-audiox",
+      "name": "Recomp: audio + extra detail",
+      "trace": "audio,audiox,dsp",
+      "capture": true,
+      "ask_label": true,
+      "hint": "Board state, skids, bails, collision posts, voice levels. Asks for a label for the session folder."
+    },
+    {
+      "id": "recomp-marker",
+      "name": "Recomp: marker / teleport trace",
+      "trace": "audio,audiox,dsp",
+      "capture": true,
+      "label": "marker",
+      "folder": "audiox",
+      "hint": "Session marker and teleport hooks with the sound recording."
+    },
+    {
+      "id": "recomp-npc",
+      "name": "Recomp: NPCs, traffic and world",
+      "trace": "npc,world,traffic",
+      "hint": "Peds, traffic, trigger volumes."
+    },
+    {
+      "id": "recomp-all",
+      "name": "Recomp: everything",
+      "trace": "audio,dsp,npc,world,traffic,aiskater",
+      "capture": true,
+      "hint": "Audio, voice levels, NPCs, traffic, world, NPC skaters. Heavy."
+    }
+  ],
+  "rpcs3": {
+    "exe": "C:\\path\\to\\rpcs3.exe",
+    "game": "C:\\path\\to\\your\\Skate 3 disc folder",
+    "args": "--no-gui --fullscreen"
+  },
+  "rpcs3_entries": [
+    {
+      "id": "rpcs3-play",
+      "name": "Retail Skate 3 (RPCS3)",
+      "hint": "The PS3 game, full screen."
+    }
   ]
 }

@@ -14,7 +14,7 @@
 //! scale from the Reverb owner in [`EnvNetwork::scale_frame`]; the FlangeSub returns in
 //! [`super::flange`].
 //!
-//! Not modelled (UNCERTAIN in the spec): the non-voice contributors other than the owner one-shot
+//! Not modeled (UNCERTAIN in the spec): the non-voice contributors other than the owner one-shot
 //! buses and the Collision SubMix, the module timer delay before a new reverb configuration is
 //! heard (applied at the next block here).
 use crate::BLOCK;
@@ -93,7 +93,7 @@ impl Level {
     }
 }
 
-/// One LFO record (`sub_82490B60`): out = centre + depth · amount · sin(2π · phase / period).
+/// One LFO record (`sub_82490B60`): out = center + depth · amount · sin(2π · phase / period).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Lfo {
     pub period: f32,

@@ -60,7 +60,7 @@ now a constant.
 ## Test fix: `customiser_equipment_reaches_ground_force_and_torque`
 
 This ignored test needs the private assets. At 50 iterations it failed with "Profile hardness was
-lost before live straighten torque". The cause was the test's setup. The solver and the customiser
+lost before live straighten torque". The cause was the test's setup. The solver and the customizer
 path were fine.
 
 **Root cause.** The test sampled the board one tick after spawn. At that tick the board is still
@@ -86,7 +86,7 @@ in Ground (state 100) at rest by about tick 20, with deck ω_y about 4.6e-5 rad/
 
 **Change (test only).** `crates/skate-game/src/tests/physics_startup.rs`: each run ticks 60 times
 with the same default profile, so the board settles. Then the test applies the hardness profile
-(the same call the customiser makes) and runs one more tick, so PlayerInput publishes it. Before
+(the same call the customizer makes) and runs one more tick, so PlayerInput publishes it. Before
 injecting the sideways travel it asserts the realistic precondition: Ground state, 4 wheel
 contacts, |deck ω_y| < 0.01 rad/s. The intent is unchanged: the same injected travel, the real
 Ground adapter, side friction = lerp(SoftestWheelSideFrictionScalar, 1, hardness), and hardness
@@ -115,7 +115,7 @@ must reach the deck torque.
     means is still unknown. In every trace it was 0.
   - **Traces (the recomp, Super-Ultra Mega-Park spawn, background, muted).** The new `ITERSET` /
     `ITERTICK` hooks (category `physics`) were used, plus a watch list for the byte, both owners' modes
-    and both Simulations' +176. 0 malformed lines. Data is in `.local/research/solver-iters/`.
+    and both Simulations' +176. 0 malformed lines. Data is in a local data folder.
     - `survey.tsv` covers riding, a forced bail on the board (both sticks + both triggers), the
       session-marker respawn, getting off the board and walking, a forced ledge bail on foot (FIRSTHIT
       +676 confirmed both bails), another respawn, getting back on the board, Start (opens the

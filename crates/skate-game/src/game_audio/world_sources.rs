@@ -125,6 +125,11 @@ struct SpeechVoiceJson {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 struct SpeechTuningJson {
+    /// `+0` / `+4` (setup exports them unnamed; a mod's tuning may use the names).
+    #[serde(alias = "unknown_0")]
+    start_delay: f32,
+    #[serde(alias = "unknown_4")]
+    stream_gap: f32,
     gap: f32,
     flags_12: Vec<u8>,
     priority: i32,
@@ -270,6 +275,8 @@ impl WorldTuningJson {
                 Some((
                     id.parse().ok()?,
                     skate_audio::world::speech_manager::EventTuning {
+                        start_delay: t.start_delay,
+                        stream_gap: t.stream_gap,
                         gap: t.gap,
                         priority: t.priority,
                         interrupt: flags(1),
@@ -444,6 +451,16 @@ fn prefetch_world_banks(p: &mut WorldPrefetch, native: &mut Native, library: &Li
     }
 }
 
+/// The world banks for the map being loaded (path `map`), queued on the prefetch worker while the
+/// living world publishes here (a map change unloads them; [`prefetch_world_banks`] then finds them
+/// requested). Returns how many were queued.
+pub(super) fn read_ahead_banks(native: &mut Native, library: &Library, map: &std::path::Path) -> usize {
+    if !requested() || !prefetch_on() {
+        return 0;
+    }
+    TRAFFIC_BANKS.iter().chain(PED_BANKS).filter(|stem| library.bank_source(stem).is_ok_and(|source| native.prefetch.request_next(map, source))).count()
+}
+
 #[derive(Resource)]
 pub(crate) struct WorldHost {
     /// None: not tried yet; Some(false): some world banks are missing (warned once).
@@ -584,7 +601,57 @@ pub(crate) fn register(app: &mut App) {
     app.init_resource::<WorldOwners>()
         .init_resource::<WorldHost>()
         .init_resource::<WorldHeld>()
-        .add_systems(Update, frame_post.after(super::native::mixmap_tick));
+        .add_systems(Update, frame_post.after(super::native::mixmap_tick))
+        .add_systems(Startup, take_banks_hold)
+        .add_systems(Update, release_banks_hold.after(frame));
+}
+
+/// Startup hold for the world banks: the loading screen stays until the prefetch has them (no game-thread decode).
+const BANKS_HOLD: &str = "world_audio_banks";
+const BANKS_MAX_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn take_banks_hold(startup: Option<ResMut<crate::startup_loading::StartupLoading>>) {
+    if let Some(mut startup) = startup
+        && requested()
+        && prefetch_on()
+    {
+        startup.hold(BANKS_HOLD, "Loading the world sounds");
+    }
+}
+
+/// Every world bank is loaded, missing from the install, or requested and no longer queued or decoding.
+fn banks_settled(p: &WorldPrefetch, native: &Native) -> bool {
+    p.epoch == Some(native.prefetch.clears())
+        && TRAFFIC_BANKS.iter().chain(PED_BANKS).all(|&stem| {
+            native.bank_loaded(stem)
+                || p.unavailable.contains(&stem)
+                || (p.requested.contains(&stem) && !native.prefetch.busy(stem))
+        })
+}
+
+/// Released once the audio's first start and the living world's load are done and, when the living world will
+/// publish, the world banks are settled; or after [`BANKS_MAX_WAIT`].
+fn release_banks_hold(
+    startup: Option<ResMut<crate::startup_loading::StartupLoading>>,
+    native: Option<Res<Native>>,
+    host: Res<WorldHost>,
+    living: Res<crate::world_audio::LivingWorldAudio>,
+    mut since: Local<Option<std::time::Instant>>,
+) {
+    let Some(mut startup) = startup else { return };
+    if !startup.holding(BANKS_HOLD) || startup.holding("audio") || startup.holding("living_world") {
+        return;
+    }
+    let started = *since.get_or_insert_with(std::time::Instant::now);
+    let settled = match native {
+        Some(native) => !living.expected || banks_settled(&host.prefetch, &native),
+        // The runtime did not start: nothing to wait for.
+        None => true,
+    };
+    if settled || started.elapsed() >= BANKS_MAX_WAIT {
+        info!("AUDIO_WORLD banks ready behind the loading screen in {} ms{}", started.elapsed().as_millis(), if settled { "" } else { " (gave up waiting)" });
+        startup.release(BANKS_HOLD);
+    }
 }
 
 fn apply(host: &mut WorldHost, rt: &mut skate_audio::runtime::Runtime, cmds: Vec<WorldCommand>) {
@@ -600,7 +667,7 @@ fn apply(host: &mut WorldHost, rt: &mut skate_audio::runtime::Runtime, cmds: Vec
                 }
                 let muted = host.rules.as_deref().is_some_and(|r| {
                     let (name, index) = super::mod_audio::world_slot(&slot);
-                    r.mutes(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::World, class, slot: name, id: index, owner })
+                    r.mutes(&super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::World, class, slot: name, id: index, owner, hit: None })
                 });
                 if !muted {
                     host.nodes.insert((owner, slot), rt.post(id, &words));
@@ -608,7 +675,7 @@ fn apply(host: &mut WorldHost, rt: &mut skate_audio::runtime::Runtime, cmds: Vec
                 host.posts += 1;
                 if host.events.is_some() {
                     let (name, index) = super::mod_audio::world_slot(&slot);
-                    super::mod_audio::record(&mut host.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::World, class, slot: name, id: index, owner });
+                    super::mod_audio::record(&mut host.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Post, source: super::mod_audio::Source::World, class, slot: name, id: index, owner, hit: None });
                 }
             }
             WorldCommand::Redeliver { owner, slot, words } => {
@@ -621,7 +688,7 @@ fn apply(host: &mut WorldHost, rt: &mut skate_audio::runtime::Runtime, cmds: Vec
                     rt.release(node);
                     if host.events.is_some() {
                         let (name, index) = super::mod_audio::world_slot(&slot);
-                        super::mod_audio::record(&mut host.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Release, source: super::mod_audio::Source::World, class: "", slot: name, id: index, owner });
+                        super::mod_audio::record(&mut host.events, super::mod_audio::EventRow { kind: super::mod_audio::EventKind::Release, source: super::mod_audio::Source::World, class: "", slot: name, id: index, owner, hit: None });
                     }
                 }
             }
@@ -746,6 +813,7 @@ pub(super) fn frame(
     mut speech: ResMut<super::world_speech::WorldSpeech>,
     listener: Query<&GlobalTransform, With<super::GameAudioListener>>,
 ) {
+    let _span = super::hitch_parts::span(super::hitch_parts::WORLD_SOURCES);
     // Inert: nothing published, expected, held or prefetched.
     let idle = owners.vehicles.is_empty() && owners.peds.is_empty() && host.vehicles.is_empty() && host.ped_objects.is_empty();
     if idle && !owners.expected && host.prefetch.requested.is_empty() {
@@ -1063,6 +1131,30 @@ mod tests {
         assert!(bank[&9].speaker_repeat.is_empty(), "an install from before the export: +24 for everyone");
     }
 
+    /// The world banks' startup hold waits for the audio's first start and the living world's load, then goes at
+    /// once when there is nothing to decode (no runtime, or no living world on the map).
+    #[test]
+    fn the_world_banks_hold_waits_for_the_audio_and_the_living_world() {
+        let mut app = App::new();
+        let mut loading = crate::startup_loading::StartupLoading::new();
+        loading.hold("audio", "Loading sound");
+        loading.hold("living_world", "Loading the living world");
+        loading.hold(BANKS_HOLD, "Loading the world sounds");
+        app.insert_resource(loading)
+            .init_resource::<WorldHost>()
+            .init_resource::<crate::world_audio::LivingWorldAudio>()
+            .add_systems(Update, release_banks_hold);
+        let holding = |app: &App| app.world().resource::<crate::startup_loading::StartupLoading>().holding(BANKS_HOLD);
+        app.update();
+        assert!(holding(&app), "the audio is still starting");
+        app.world_mut().resource_mut::<crate::startup_loading::StartupLoading>().release("audio");
+        app.update();
+        assert!(holding(&app), "the living world is still loading");
+        app.world_mut().resource_mut::<crate::startup_loading::StartupLoading>().release("living_world");
+        app.update();
+        assert!(!holding(&app), "no runtime: nothing to wait for");
+    }
+
     #[test]
     fn no_owners_means_no_work() {
         // The default host holds nothing: `frame` returns before touching the runtime.
@@ -1155,6 +1247,7 @@ mod tests {
         for stem in &stems {
             native.prefetch.wait(stem);
         }
+        assert!(banks_settled(&p, &native), "decoded or missing: the startup hold can go");
         assert_eq!(snapshot(&native), before, "the requests never touch the runtime");
         let decodes = WAV_DECODES.with(|n| n.get());
         for stem in &stems {
@@ -1193,8 +1286,10 @@ mod tests {
     fn traffic_rpm_and_relative_speed_follow_the_recomp() {
         let base = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
         let Ok(library) = Library::load(&base.join("assets")) else { panic!("missing private data: no audio install") };
-        let sessions = std::env::var_os("SKATE_RECOMP_SESSIONS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
-        let Some(Ok(text)) = sessions.map(|s| std::fs::read_to_string(s.join("gapg1_20261003_152507/trace.tsv"))) else { panic!("missing private data: no gap run G1") };
+        let Some(sessions) = std::env::var_os("SKATE_RECOMP_SESSIONS").filter(|v| !v.is_empty()).map(std::path::PathBuf::from) else {
+            test_skip!("set SKATE_RECOMP_SESSIONS (gap run G1)")
+        };
+        let Ok(text) = std::fs::read_to_string(sessions.join("gapg1_20261003_152507/trace.tsv")) else { panic!("missing private data: no gap run G1") };
         let v3 = |s: &str| -> [f32; 3] {
             let v: Vec<f32> = s.split(' ').filter_map(|x| x.parse().ok()).collect();
             [v[0], v[1], v[2]]
@@ -1279,7 +1374,7 @@ mod tests {
                 if std::env::var_os("SKATE_VERIFY_VERBOSE").is_some() && (d > 60.0 || (rel - b.5).abs() > 0.5) {
                     eprintln!("  {:.1}s span {span:.3} speed {:.2}->{:.2} rpm {:.0}->{:.0} ours {:.0} | rel {:.2}->{:.2} ours {rel:.2} lv {:?}", b.0 / 1000.0, a.4, b.4, a.2, b.2, e.rpm, a.5, b.5, lv);
                 }
-                // Resynchronise (the log is the truth at each sample).
+                // Resynchronize (the log is the truth at each sample).
                 e.rpm = b.2;
                 rel = b.5;
             }

@@ -4,6 +4,7 @@ import unittest
 
 import numpy
 
+from tools.asset_pipeline import audio_export
 from tools.asset_pipeline import audio_formats as audio
 
 
@@ -189,6 +190,32 @@ class Emitters(unittest.TestCase):
     def test_rejects_a_truncated_file(self):
         with self.assertRaises(ValueError):
             audio.ems_emitters(struct.pack('>I', 2) + bytes(72))
+
+    def test_a_packs_emitter_file_places_its_banks_including_its_own(self):
+        # b432: a pack's .ems is its map's own emitter file; its sounds name the pack's loose banks or disc banks.
+        from types import SimpleNamespace
+
+        class Archive:
+            def __init__(self, files):
+                self.files = files
+                self.entries = [SimpleNamespace(path=p) for p in files]
+
+            def read(self, entry):
+                return self.files[entry.path]
+
+        def ems(*sounds):
+            return struct.pack('>I', len(sounds)) + b''.join(audio.EMS_RECORD.pack(
+                1, 0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, s, 1.0, 1.0, 1.0, 1.0) for s in sounds)
+        own, disc, reverb = audio.name_id('cage_rattle_1'), audio.name_id('frogs'), audio.name_id('room')
+        attributes = {own: {'bank_file': 'cage_rattle_1.abk'}, disc: {'bank_file': 'frogs.abk'},
+                      reverb: {'bank_file': 'reverb_room.abk'}}
+        files = Archive({'data/audio/frogs.abk': b'', 'data/audio/reverb_room.abk': b'',
+                         'data/audio/reverb_city.ems': ems(reverb)})
+        pack = Archive({'data/audio/DLC_sanitarium.ems': ems(own, disc), 'data/audio/cage_rattle_1.abk': b''})
+        from .audio_export import emitters
+        listed, placed = emitters(files, attributes, [pack])
+        self.assertEqual([r['bank'] for r in listed['DLC_sanitarium']], ['cage_rattle_1', 'frogs'])
+        self.assertEqual(placed, {'cage_rattle_1.abk', 'frogs.abk'}, 'not the disc reverb file (no sfx_ prefix)')
 
 
 class EmitterAttributes(unittest.TestCase):
@@ -418,6 +445,19 @@ class PlayerTuning(unittest.TestCase):
         self.assertEqual(t['audio_tricks'], {ollie[5:]: 28, base[5:]: -1, '0000000000000001': -1})
         self.assertEqual(t['audio_tricks_2'], {}, 'no second field in these records')
 
+    def test_hand_grab_pair_and_bus_come_from_the_splicer_and_eq_records(self):
+        from tools.asset_pipeline.audio_export import EQCHAIN_CLASS, HANDGRAB, HANDGRAB_EQ, player_tuning
+
+        t = player_tuning([
+            {'class': HANDGRAB[0], 'key': 'handgrab', 'parent': '', 'fields': {
+                HANDGRAB[2]: {'type': 'Skate_Collisions', 'data': '000003C5'},
+                HANDGRAB[3]: {'type': 'Skate_Metal', 'data': '000001D0'}}},
+            {'class': EQCHAIN_CLASS, 'key': 'default', 'parent': '', 'fields': {
+                HANDGRAB_EQ: {'type': 'Sk8::Audio::eEQChain', 'data': '00000002'}}},
+        ])
+        self.assertEqual(t['hand_grab'], {'collisions': 0x3C5, 'metal': 0x1D0, 'eq': 2})
+        self.assertNotIn('hand_grab', player_tuning([]))
+
     def test_collision_materials_follow_the_image_keys_and_refspecs(self):
         from tools.asset_pipeline.audio_export import (BAND_CLASS, MATERIAL_CLASS, MATERIAL_KEYS, MATERIAL_KINDS,
                                                         WINDOW_CLASS, player_tuning)
@@ -529,3 +569,17 @@ class SpliceTrees(unittest.TestCase):
             listed = splice_trees(archive, out, ['Skate_Collisions.bnk', 'water.abk', 'missing.bnk'])
             self.assertEqual(listed, {'Skate_Collisions': 'aems/Skate_Collisions.splc'})
             self.assertEqual((out/'aems/Skate_Collisions.splc').read_bytes(), bank[:60 + len(body)])
+
+
+class WavPack(unittest.TestCase):
+    # The pack lives in audio_export (only the audio group fingerprints it).
+    def test_round_trip(self):
+        wavs = [b'RIFF' + bytes(range(7)), b'', b'RIFFxyz']
+        data, ranges = audio_export.wav_pack(wavs)
+        self.assertEqual(audio_export.wav_pack_entries(data), wavs)
+        self.assertEqual([data[o:o + n] for o, n in ranges], wavs)
+        self.assertEqual(ranges[0][0], 16 + 16 * 3)
+
+    def test_rejects_other_files(self):
+        with self.assertRaises(ValueError):
+            audio_export.wav_pack_entries(b'RIFF0000')

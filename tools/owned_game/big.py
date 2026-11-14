@@ -177,6 +177,11 @@ class BigArchive:
         with self.path.open("rb") as stream:
             stream.seek(entry.offset)
             packed = stream.read(entry.stored_size)
+        return self.decode(entry, packed)
+
+    @staticmethod
+    def decode(entry: BigEntry, packed: bytes) -> bytes:
+        """An entry's bytes from its stored (packed) bytes, however they were read."""
         if len(packed) != entry.stored_size:
             raise FormatError(f"{entry.path}: truncated BIG payload")
         if entry.compression == 0:
@@ -216,14 +221,35 @@ class BigArchive:
         output = Path(output).resolve()
         output.mkdir(parents=True, exist_ok=True)
         written: list[Path] = []
+        # Every check first, in entry order; the writes then run on threads (the native RefPack and file I/O release
+        # the GIL). Each target is written once: with overwrite a repeated path keeps its last entry, as in order.
+        last: dict[Path, BigEntry] = {}
         for entry in entries:
             relative = self.safe_relative(entry.path)
             target = (output / relative).resolve()
             if output != target and output not in target.parents:
                 raise FormatError(f"archive path escapes output: {entry.path!r}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if target.exists() and not overwrite:
+            if not overwrite and (target in last or target.exists()):
                 raise FileExistsError(f"refusing to overwrite {target}")
-            target.write_bytes(self.read(entry))
+            last[target] = entry
             written.append(target)
+
+        def write(item):
+            target, entry = item
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(self.read(entry))
+
+        try:
+            from tools.asset_pipeline.setup_budget import extract_threads
+            threads = extract_threads()
+        except ImportError:
+            threads = 1
+        if threads <= 1 or len(last) <= 1:
+            for item in last.items():
+                write(item)
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(min(threads, len(last))) as pool:
+                for _ in pool.map(write, last.items()):
+                    pass
         return written

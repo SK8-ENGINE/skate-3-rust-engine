@@ -1,15 +1,15 @@
-# AEMS patch-program evaluator — behavioural specification (Skate 3 TU3)
+# AEMS patch-program evaluator: behavioral specification (Skate 3 TU3)
 
 Basis for a native Rust re-implementation. Written 2026-10-02 in our own words. Facts (offsets, opcode
 numbers, constants, addresses) come from:
-- the TU3 recomp (`skate3recomp/generated`, read with `tools/recomp-code-search/fn.sh`);
+- the TU3 (title update 3) recomp (`skate3recomp/generated`, read with `tools/recomp-code-search/fn.sh`);
 - the disc banks (our survey script `tools/audio-file-inspect/aems_survey.py`, all 376 `.abk` and 9 `.csi`);
 - the PoC probe (`emitter_probe` in our local PoC worktree, which runs upstream PR #4);
-- PR #4 and sk8Audio (reference only, no licence);
+- PR #4 and sk8Audio (reference only, no license);
 - nfsmw Snd9 (dbalatoni13/nfsmw, CC0; see `rwaudio-prior-work.md`). It is the source of the official names, and it is
   2005-era, so differences are marked.
 
-Licence rule: nothing here is code from PR #4, the recomp or b5-decomp. Describe, don't transliterate.
+License rule: nothing here is code from PR #4, the recomp or b5-decomp. Describe, don't transliterate.
 
 Status tags: **[V]** verified against retail code or data by us; **[P]** taken from PR #4's reading of
 retail code and spot-checked; **[N]** from nfsmw 2005, consistent with Skate but not re-read in TU3;
@@ -48,7 +48,7 @@ All multi-byte fields are big-endian. Offsets are from the start of the file (on
 offset listed in the rebase list becomes an absolute pointer. For a native port, keep offsets and resolve
 on access.
 
-### 1.1 ModuleBank (`.abk`, magic `ABKC`) — header, 0x5C bytes [V]
+### 1.1 ModuleBank (`.abk`, magic `ABKC`): header, 0x5C bytes [V]
 
 | Off | Name | Disc value / meaning |
 |---|---|---|
@@ -184,7 +184,7 @@ Counts run from 1 up to 10001 (Sk8_Air_Flip_Tricks, equal to its S10A capacity).
 | id | Name | Effect | Count |
 |---|---|---|---|
 | 0 | PITCHMULT | 1525 | resample ratio = value/4096 (clamp 0..65535) |
-| 1 | TIMEMULT | — | ignored |
+| 1 | TIMEMULT | n/a | ignored |
 | 2 | VOL | 1527 | master level value/32767 (clamp 0..32767); multiplies dry and send |
 | 3 | AZIMUTH | 1516 | pan angle = value·360/65536 degrees (alternate setter) |
 | 4 | ELEVATION | 2 | ignored |
@@ -485,7 +485,7 @@ uses the low word, so 32-bit wrapping is exact. Exceptions (op 9 unsigned compar
 
 **Float semantics:** all float math is **f32** with round-to-nearest after each operation:
 - int → float conversion = exact to f64, then round to f32;
-- "fused" means one rounding of a·b+c (PPC fmadds) — use an f64 FMA then round to f32; double rounding is
+- "fused" means one rounding of a·b+c (PPC fmadds): use an f64 FMA then round to f32; double rounding is
   theoretically possible but immaterial at these magnitudes [?];
 - **round(x)** = (x < 0 ? x − 0.5 : x + 0.5) in f32, then truncate toward zero to i32. Saturate like PPC
   fctiwz: >2³¹−1 → 0x7FFFFFFF; < −2³¹ or NaN → 0x80000000. Rust `as i32` maps NaN to 0, so special-case
@@ -498,7 +498,7 @@ uses the low word, so 32-bit wrapping is exact. Exceptions (op 9 unsigned compar
 Block offsets are from the op's block. "trig" = a trigger input word, where non-zero means true. All ops
 return i32.
 
-| # | Name | Block layout | Behaviour | PR #4 |
+| # | Name | Block layout | Behavior | PR #4 |
 |---|---|---|---|---|
 | 0 | ClassDestructor | the ClassDestructorState: +16 triggered | return triggered, then clear it (one-shot "released" pulse) | ported |
 | 1 | ClassData | ClassDataState: +16 u8 n, +20 values | return values[0]; programs fan the other payload words out with copy pairs | ported |
@@ -652,8 +652,8 @@ It owns a child post: a nested class instance, e.g. c_tazer → `c_tazer_grn_pla
      = 0 when updateoutputs).
    - c = 1:
      - a voice exists → resume it;
-     - otherwise, unless (prev[0] = 2 and prev[1] = 1) — a voice that died while paused is not
-       restarted —
+     - otherwise, unless (prev[0] = 2 and prev[1] = 1) (a voice that died while paused is not
+       restarted)
        - k = sampleselect clamped to [0, count−1];
        - entry k's sample index `FFFF` → no voice (outputs cleared);
        - otherwise **open** a voice (§5.2).
@@ -672,7 +672,7 @@ It owns a child post: a nested class instance, e.g. c_tazer → `c_tazer_grn_pla
 - On open, all inputs are pushed (open applies the full set). Query and outputs happen **in the same
   walk**, so timeleft is valid immediately after the open.
 
-### 5.2 Voice open (device `sub_824A3140`) — what AEMS hands over [P]
+### 5.2 Voice open (device `sub_824A3140`): what AEMS hands over [P]
 
 - the sample: S10A slot = entry's s16 index, data = sfx bank + offset[index];
 - the entry's level % → per-voice player gain ×0.01;
@@ -697,7 +697,7 @@ So **remaining is source time, not wall time**: at pitch p the real time left is
 [V] for the duration and [N] for elapsed; Skate's status time field is not re-traced [?].
 - Consequence: water_fountain (pitch 0.82–0.94) starts its relay later in wall time than a pitch-1 mock
   predicts.
-- 2005 reports 0 time-left for sustained loops [N]. Skate's loop behaviour is unknown [?]: the PoC mock
+- 2005 reports 0 time-left for sustained loops [N]. Skate's loop behavior is unknown [?]: the PoC mock
   reports 1e6 ms for loops.
 
 ### 5.4 Routing codes at open (ids ≥ 9) [P]
@@ -719,7 +719,7 @@ See §1.6. id 2 is the master level, and dry (8) and send (5) are each multiplie
 
 ---
 
-## 6. Per-bank behaviours to reproduce (measured on the PoC)
+## 6. Per-bank behaviors to reproduce (measured on the PoC)
 
 All with the PoC mock device:
 - a voice is alive while now < open time + sample duration;
@@ -736,7 +736,7 @@ All with the PoC mock device:
 
 ---
 
-## 7. Implementation outline for the native port (behaviour, not code)
+## 7. Implementation outline for the native port (behavior, not code)
 
 - **Load:** parse the csi files into symbol tables. Parse each bank, apply rebases as offsets, resolve
   interface references into handles, and register modules on class records. Reject opcodes ≥ 40 and
@@ -844,7 +844,7 @@ Compare to `Siren_city_4` layer times (+16/+216 ms) and the location-set firings
 | 0x8216DEE0 | −1.0 | DelayTrigger idle |
 | 0x822F890C | 1/4096 | Ramp unit |
 | 0x822F8EA4 | 1024.0 | sine phase scale |
-| 0x82098D0C | 1/65536 | sine normalisation |
+| 0x82098D0C | 1/65536 | sine normalization |
 | 0x82060C50 | 2.0 | triangle gain |
 | 0x8209975C | 0.5 | rounding |
 | 0x82FD36B8 | 257 × u16 | quarter sine (formula §4.4) |

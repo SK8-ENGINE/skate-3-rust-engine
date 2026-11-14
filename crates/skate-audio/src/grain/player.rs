@@ -559,7 +559,7 @@ mod tests {
         Arc::new(GrainSource { name: "test".into(), duration: n as f32 / rate as f32, pcm: Arc::new(Pcm { rate, channels: vec![data] }) })
     }
 
-    /// At pitch 1 and a fixed position, player A starts a grain every 0.1 + 0.2 s (quantised up to
+    /// At pitch 1 and a fixed position, player A starts a grain every 0.1 + 0.2 s (quantized up to
     /// blocks) and never runs more than two voices; B every 0.2 + 0.1 s (§2.4 table).
     #[test]
     fn steady_rhythm_and_two_voices_at_most() {
